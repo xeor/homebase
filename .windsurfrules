@@ -1,0 +1,84 @@
+# AI Agent Instructions
+
+This is a single-user personal workspace. No external audience.
+All AI agents operating in this directory tree must follow these instructions.
+
+## Documentation Style
+
+- This workspace has one user — do not write for a broader audience
+- All documentation (README, comments, inline docs) must be short and precise
+- Prefer code examples over explanations:
+  ```
+  # bad
+  "To run the tests, execute the following command in your terminal"
+
+  # good
+  `pytest -x --tb=short`
+  ```
+- No filler text, no marketing language, no verbose descriptions
+- If something is self-evident from code, do not document it
+
+## Language and Communication
+
+- Always communicate in English, regardless of prompt language
+- Be direct and technical — the user is an experienced engineer
+- Do not over-explain basic concepts
+- Ask when uncertain rather than guessing
+
+## General Behavior
+
+- Always use the latest stable version of tools, languages, and frameworks unless explicitly told otherwise
+- Preserve existing directory structure and conventions
+- Never create files unless strictly necessary — prefer editing existing files
+- Never create documentation files (README, etc.) unless explicitly asked
+- Do not add emojis unless explicitly requested
+- Do not add unnecessary comments to code
+- If a task is ambiguous, ask for clarification before proceeding
+
+## Shell and Environment
+
+- Primary shell: nushell
+- Scripts must also work in bash and zsh (use POSIX sh where possible)
+- direnv is used for per-directory environment setup (`.envrc` files)
+- tmuxp is used for tmux session/window management
+
+## Code Style
+
+- Prefer readability over cleverness
+- Use consistent naming conventions matching the existing codebase
+- Keep functions small and focused
+- Use meaningful variable and function names
+
+## Robustness and Error Handling
+
+- Never use broad exception handlers (`except Exception`, bare `except:`) unless explicitly requested by the user for a specific boundary
+- Catch only the concrete exception types expected at that call site
+- Keep `try` blocks narrow; only wrap statements that can raise the handled exception
+- Do not silently swallow failures; log/propagate with enough technical context to debug
+- When UI is present, surface runtime failures clearly in the UI with operation context and technical details
+- Prefer fail-fast behavior for unexpected states; do not mask programming errors
+- Do not duplicate business logic across paths; extract shared helpers/constants and reuse them
+- Keep constraints centralized (paths, policies, config keys, feature flags) instead of scattering literals
+- Validate inputs and invariants at boundaries, then operate on normalized data internally
+- Ensure degraded/fallback behavior is explicit, deterministic, and observable
+
+## File and Directory Conventions
+
+- This workspace contains mixed content: projects, notes, configs, personal data
+- Subdirectories may have their own `AGENTS.md` with more specific instructions — those take precedence
+- Do not modify files outside the current working scope without explicit permission
+- Respect `.gitignore` patterns where present
+- Never commit secrets, credentials, or `.env` files
+
+## Git
+
+- Do not commit unless explicitly asked
+- Do not push unless explicitly asked
+- Follow existing commit message conventions in the repository
+- Never force-push to main/master
+
+## Security
+
+- Never expose or log secrets, tokens, API keys, or passwords
+- Do not create or modify `.env` files without explicit instruction
+- Avoid running destructive commands (rm -rf, DROP TABLE, etc.) without confirmation

@@ -1,0 +1,197 @@
+from __future__ import annotations
+
+import json
+import sqlite3
+import time
+from pathlib import Path
+
+import yaml
+
+from ..core.constants import (
+    CACHE_MAX_AGE_S,
+    CACHE_SCHEMA_VERSION,
+    RECONCILE_USAGE_CACHE_LIMIT,
+)
+from ..core.models import ProjectRow
+from ..metadata.api import normalize_property_keys
+from ..workspace.projects import project_row
+from . import store as cache_store
+
+
+def cache_db_path(base_dir: Path) -> Path:
+    return cache_store.cache_db_path(base_dir)
+
+
+def _cache_connect(base_dir: Path) -> sqlite3.Connection:
+    return cache_store.cache_connect(base_dir)
+
+
+def _cache_init(conn: sqlite3.Connection) -> None:
+    cache_store.cache_init(conn, cache_schema_version=CACHE_SCHEMA_VERSION)
+
+
+def cache_load_rows(
+    base_dir: Path, max_age_s: int = CACHE_MAX_AGE_S
+) -> tuple[list[ProjectRow], list[ProjectRow], int]:
+    def _deserialize_cache_row(
+        rec: sqlite3.Row,
+        age: int,
+        stale: bool,
+    ) -> ProjectRow | None:
+        try:
+            p = Path(str(rec["path"]))
+            restore_raw = rec["restore_target"]
+            restore_target = Path(str(restore_raw)) if restore_raw else None
+            cached_at = int(rec["cached_at"])
+            reconciled_at = int(rec["reconciled_at"])
+            return ProjectRow(
+                path=p,
+                name=str(rec["name"]),
+                branch=str(rec["branch"]),
+                dirty=str(rec["dirty"]),
+                last=str(rec["last"]),
+                src=str(rec["src"]),
+                created=str(rec["created"]),
+                tags=[str(x) for x in json.loads(str(rec["tags_json"]))],
+                properties=normalize_property_keys(
+                    [str(x) for x in json.loads(str(rec["properties_json"]))]
+                ),
+                description=str(rec["description"]),
+                created_ts=int(rec["created_ts"]),
+                last_ts=int(rec["last_ts"]),
+                git_ts=int(rec["git_ts"]),
+                opened_ts=int(rec["opened_ts"]),
+                is_fork=bool(rec["is_fork"]),
+                is_tmp=bool(rec["is_tmp"]),
+                archived=bool(rec["archived"]),
+                packed=bool(rec["packed"]),
+                pack_format=(
+                    str(rec["pack_format"]) if rec["pack_format"] is not None else None
+                ),
+                restore_target=restore_target,
+                archived_ts=int(rec["archived_ts"]),
+                wip=bool(rec["wip"]),
+                suffix=(str(rec["suffix"]) if rec["suffix"] is not None else None),
+                size_bytes=max(0, int(rec["size_bytes"])),
+                size_refresh_count=max(0, int(rec["size_refresh_count"])),
+                stale=stale,
+                cache_age_s=age,
+                last_cached_ts=cached_at,
+                last_reconciled_ts=reconciled_at,
+            )
+        except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+            return None
+
+    active_rows, archived_rows, last_refresh_ts = cache_store.cache_load_rows(
+        base_dir,
+        cache_schema_version=CACHE_SCHEMA_VERSION,
+        max_age_s=max_age_s,
+        deserialize_row=_deserialize_cache_row,
+    )
+    return (
+        [row for row in active_rows if isinstance(row, ProjectRow)],
+        [row for row in archived_rows if isinstance(row, ProjectRow)],
+        last_refresh_ts,
+    )
+
+
+def cache_store_rows(
+    base_dir: Path, active_rows: list[ProjectRow], archived_rows: list[ProjectRow]
+) -> int:
+    now_ts = int(time.time())
+    payload_rows = [_cache_row_payload(row, now_ts) for row in (active_rows + archived_rows)]
+    return cache_store.cache_store_rows(
+        base_dir,
+        cache_schema_version=CACHE_SCHEMA_VERSION,
+        payload_rows=payload_rows,
+    )
+
+
+def _cache_row_payload(row: ProjectRow, cached_at: int) -> tuple[object, ...]:
+    reconciled_at = int(row.last_reconciled_ts or cached_at)
+    return (
+        str(row.path),
+        1 if row.archived else 0,
+        1 if row.packed else 0,
+        row.pack_format,
+        row.name,
+        row.branch,
+        row.dirty,
+        row.last,
+        row.src,
+        row.created,
+        json.dumps(row.tags),
+        json.dumps(row.properties),
+        row.description,
+        row.created_ts,
+        row.last_ts,
+        row.git_ts,
+        row.opened_ts,
+        1 if row.is_fork else 0,
+        1 if row.is_tmp else 0,
+        str(row.restore_target) if row.restore_target is not None else None,
+        row.archived_ts,
+        1 if row.wip else 0,
+        row.suffix,
+        max(0, int(row.size_bytes)),
+        max(0, int(row.size_refresh_count)),
+        cached_at,
+        reconciled_at,
+    )
+
+
+def cache_upsert_rows(
+    base_dir: Path, rows: list[ProjectRow], touch_refresh_ts: bool = False
+) -> int:
+    now_ts = int(time.time())
+    payload_rows = [_cache_row_payload(row, now_ts) for row in rows]
+    return cache_store.cache_upsert_rows(
+        base_dir,
+        cache_schema_version=CACHE_SCHEMA_VERSION,
+        payload_rows=payload_rows,
+        touch_refresh_ts=touch_refresh_ts,
+    )
+
+
+def cache_delete_paths(
+    base_dir: Path, paths: list[Path], touch_refresh_ts: bool = False
+) -> int:
+    return cache_store.cache_delete_paths(
+        base_dir,
+        cache_schema_version=CACHE_SCHEMA_VERSION,
+        paths=paths,
+        touch_refresh_ts=touch_refresh_ts,
+    )
+
+
+def cache_upsert_project_fast(base_dir: Path, path: Path) -> None:
+    try:
+        row = project_row(path, include_git_dirty=False)
+        _ = cache_upsert_rows(base_dir, [row], touch_refresh_ts=True)
+    except (OSError, ValueError, TypeError, sqlite3.Error, yaml.YAMLError):
+        return
+
+
+def cache_load_reconcile_usage(
+    base_dir: Path,
+) -> tuple[dict[Path, float], dict[Path, int], dict[Path, int]]:
+    return cache_store.cache_load_reconcile_usage(
+        base_dir,
+        cache_schema_version=CACHE_SCHEMA_VERSION,
+    )
+
+
+def cache_save_reconcile_usage(
+    base_dir: Path,
+    score: dict[Path, float],
+    hits: dict[Path, int],
+    last_used: dict[Path, int],
+) -> None:
+    cache_store.cache_save_reconcile_usage(
+        base_dir,
+        cache_schema_version=CACHE_SCHEMA_VERSION,
+        score=score,
+        hits=hits,
+        last_used=last_used,
+        limit=RECONCILE_USAGE_CACHE_LIMIT,
+    )

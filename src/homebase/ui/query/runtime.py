@@ -1,0 +1,157 @@
+from __future__ import annotations
+
+import time
+from pathlib import Path
+from typing import Any, Callable
+
+from textual.widgets import Static
+
+from ...core.constants import CURSOR_BG_HEX, CURSOR_FG_HEX
+
+_CURSOR_STYLE = f"{CURSOR_FG_HEX} on {CURSOR_BG_HEX}"
+
+
+def named_filters_sig(named_filters: dict[str, str]) -> str:
+    if not named_filters:
+        return ""
+    return "|".join(f"{k}={named_filters[k]}" for k in sorted(named_filters.keys()))
+
+
+def query_eval(
+    app: Any,
+    query_text: str,
+    *,
+    named_filters: dict[str, str],
+    base_dir: Path,
+    query_uses_filter_syntax: Callable[[str], bool],
+    resolve_filter_expression: Callable[[Path, str], tuple[str, str | None]],
+    compile_filter_expr: Callable[[str], tuple[Callable[[Any], bool], str | None]],
+) -> tuple[bool, str, str | None, Callable[[Any], bool], str | None]:
+    sig = named_filters_sig(named_filters)
+    if sig != app.query_named_sig:
+        app.query_named_sig = sig
+        app.query_eval_cache.clear()
+        app.query_eval_cache_order = []
+
+    cached = app.query_eval_cache.get(query_text)
+    if cached is not None:
+        return cached
+
+    query_mode = query_uses_filter_syntax(query_text)
+    resolved_query, query_resolve_err = resolve_filter_expression(base_dir, query_text)
+    query_pred, query_err = compile_filter_expr(resolved_query)
+    value = (query_mode, resolved_query, query_resolve_err, query_pred, query_err)
+    app.query_eval_cache[query_text] = value
+    app.query_eval_cache_order.append(query_text)
+    if len(app.query_eval_cache_order) > 256:
+        old = app.query_eval_cache_order.pop(0)
+        app.query_eval_cache.pop(old, None)
+    return value
+
+
+def queue_query_apply(app: Any) -> None:
+    app.query_apply_pending = True
+    app.query_apply_due_at = time.time() + app.query_apply_debounce_s
+    app._refresh_search_display()
+    app._refresh_side()
+
+
+def flush_query_apply_if_due(app: Any) -> None:
+    if not app.query_apply_pending:
+        return
+    if time.time() < app.query_apply_due_at:
+        return
+    app.query_apply_pending = False
+    app._refresh_table()
+    app._refresh_side()
+
+
+def refresh_search_display(
+    app: Any,
+    *,
+    color_interactive_hex: str,
+    color_nav_hex: str,
+    color_archive_hex: str,
+    color_success_hex: str,
+    color_error_hex: str,
+    color_warn_hex: str,
+    mode_active: str,
+) -> None:
+    disp = app.query_one("#global_meta", Static)
+
+    def esc(text: str) -> str:
+        return text.replace("[", "\\[").replace("]", "\\]")
+
+    app._normalize_query_cursor()
+    if app.query:
+        if app.query_cursor < len(app.query):
+            left = esc(app.query[: app.query_cursor])
+            cur = esc(app.query[app.query_cursor])
+            right = esc(app.query[app.query_cursor + 1 :])
+            active = f"{left}[{_CURSOR_STYLE}]{cur}[/]{right}"
+        else:
+            active = f"{esc(app.query)}[{_CURSOR_STYLE}] [/]"
+    else:
+        active = ""
+    count = app.query_last_rows_count
+    query_mode, _resolved_query, query_resolve_err, _qpred, query_err = app._query_eval(
+        app.query
+    )
+    if not app.query_apply_pending:
+        count = len(app._current_rows())
+        app.query_last_rows_count = count
+    query_badge = ""
+    if query_mode:
+        query_badge = f" [{color_interactive_hex}](expr)[/]"
+        if query_resolve_err:
+            query_badge = f" [red](expr: {query_resolve_err})[/]"
+        elif query_err:
+            query_badge = " [red](expr invalid)[/]"
+    if app.query_apply_pending:
+        query_badge += " [dim](typing)[/]"
+    line1 = f"[bold {color_nav_hex}]QUERY[/] [bold white]{active}[/]{query_badge}"
+    view_color = color_nav_hex if app.view_mode == mode_active else color_archive_hex
+    cache_state = "warming" if app.cache_worker_running else "ready"
+    cache_state_color = color_interactive_hex if app.cache_worker_running else color_success_hex
+    select_color = color_success_hex if app.select_mode else color_error_hex
+    line2 = (
+        f"[bold {color_nav_hex}]VIEW[/]: [{view_color}]{app.view_mode}[/]"
+        f"   [bold {color_nav_hex}]SORT[/]: [{color_interactive_hex}]{app.sort_mode}[/]"
+        f"   [bold {color_nav_hex}]ROWS[/]: [white]{count}[/]"
+        f"   [bold {color_nav_hex}]SELECT[/]: [{select_color}]{'ON' if app.select_mode else 'OFF'}[/]"
+        f"   [bold {color_nav_hex}]CACHE[/]: [{cache_state_color}]{cache_state}[/]"
+    )
+    if app._critical_job_active():
+        line2 += (
+            f"   [{color_warn_hex}]![/] [{color_warn_hex}]{esc(app._critical_job_label())}[/]"
+        )
+    if app.select_mode:
+        line2 += (
+            f"   [bold {color_nav_hex}]SELECTED_COUNT[/]: [{color_interactive_hex}]"
+            f"{len(app.multi_selected)}[/]"
+        )
+    if app._busy_depth > 0:
+        spinner = app._busy_frames[app._busy_frame_index]
+        line2 += f" [{color_interactive_hex}]{spinner} {esc(app._busy_label)}[/]"
+    line2 += f"   [bold {color_nav_hex}]DETAILS[/]:"
+    if app.detail_worker_running and app.detail_worker_path is not None:
+        line2 += (
+            f" [{color_interactive_hex}]refreshing {esc(app.detail_worker_path.name)}[/]"
+        )
+    if app.runtime_status_text:
+        color = color_success_hex
+        if app.runtime_status_level == "warn":
+            color = color_warn_hex
+        elif app.runtime_status_level == "error":
+            color = color_error_hex
+        line2 += f"   [bold {color_nav_hex}]STATUS[/]: [{color}]{esc(app.runtime_status_text)}[/]"
+    text = f"{line1}\n{line2}"
+    if app.select_mode:
+        text += (
+            "\n[bold yellow]select keys[/]: "
+            f"[bold {color_nav_hex}]space[/] toggle "
+            f"[bold {color_nav_hex}]a[/]ll "
+            f"[bold {color_nav_hex}]c[/]lear "
+            f"[bold {color_nav_hex}]u[/]ntagged"
+        )
+    disp.update(text)

@@ -1,0 +1,79 @@
+from __future__ import annotations
+
+import sqlite3
+from pathlib import Path
+
+from homebase.cache import store as cache_store
+
+
+def test_cache_store_and_load_rows(tmp_path: Path) -> None:
+    payload = [
+        (
+            str(tmp_path / "a"),
+            0,
+            0,
+            None,
+            "a",
+            "main",
+            "",
+            "-",
+            "src",
+            "created",
+            "[]",
+            "[]",
+            "",
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            None,
+            0,
+            0,
+            None,
+            0,
+            0,
+            1,
+            1,
+        )
+    ]
+    _ = cache_store.cache_store_rows(
+        tmp_path,
+        cache_schema_version=5,
+        payload_rows=payload,
+    )
+
+    def deserialize(rec: sqlite3.Row, _age: int, _stale: bool) -> object | None:
+        return str(rec["name"])
+
+    active, archived, _ = cache_store.cache_load_rows(
+        tmp_path,
+        cache_schema_version=5,
+        max_age_s=120,
+        deserialize_row=deserialize,
+    )
+    assert active == ["a"]
+    assert archived == []
+
+
+def test_cache_reconcile_usage_roundtrip(tmp_path: Path) -> None:
+    score = {Path("/tmp/p1"): 12.3}
+    hits = {Path("/tmp/p1"): 7}
+    last_used = {Path("/tmp/p1"): 100}
+    cache_store.cache_save_reconcile_usage(
+        tmp_path,
+        cache_schema_version=5,
+        score=score,
+        hits=hits,
+        last_used=last_used,
+        limit=100,
+    )
+    loaded_score, loaded_hits, loaded_last_used = cache_store.cache_load_reconcile_usage(
+        tmp_path,
+        cache_schema_version=5,
+    )
+    path = Path("/tmp/p1")
+    assert loaded_score[path] > 0
+    assert loaded_hits[path] == 7
+    assert loaded_last_used[path] == 100

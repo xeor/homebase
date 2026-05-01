@@ -1,0 +1,69 @@
+from __future__ import annotations
+
+import time
+import webbrowser
+from typing import Callable
+
+from textual.suggester import Suggester
+from textual.widgets import MarkdownViewer
+
+
+def token_bounds(value: str) -> tuple[int, int, str]:
+    if not value:
+        return 0, 0, ""
+    end = len(value)
+    i = end - 1
+    while i >= 0 and value[i].isspace():
+        i -= 1
+    if i < 0:
+        return end, end, ""
+    end = i + 1
+    start = i
+    while start >= 0 and not value[start].isspace():
+        start -= 1
+    start += 1
+    return start, end, value[start:end]
+
+
+class TokenFilterSuggester(Suggester):
+    def __init__(self, get_candidates: Callable[[str], list[str]]) -> None:
+        super().__init__(use_cache=False, case_sensitive=False)
+        self.get_candidates = get_candidates
+
+    async def get_suggestion(self, value: str) -> str | None:
+        if value is None:
+            return None
+        start, end, token = token_bounds(value)
+        if end != len(value):
+            return None
+        candidates = self.get_candidates(token)
+        if not candidates:
+            return None
+        cand = candidates[0]
+        return value[:start] + cand + value[end:]
+
+
+class ReadmeMarkdownViewer(MarkdownViewer):
+    _last_link_href = ""
+    _last_link_ts = 0.0
+
+    async def go(self, location) -> None:
+        href = str(location or "").strip()
+        if not href:
+            return
+
+        now = time.time()
+        if href == self._last_link_href and (now - float(self._last_link_ts)) < 0.75:
+            return
+        self._last_link_href = href
+        self._last_link_ts = now
+
+        app = getattr(self, "app", None)
+        handler = getattr(app, "_handle_side_markdown_link", None)
+        if callable(handler):
+            try:
+                handler(href)
+            except (OSError, ValueError, RuntimeError, webbrowser.Error) as exc:
+                show_error = getattr(app, "_show_runtime_error", None)
+                if callable(show_error):
+                    show_error(f"open markdown link ({href})", exc)

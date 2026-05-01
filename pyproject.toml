@@ -1,0 +1,57 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "homebase"
+version = "0.1.0"
+description = "Homebase TUI and project workspace tooling"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "Proprietary" }
+dependencies = [
+  "textual>=0.88.1",
+  "PyYAML>=6.0.2",
+]
+
+[project.scripts]
+homebase = "homebase.cli:entrypoint"
+b = "homebase.cli:entrypoint"
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.3.3",
+  "ruff>=0.11.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = [
+  "E4",
+  "E7",
+  "E9",
+  "F",
+  "I",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/homebase"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+  "src/homebase",
+  "tests",
+  "README.md",
+  "AGENTS.md",
+  "CLAUDE.md",
+  ".cursorrules",
+  ".windsurfrules",
+]

@@ -1,0 +1,374 @@
+from __future__ import annotations
+
+import re
+import time
+from datetime import datetime
+from typing import Any, Callable
+
+
+def compile_filter_expr(
+    expr: str,
+    *,
+    token_re: re.Pattern[str],
+    match_query_fn: Callable[[Any, str], bool],
+    property_alias_set_fn: Callable[[str], set[str]],
+    get_named_filter: Callable[[str], str],
+) -> tuple[Callable[[Any], bool], str | None]:
+    raw = expr.strip()
+    if not raw:
+        return (lambda _row: True), None
+
+    tokens = [m.group(0) for m in token_re.finditer(raw)]
+    normalized = ["OR" if (token.upper() == "OR" or token == "|") else token for token in tokens]
+
+    with_and: list[str] = []
+    prev_kind = ""
+    prev_term = ""
+    for token in normalized:
+        kind = "TERM"
+        if token == "(":
+            kind = "LP"
+        elif token == ")":
+            kind = "RP"
+        elif token == "OR":
+            kind = "OR"
+        if with_and and prev_kind in {"TERM", "RP"} and kind in {"TERM", "LP"}:
+            if prev_kind == "TERM" and kind == "TERM" and prev_term.startswith("@") and token.startswith("@"):
+                with_and.append("OR")
+            else:
+                with_and.append("AND")
+        with_and.append(token)
+        prev_kind = kind
+        prev_term = token if kind == "TERM" else ""
+
+    prec = {"OR": 1, "AND": 2}
+    out: list[str] = []
+    ops: list[str] = []
+    for token in with_and:
+        if token in {"AND", "OR"}:
+            while ops and ops[-1] in prec and prec[ops[-1]] >= prec[token]:
+                out.append(ops.pop())
+            ops.append(token)
+            continue
+        if token == "(":
+            ops.append(token)
+            continue
+        if token == ")":
+            while ops and ops[-1] != "(":
+                out.append(ops.pop())
+            if not ops or ops[-1] != "(":
+                return (lambda _row: True), "filter parse error: unmatched ')'"
+            ops.pop()
+            continue
+        out.append(token)
+    while ops:
+        op = ops.pop()
+        if op in {"(", ")"}:
+            return (lambda _row: True), "filter parse error: unmatched '('"
+        out.append(op)
+
+    now_ts = int(time.time())
+    compiled_named: dict[str, Callable[[Any], bool]] = {}
+    compiling_named: set[str] = set()
+
+    def compare_int(lhs: int, op: str, rhs: int) -> bool:
+        if op == "=":
+            return lhs == rhs
+        if op == "!=":
+            return lhs != rhs
+        if op == ">":
+            return lhs > rhs
+        if op == ">=":
+            return lhs >= rhs
+        if op == "<":
+            return lhs < rhs
+        if op == "<=":
+            return lhs <= rhs
+        return False
+
+    def duration_to_seconds(n: int, unit: str) -> int:
+        mult = {"s": 1, "h": 3600, "d": 86400, "w": 604800, "m": 2592000, "y": 31536000}
+        return n * mult.get(unit, 1)
+
+    def parse_relative_span_to_seconds(spec: str) -> int | None:
+        parts = re.findall(r"(\d+)([ymwdhs])", spec)
+        if not parts:
+            return None
+        rebuilt = "".join(f"{n}{u}" for n, u in parts)
+        if rebuilt != spec:
+            return None
+        total = 0
+        for n, u in parts:
+            total += duration_to_seconds(int(n), u)
+        return total
+
+    def row_ts(row: Any, field: str) -> int:
+        if field == "created":
+            return int(getattr(row, "created_ts", 0))
+        if field == "opened":
+            return int(getattr(row, "opened_ts", 0))
+        return int(getattr(row, "last_ts", 0))
+
+    def parse_date_literal(value: str) -> tuple[int, ...] | None:
+        if re.fullmatch(r"\d{4}", value):
+            return (int(value),)
+        if re.fullmatch(r"\d{4}-\d{2}", value):
+            year, month = value.split("-", 1)
+            yy = int(year)
+            mm = int(month)
+            return (yy, mm) if 1 <= mm <= 12 else None
+        if re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
+            year, month, day = value.split("-", 2)
+            yy = int(year)
+            mm = int(month)
+            dd = int(day)
+            try:
+                datetime(yy, mm, dd)
+            except (TypeError, ValueError):
+                return None
+            return (yy, mm, dd)
+        return None
+
+    def date_key(ts: int, precision: int) -> tuple[int, ...] | None:
+        if ts <= 0:
+            return None
+        dt = datetime.fromtimestamp(ts).astimezone()
+        if precision == 1:
+            return (dt.year,)
+        if precision == 2:
+            return (dt.year, dt.month)
+        return (dt.year, dt.month, dt.day)
+
+    def named_pred(name: str) -> Callable[[Any], bool]:
+        if name in compiled_named:
+            return compiled_named[name]
+        if name in compiling_named:
+            return lambda _row: False
+        expr_text = get_named_filter(name).strip()
+        if not expr_text:
+            return lambda _row: False
+        compiling_named.add(name)
+        pred, err = compile_filter_expr(
+            expr_text,
+            token_re=token_re,
+            match_query_fn=match_query_fn,
+            property_alias_set_fn=property_alias_set_fn,
+            get_named_filter=get_named_filter,
+        )
+        compiling_named.discard(name)
+        if err:
+            return lambda _row: False
+        compiled_named[name] = pred
+        return pred
+
+    def term_pred(token: str) -> Callable[[Any], bool]:
+        low = token.lower()
+
+        m_count = re.match(r"^(tags|props|properties)(<=|>=|!=|=|<|>)(\d+)$", low)
+        if m_count:
+            field = m_count.group(1)
+            op = m_count.group(2)
+            rhs = int(m_count.group(3))
+
+            def lhs(row: Any) -> int:
+                if field == "tags":
+                    return len(getattr(row, "tags", []))
+                return len(getattr(row, "properties", []))
+
+            return lambda row: compare_int(lhs(row), op, rhs)
+
+        m_rel_time = re.match(r"^(created|opened|last)=@-([0-9ymwdhs]+)$", low)
+        if m_rel_time:
+            field = m_rel_time.group(1)
+            seconds = parse_relative_span_to_seconds(m_rel_time.group(2))
+            if seconds is None:
+                return lambda _row: False
+            threshold = now_ts - seconds
+            return lambda row: row_ts(row, field) >= threshold
+
+        m_abs_date = re.match(
+            r"^(created|opened|last)(<=|>=|!=|=|<|>)(\d{4}(?:-\d{2}(?:-\d{2})?)?)$",
+            low,
+        )
+        if m_abs_date:
+            field = m_abs_date.group(1)
+            op = m_abs_date.group(2)
+            rhs_key = parse_date_literal(m_abs_date.group(3))
+            if rhs_key is None:
+                return lambda _row: False
+            precision = len(rhs_key)
+
+            def pred(row: Any) -> bool:
+                lhs_key = date_key(row_ts(row, field), precision)
+                if lhs_key is None:
+                    return False
+                if op == "=":
+                    return lhs_key == rhs_key
+                if op == "!=":
+                    return lhs_key != rhs_key
+                if op == "<":
+                    return lhs_key < rhs_key
+                if op == "<=":
+                    return lhs_key <= rhs_key
+                if op == ">":
+                    return lhs_key > rhs_key
+                if op == ">=":
+                    return lhs_key >= rhs_key
+                return False
+
+            return pred
+
+        if token.startswith("@") and len(token) > 1:
+            return named_pred(token[1:].strip())
+        if token.startswith(".") and len(token) > 1:
+            suffix = token[1:].strip().lower()
+            return lambda row: (getattr(row, "suffix", "") or "") == suffix
+        if token.startswith("#") and len(token) > 1:
+            needle = token[1:].lower()
+            return lambda row: any(str(tag).lower() == needle for tag in getattr(row, "tags", []))
+        if token.startswith("!") and len(token) > 1:
+            needle = token[1:].lower()
+            return lambda row: any(needle in property_alias_set_fn(str(prop)) for prop in getattr(row, "properties", []))
+        return lambda row: match_query_fn(row, low)
+
+    compiled: list[tuple[str, Callable[[Any], bool] | None]] = []
+    for token in out:
+        if token in {"AND", "OR"}:
+            compiled.append((token, None))
+        else:
+            compiled.append(("TERM", term_pred(token)))
+
+    def predicate(row: Any) -> bool:
+        stack: list[bool] = []
+        for kind, pred in compiled:
+            if kind == "AND":
+                if len(stack) < 2:
+                    return False
+                b = stack.pop()
+                a = stack.pop()
+                stack.append(a and b)
+            elif kind == "OR":
+                if len(stack) < 2:
+                    return False
+                b = stack.pop()
+                a = stack.pop()
+                stack.append(a or b)
+            else:
+                if pred is None:
+                    return False
+                stack.append(pred(row))
+        return stack[0] if len(stack) == 1 else False
+
+    return predicate, None
+
+
+def query_uses_filter_syntax(text: str) -> bool:
+    q = text.strip()
+    if not q:
+        return False
+    if q.startswith("@"):
+        return True
+    if any(ch in q for ch in "#!()|"):
+        return True
+    ql = q.lower()
+    if re.search(r"\b(created|opened|last)=@-(?:\d+[ymwdhs])+\b", ql):
+        return True
+    if re.search(r"\b(tags|props|properties)(<=|>=|!=|=|<|>)\d+\b", ql):
+        return True
+    if re.search(r"\b(created|opened|last)(<=|>=|!=|=|<|>)\d{4}(?:-\d{2}(?:-\d{2})?)?\b", ql):
+        return True
+    if re.search(r"\bOR\b", q, flags=re.IGNORECASE):
+        return True
+    if re.search(r"(^|\s)\.[A-Za-z0-9_]+", q):
+        return True
+    return False
+
+
+def normalize_filter_expression(expr: str, *, token_re: re.Pattern[str]) -> str:
+    tokens = token_re.findall(expr.strip())
+    if not tokens:
+        return ""
+
+    norm = ["OR" if (token == "|" or token.upper() == "OR") else token for token in tokens]
+    changed = True
+    while changed:
+        changed = False
+        while norm and norm[0] in {"OR", ")"}:
+            norm.pop(0)
+            changed = True
+        while norm and norm[-1] in {"OR", "("}:
+            norm.pop()
+            changed = True
+
+        i = 0
+        out: list[str] = []
+        while i < len(norm):
+            cur = norm[i]
+            nxt = norm[i + 1] if i + 1 < len(norm) else ""
+            if cur == "OR" and nxt == "OR":
+                out.append("OR")
+                i += 2
+                changed = True
+                continue
+            if cur == "(" and nxt == ")":
+                i += 2
+                changed = True
+                continue
+            if cur == "(" and nxt == "OR":
+                out.append("(")
+                i += 2
+                changed = True
+                continue
+            if cur == "OR" and nxt == ")":
+                out.append(")")
+                i += 2
+                changed = True
+                continue
+            out.append(cur)
+            i += 1
+        norm = out
+    return " ".join(norm)
+
+
+def pretty_filter_expression(expr: str, *, token_re: re.Pattern[str]) -> str:
+    text = normalize_filter_expression(expr, token_re=token_re)
+    if not text:
+        return "-"
+    tokens = token_re.findall(text)
+    if not tokens:
+        return "-"
+
+    lines: list[str] = []
+    current: list[str] = []
+    level = 0
+    line_level = 0
+
+    def indent(n: int) -> str:
+        return " " * (2 + max(0, n) * 2)
+
+    def flush_current() -> None:
+        if not current:
+            return
+        lines.append(f"{indent(line_level)}{' '.join(current)}")
+        current.clear()
+
+    for token in tokens:
+        if token == "(":
+            flush_current()
+            lines.append(f"{indent(level)}(")
+            level += 1
+            continue
+        if token == ")":
+            flush_current()
+            level = max(0, level - 1)
+            lines.append(f"{indent(level)})")
+            continue
+        if token == "OR":
+            flush_current()
+            lines.append(f"{indent(level)}OR")
+            continue
+        if not current:
+            line_level = level
+        current.append(token)
+    flush_current()
+    return "\n".join(lines) if lines else "-"
