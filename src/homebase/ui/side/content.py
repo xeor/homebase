@@ -9,6 +9,24 @@ from typing import Any, Callable
 from ...core.models import ProjectRow
 
 
+def global_info_lines(app: Any) -> list[str]:
+    rows = app._current_rows()
+    selected = app._selected_row()
+    query_text = str(getattr(app, "query", "")).strip()
+    selected_text = selected.name if selected is not None else "-"
+    open_panes_total = sum(int(n) for n in app.open_pane_count_by_project.values())
+    return [
+        f"base dir: {app._esc(app.base_dir)}",
+        f"view: {app.view_mode}",
+        f"sort: {app.sort_mode}",
+        f"query: {app._esc(query_text) if query_text else '-'}",
+        f"rows visible: {len(rows)}",
+        f"focused: {app._esc(selected_text)}",
+        f"multi-selected: {len(app.multi_selected)}",
+        f"open panes: {open_panes_total}",
+    ]
+
+
 def property_count_map(
     app: Any,
     *,

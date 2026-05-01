@@ -140,6 +140,9 @@ not the import.
 - Tests run via `uv run pytest`. Must stay green at every commit.
 - Pure-data helpers in `*_utils.py` / `*_engine.py` should always
   have unit tests.
+- For every bug fix, add or update regression tests during the same
+  change. Prefer coverage that exercises the full affected path, not
+  only the narrow helper.
 - Don't mock the filesystem or sqlite — use `tmp_path`. The benchmark
   / regression suites already exercise the real I/O paths.
 - Add a layering check (see TODO) when touching the import graph.

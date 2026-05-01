@@ -7,7 +7,10 @@ import time
 from pathlib import Path
 from typing import Any
 
+from textual.css.query import NoMatches
+
 from ...core.models import PaneRef
+from ...core.utils import WIDGET_API_ERRORS
 
 
 def project_for_path(cwd: Path, project_roots: set[Path]) -> Path | None:
@@ -108,8 +111,11 @@ def on_probe_open_panes_done(app: Any, mapping: dict[Path, list[PaneRef]]) -> No
     sig = "|".join(sig_parts)
     if sig != app.pane_state_sig:
         app.pane_state_sig = sig
-        app._refresh_table()
-        app._refresh_side()
+        try:
+            app._refresh_table()
+            app._refresh_side()
+        except (*WIDGET_API_ERRORS, NoMatches):
+            return
 
     app.pane_probe_next_due_at = time.time() + app._pane_probe_desired_interval_s()
 

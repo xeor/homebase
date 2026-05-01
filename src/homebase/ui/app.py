@@ -95,6 +95,7 @@ from ..core.constants import (
     STATE_KEY_SIDE_SETTINGS,
     SUFFIXES,
     TABLE_COLUMN_VIEWS,
+    TABLE_SIDE_WIDTH_PRESETS,
     UI_TICK_BUSY_S,
     UI_TICK_GIT_REFRESH_S,
     UI_TICK_MICRO_RECONCILE_S,
@@ -962,6 +963,9 @@ class BApp(App[tuple[str, Path | None, list[str]]]):
     def _tag_count_map(self, limit: int = 12) -> list[tuple[str, int]]:
         return textual_ui_side_content.tag_count_map(self, limit=limit)
 
+    def _global_info_lines(self) -> list[str]:
+        return textual_ui_side_content.global_info_lines(self)
+
     def _cheat_columns(self) -> tuple[str, str]:
         return textual_ui_side_content.cheat_columns(
             self,
@@ -1597,6 +1601,17 @@ class BApp(App[tuple[str, Path | None, list[str]]]):
 
     def _table_config_rows(self) -> list[tuple[str, str, str, str]]:
         return textual_ui_settings_panel.table_config_rows(self)
+
+    def _table_pin_wip_top_enabled(self) -> bool:
+        return bool(self.table_behavior.get("pin_wip_top", False))
+
+    def _table_side_width_pct(self) -> int:
+        try:
+            raw = int(self.table_behavior.get("side_width_pct", 33))
+        except (TypeError, ValueError):
+            raw = 33
+        presets = list(TABLE_SIDE_WIDTH_PRESETS) or [raw]
+        return min(presets, key=lambda pct: abs(pct - raw))
 
     def _table_config_save(self) -> None:
         textual_ui_settings_panel.table_config_save(self, base_dir=self.base_dir)
@@ -2877,4 +2892,3 @@ def run_textual_ui(
         None,
         [],
     )
-

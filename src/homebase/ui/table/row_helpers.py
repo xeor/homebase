@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Callable
 
 from ...core.models import ProjectRow
-from ...metadata.property import property_tokens
+from ...metadata.api import property_tokens
 
 
 def match_query_lower(row: ProjectRow, q_lower: str) -> bool:

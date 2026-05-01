@@ -11,7 +11,7 @@ from textual.widgets import Button, Static, Tab, Tabs
 from ...core.constants import COLOR_DYNAMIC_FILE_HEX
 from ...core.models import ProjectRow
 from ...core.utils import WIDGET_API_ERRORS, fmt_age_short_from_iso
-from ...workspace.project_info import build_project_info_text
+from ...metadata.api import build_project_info_text
 from ..query.notes_paths import render_notes_template
 from ..widgets import ReadmeMarkdownViewer
 
