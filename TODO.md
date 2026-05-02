@@ -71,9 +71,8 @@ features.
   each subpackage's imports and asserts the rule in `AGENTS.md` §5.
   Catches regressions of the inward-only layering rule.
 
-- [ ] **Collapse `ui/runtime.py`.** It's a 5-line re-export of
-  `from .app import run_textual_ui`. Could be folded into
-  `ui/__init__.py` to remove one extra hop. Low priority.
+- [x] **Collapse `ui/runtime.py`.** Moved `run_textual_ui` export to
+  `ui/__init__.py` and removed `ui/runtime.py`.
 
 ## Feature backlog
 
