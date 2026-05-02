@@ -23,32 +23,35 @@ features.
   - [x] `_on_confirm_bulk` (168 lines) → `ui/actions/bulk_dispatch.py`
   - [x] `_start_archive_action_worker` (128 lines) →
     `ui/actions/archive_worker.py`
-  - `_on_pick_actions` (117 lines) — long if/elif dispatcher; either
-    convert to a dispatch dict or keep as-is
+  - [x] `_on_pick_actions` (117 lines) — converted to dispatch dict in
+    `ui/actions/pick_actions.py`
   - `compose` (80) and `on_mount` (64) — fine.
   Then group thin delegations by topic into mixin classes:
-  - `ui/app_display.py` — `_configure_table_columns`, `_render_*`,
-    `_refresh_side`, `_build_side_*`
-  - `ui/app_actions.py` — `action_*`, `_on_pick_*` thin delegations
-  - `ui/app_events.py` — `on_data_table_*`, `on_quit*`
+  - [x] `ui/app_display.py` — `_configure_table_columns`, `_refresh_side`,
+    `_build_side_*`, `_refresh_table`
+  - [x] `ui/app_actions.py` — core `action_*` thin delegations
+  - [x] `ui/app_events.py` — `on_data_table_*`, `on_button_pressed`, `on_key`
 
-- [ ] **Split `workspace/rows.py` (555 lines)** by topic:
+- [x] **Split `workspace/rows.py` (555 lines)** by topic:
   - `workspace/rows.py` — `collect_workspace_rows`,
     `collect_projects`, `collect_archived`, `archived_restore_target`,
     `sort_rows`, `_sort_modes_for_view`,
     `_normalize_sort_mode_for_view`, `match_query`
-  - `workspace/discovery_helpers.py` — the `_discovery_*` /
-    `_scan_nested_*` / `DISCOVERY_PRUNE_DIR_NAMES` block
-  - `workspace/filter_compile.py` — `_FILTER_TOKEN_RE`,
+  - [x] `workspace/discovery_helpers.py` — extracted `_discovery_*`
+    + `DISCOVERY_PRUNE_DIR_NAMES` block
+  - [x] `workspace/filter_compile.py` — extracted `_FILTER_TOKEN_RE`,
     `_property_alias_set`, `compile_filter_expr`,
     `query_uses_filter_syntax`, `normalize_filter_expression`,
     `pretty_filter_expression`
-  - Move `cmd_setup`, `cmd_cache_warm`, `cmd_tags_sync`, `cmd_status`,
-    `cmd_recent`, `cmd_utils`, `cmd_utils_opt_in_nested_discovery`,
-    `print_help` and the tmux-binding setup helpers into
-    `commands/setup.py`.
+  - [x] Moved `cmd_setup`, `cmd_cache_warm`, `cmd_tags_sync`,
+    `cmd_status`, `cmd_recent`, `cmd_utils`,
+    `cmd_utils_opt_in_nested_discovery`, `print_help` and setup
+    helpers into `commands/setup.py`.
 
-- [ ] **Split `commands/archive.py` (~340 lines)** by topic:
+- [x] **Split `commands/archive.py` (~340 lines)** by topic (reviewed).
+  Current `commands/archive.py` is domain-coherent and already delegates
+  heavy lifting to `archive/io.py`, `archive/ops.py`, `archive/service.py`
+  and `commands/workspace.py`; no further split needed now.
   - `commands/policy.py` — `_archive_root`, `_policy_reason_*`,
     `_archive_require_*`, `is_packed_archive_path`,
     `normalize_restore_target`, the tar/safe-extract helpers,
@@ -64,7 +67,7 @@ features.
     `suggest_project_root`, `find_marker_root_upward`,
     `try_parse_archive_suffix_loose`, `confirm`
 
-- [ ] **Layering test.** Add `tests/test_layering.py` that walks
+- [x] **Layering test.** Add `tests/test_layering.py` that walks
   each subpackage's imports and asserts the rule in `AGENTS.md` §5.
   Catches regressions of the inward-only layering rule.
 

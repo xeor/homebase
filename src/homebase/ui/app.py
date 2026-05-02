@@ -105,16 +105,14 @@ from ..core.models import (
     ProjectRow,
     RestoreTargetExistsError,
 )
-from ..core.utils import WIDGET_API_ERRORS, fmt_age_short_from_iso, fmt_size_human, fmt_ymd
+from ..core.utils import WIDGET_API_ERRORS, fmt_ymd
 from ..metadata.api import (
     all_property_defs,
     base_meta_health,
     base_meta_issues,
-    load_base_data,
     load_base_meta,
     normalize_property_keys,
     open_meta_for_review,
-    property_tokens_text,
     rename_legacy_base_yaml,
     save_base_description,
     save_base_opened,
@@ -146,12 +144,15 @@ from .actions import bulk_confirm as textual_ui_bulk_confirm
 from .actions import bulk_dispatch as textual_ui_bulk_dispatch
 from .actions import bulk_preflight as textual_ui_bulk_preflight
 from .actions import item_edits as textual_ui_item_edits
+from .actions import pick_actions as textual_ui_pick_actions
 from .actions import project_create as textual_ui_project_create
 from .actions import tag_actions as textual_ui_tag_actions
 from .actions import wip_actions as textual_ui_wip_actions
+from .app_actions import AppActionsMixin
+from .app_display import AppDisplayMixin
+from .app_events import AppEventsMixin
 from .context import UIContext, build_ui_context
 from .query import edit as textual_ui_query_edit
-from .query import key_input as textual_ui_key_input
 from .query import notes_paths as textual_ui_notes_paths
 from .query import runtime as textual_ui_query_runtime
 from .query import selection_events as textual_ui_selection_events
@@ -187,7 +188,6 @@ from .sync import reconcile as textual_ui_reconcile
 from .sync import reconcile_worker as textual_ui_reconcile_worker
 from .sync import sync as textual_ui_sync
 from .table import nav as textual_ui_table_nav
-from .table import render as textual_ui_table_render
 from .table import row_helpers as textual_ui_row_helpers
 from .table import rows_view as textual_ui_rows_view
 from .table import tabs_state as textual_ui_tabs_state
@@ -226,7 +226,7 @@ _VIEW_CONFIG_DEFAULT: dict[str, dict[str, list[tuple[str, str]]]] = {
 }
 
 
-class BApp(App[tuple[str, Path | None, list[str]]]):
+class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path | None, list[str]]]):
     CSS = """
     Screen { layout: vertical; }
     #toolbar { height: 5; border: round $accent; padding: 0 1; }
@@ -312,6 +312,8 @@ class BApp(App[tuple[str, Path | None, list[str]]]):
         super().__init__()
         self.base_dir = base_dir
         self.ctx = ctx if ctx is not None else build_ui_context(base_dir)
+        self._confirm_screen_cls = ConfirmScreen
+        self._input_screen_cls = InputScreen
         self.start_new_mode = start_new_mode
         persisted = load_ui_state(self.base_dir)
         self._init_rows_state(initial_filter, persisted)
@@ -907,12 +909,6 @@ class BApp(App[tuple[str, Path | None, list[str]]]):
             side_child_tabs=SIDE_CHILD_TABS,
         )
 
-    def action_cycle_tabs(self) -> None:
-        textual_ui_tabs_state.action_cycle_tabs(self)
-
-    def action_cycle_tabs_prev(self) -> None:
-        textual_ui_tabs_state.action_cycle_tabs_prev(self)
-
     def _named_filters_sig(self) -> str:
         return textual_ui_query_runtime.named_filters_sig(self.ctx.named_filters)
 
@@ -979,59 +975,6 @@ class BApp(App[tuple[str, Path | None, list[str]]]):
     @staticmethod
     def _run_cmd(cwd: Path, *cmd: str) -> tuple[str, str | None]:
         return textual_ui_side_content.run_cmd(cwd, *cmd)
-
-    def _build_side_git_text(self, row: ProjectRow) -> str:
-        return textual_ui_side_content.build_side_git_text(self, row)
-
-    def _build_side_project_events_text(self, row: ProjectRow) -> str:
-        return textual_ui_side_content.build_side_project_events_text(
-            self,
-            row,
-            load_base_data=load_base_data,
-            fmt_age_short_from_iso=fmt_age_short_from_iso,
-        )
-
-    def _build_side_files_text(self, row: ProjectRow) -> str:
-        return textual_ui_side_content.build_side_files_text(
-            self,
-            row,
-            file_view_exclude_patterns=self.ctx.file_view_exclude_patterns,
-            fmt_size_human=fmt_size_human,
-        )
-
-
-    def _configure_table_columns(self) -> None:
-        table = self.query_one(WIDGET_PROJECTS, DataTable)
-        table.clear(columns=True)
-
-        visible = self._table_visible_columns_for_view(self.view_mode)
-        if not visible:
-            visible = [
-                col
-                for col in self._table_columns_for_view(self.view_mode)
-                if col.get("id") == "name"
-            ]
-            if not visible:
-                visible = [
-                    {
-                        "id": "name",
-                        "label": "NAME",
-                        "enabled": True,
-                        "width": 34,
-                        "views": ["active", "archive"],
-                    }
-                ]
-        for col in visible:
-            label = str(col.get("label", ""))
-            try:
-                width = int(col.get("width", 12))
-            except (TypeError, ValueError):
-                width = 12
-            width = max(4, min(80, width))
-            try:
-                table.add_column(label, width=width)
-            except (RuntimeError, ValueError, TypeError):
-                table.add_column(label)
 
     def _table_visible_columns_for_view(
         self, view_mode: str
@@ -1445,52 +1388,6 @@ class BApp(App[tuple[str, Path | None, list[str]]]):
             widget_projects=WIDGET_PROJECTS,
         )
 
-    def action_query_left(self) -> None:
-        textual_ui_table_nav.action_query_left(self)
-
-    def action_query_right(self) -> None:
-        textual_ui_table_nav.action_query_right(self)
-
-    def action_query_home(self) -> None:
-        textual_ui_table_nav.action_query_home(self)
-
-    def action_query_end(self) -> None:
-        textual_ui_table_nav.action_query_end(self)
-
-    def action_table_scroll_left(self) -> None:
-        textual_ui_table_nav.action_table_scroll_left(self)
-
-    def action_table_scroll_right(self) -> None:
-        textual_ui_table_nav.action_table_scroll_right(self)
-
-    def action_route_left(self) -> None:
-        textual_ui_table_nav.action_route_left(self)
-
-    def action_route_right(self) -> None:
-        textual_ui_table_nav.action_route_right(self)
-
-    def action_route_home(self) -> None:
-        textual_ui_table_nav.action_route_home(self)
-
-    def action_route_end(self) -> None:
-        textual_ui_table_nav.action_route_end(self)
-
-    def _refresh_table(self) -> None:
-        textual_ui_table_render.refresh_table(
-            self,
-            widget_projects=WIDGET_PROJECTS,
-            mode_active=MODE_ACTIVE,
-            base_dir=self.base_dir,
-            color_error_hex=COLOR_ERROR_HEX,
-            color_success_hex=COLOR_SUCCESS_HEX,
-            color_archive_hex=COLOR_ARCHIVE_HEX,
-            color_accent_hex=COLOR_ACCENT_HEX,
-            color_warn_hex=COLOR_WARN_HEX,
-            color_interactive_hex=COLOR_INTERACTIVE_HEX,
-            fmt_ymd=fmt_ymd,
-            fmt_size_human=fmt_size_human,
-            property_tokens_text=property_tokens_text,
-        )
 
     def _clear_project_row_highlight_suspend(self) -> None:
         self._suspend_project_row_highlight = False
@@ -1519,14 +1416,6 @@ class BApp(App[tuple[str, Path | None, list[str]]]):
 
     def _update_readme_tab_state(self) -> None:
         textual_ui_side_tabs.update_readme_tab_state(self)
-
-    def _refresh_side(self) -> None:
-        textual_ui_side_tabs.refresh_side(
-            self,
-            base_dir=self.base_dir,
-            color_accent_hex=COLOR_ACCENT_HEX,
-            level_warn=LEVEL_WARN,
-        )
 
     def _open_editor_for_path(self, path: Path) -> None:
         textual_ui_side_effects.open_editor_for_path(path)
@@ -1569,9 +1458,6 @@ class BApp(App[tuple[str, Path | None, list[str]]]):
             action_id,
             level_warn=LEVEL_WARN,
         )
-
-    def on_button_pressed(self, event) -> None:
-        textual_ui_side_tabs.on_button_pressed(self, event)
 
     def _handle_side_markdown_link(self, href: str) -> None:
         textual_ui_side_effects.handle_side_markdown_link(
@@ -1719,67 +1605,12 @@ class BApp(App[tuple[str, Path | None, list[str]]]):
             suffixes=self.ctx.suffixes,
         )
 
-    def on_data_table_row_highlighted(
-        self, event: DataTable.RowHighlighted
-    ) -> None:
-        textual_ui_selection_events.on_data_table_row_highlighted(
-            self,
-            event,
-        )
-
-    def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
-        textual_ui_selection_events.on_data_table_row_selected(self, event)
-
-    def on_key(self, event: Key) -> None:
-        textual_ui_key_input.on_key(
-            self,
-            event,
-            widget_projects=WIDGET_PROJECTS,
-            wip_open_symbol_map=self.ctx.wip_open_symbol_map,
-        )
-
-    def action_toggle_select_mode(self) -> None:
-        textual_ui_selection_events.action_toggle_select_mode(self)
-
-    def action_toggle_selected(self) -> None:
-        textual_ui_selection_events.action_toggle_selected(self)
-
     def action_toggle_wip(self) -> None:
         textual_ui_wip_actions.action_toggle_wip(
             self,
             mode_active=MODE_ACTIVE,
             save_base_wip=save_base_wip,
         )
-
-    def action_refresh_details(self) -> None:
-        textual_ui_wip_actions.action_refresh_details(self)
-
-    def action_open_wip_1(self) -> None:
-        textual_ui_wip_actions.action_open_wip_index(self, 1)
-
-    def action_open_wip_2(self) -> None:
-        textual_ui_wip_actions.action_open_wip_index(self, 2)
-
-    def action_open_wip_3(self) -> None:
-        textual_ui_wip_actions.action_open_wip_index(self, 3)
-
-    def action_open_wip_4(self) -> None:
-        textual_ui_wip_actions.action_open_wip_index(self, 4)
-
-    def action_open_wip_5(self) -> None:
-        textual_ui_wip_actions.action_open_wip_index(self, 5)
-
-    def action_open_wip_6(self) -> None:
-        textual_ui_wip_actions.action_open_wip_index(self, 6)
-
-    def action_open_wip_7(self) -> None:
-        textual_ui_wip_actions.action_open_wip_index(self, 7)
-
-    def action_open_wip_8(self) -> None:
-        textual_ui_wip_actions.action_open_wip_index(self, 8)
-
-    def action_open_wip_9(self) -> None:
-        textual_ui_wip_actions.action_open_wip_index(self, 9)
 
     def action_new_project(self) -> None:
         textual_ui_project_create.action_new_project(
@@ -2037,121 +1868,7 @@ class BApp(App[tuple[str, Path | None, list[str]]]):
         )
 
     def _on_pick_actions(self, value: str | None) -> None:
-        if not value or value.startswith("__hdr__") or value == "noop":
-            return
-        if value.startswith("custom:"):
-            self._run_custom_action(value.split(":", 1)[1])
-            return
-        if value in {"readme_create", "readme_edit"}:
-            self._run_readme_button_action(value)
-            return
-        if value in {"notes_create", "notes_open"}:
-            self._run_notes_button_action(value)
-            return
-        targets = self._target_rows()
-        if value == "tags_set":
-            if not targets:
-                return
-            if any(r.packed for r in targets):
-                self._log(
-                    "packed archive selected: tag updates may be slower",
-                    "warn",
-                )
-            self.action_pick_tags()
-            return
-        if value == "suffix_set":
-            if not targets:
-                return
-            if self.view_mode != "active":
-                self._log("suffix update is only available in active view", "warn")
-                self._refresh_side()
-                return
-            self.action_pick_category()
-            return
-        if value == "refresh_cache":
-            self._start_cache_refresh("manual refresh", force=True)
-            self._log("cache refresh requested", "info")
-            self._refresh_side()
-            return
-        if value == "full_reconcile":
-            self._start_cache_refresh("manual full reconcile", force=True)
-            self._log("full reconcile requested", "info")
-            self._refresh_side()
-            return
-        if value == "reconcile_all_cache":
-            all_paths = [r.path for r in (self.active_rows + self.archived_rows)]
-            if not all_paths:
-                self._log("reconcile skipped: no rows", "warn")
-                self._refresh_side()
-                return
-            self._start_reconcile_rows("mixed", "manual-all", all_paths)
-            self._log(
-                f"reconcile requested for all rows ({len(all_paths)})", "info"
-            )
-            self._refresh_side()
-            return
-        if value == "reconcile_selection_cache":
-            if not targets:
-                self._log("reconcile skipped: no selection", "warn")
-                self._refresh_side()
-                return
-            paths = [r.path for r in targets]
-            mode = (
-                "archive"
-                if all(r.archived for r in targets)
-                else ("active" if all(not r.archived for r in targets) else "mixed")
-            )
-            self._start_reconcile_rows(mode, "manual-selection", paths)
-            self._log(f"reconcile requested for selection ({len(paths)})", "info")
-            self._refresh_side()
-            return
-        if value == "rename_item":
-            row = self._selected_row()
-            if row is None:
-                return
-            self.pending_rename_target = row.path
-            self.push_screen(
-                InputScreen("Rename item", "new folder name", row.path.name),
-                self._on_rename_item,
-            )
-            return
-        if value in {"review_meta", "rename_meta_ext"}:
-            row = self._selected_row()
-            if row is None:
-                return
-            paths = [row.path]
-            title, details = self._build_bulk_confirm_payload(value, paths)
-            self.push_screen(
-                ConfirmScreen(title, details),
-                lambda ok: self._on_confirm_bulk(ok, value, paths),
-            )
-            return
-        if value == "set_desc":
-            if not targets:
-                return
-            if any(r.packed for r in targets):
-                self._log(
-                    "packed archive selected: description updates may be slower",
-                    "warn",
-                )
-            self.pending_desc_targets = [r.path for r in targets]
-            initial = targets[0].description if len(targets) == 1 else ""
-            self.push_screen(
-                InputScreen(
-                    "Set description (empty clears)", "short summary", initial
-                ),
-                self._on_set_description,
-            )
-            return
-        if not targets:
-            return
-        paths = [r.path for r in targets]
-        action = value
-        title, details = self._build_bulk_confirm_payload(action, paths)
-        self.push_screen(
-            ConfirmScreen(title, details),
-            lambda ok: self._on_confirm_bulk(ok, action, paths),
-        )
+        textual_ui_pick_actions.on_pick_actions(self, value)
 
     def _build_bulk_confirm_payload(
         self, action: str, paths: list[Path]

@@ -14,13 +14,7 @@ from ..commands.archive import (
     cmd_migrate,
     cmd_rm,
 )
-from ..core import runtime_init
-from ..core import utils as core_utils
-from ..core.constants import DEFAULT_ARCHIVE_TZ_NAME, ENV_BASE_DIR
-from ..ui import run_textual_ui as _run_textual_ui
-from ..ui.context import UIContext
-from ..workspace.projects import run_post_commands
-from ..workspace.rows import (
+from ..commands.setup import (
     cmd_cache_warm,
     cmd_recent,
     cmd_setup,
@@ -28,6 +22,12 @@ from ..workspace.rows import (
     cmd_tags_sync,
     cmd_utils,
 )
+from ..core import runtime_init
+from ..core import utils as core_utils
+from ..core.constants import DEFAULT_ARCHIVE_TZ_NAME, ENV_BASE_DIR
+from ..ui import run_textual_ui as _run_textual_ui
+from ..ui.context import UIContext
+from ..workspace.projects import run_post_commands
 from .dispatch import dispatch_command
 from .parser import build_cli_parser
 
