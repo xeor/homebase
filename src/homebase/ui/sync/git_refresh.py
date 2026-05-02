@@ -6,9 +6,9 @@ import time
 from pathlib import Path
 from typing import Any
 
+from ...core import utils as core_utils
 from ...core.models import ProjectRow
 from ...workspace.projects import git_info
-from ...workspace.rows import fmt_ymd
 
 
 def maybe_refresh_visible_git(app: Any) -> None:
@@ -113,7 +113,7 @@ def on_git_refresh_done(app: Any, updated: list[tuple[Path, str, str, int]]) -> 
         row.git_ts = git_ts
         if git_ts > 0:
             row.last_ts = git_ts
-            row.last = fmt_ymd(git_ts)
+            row.last = core_utils.fmt_ymd(git_ts)
             row.src = "git"
         else:
             row.src = "fs"

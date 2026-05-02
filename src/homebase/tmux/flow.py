@@ -17,7 +17,6 @@ from ..core.constants import (
     TMUX_SHELL_COMMANDS,
 )
 from ..core.models import PaneRef
-from ..workspace.rows import is_under
 from . import commands as tmux_commands
 from . import core as tmux_core
 
@@ -185,7 +184,7 @@ def _resolve_project_root_from_panes(
     return tmux_core.resolve_project_root_from_panes(
         pane_start_dirs,
         base_root,
-        is_under=is_under,
+        is_under=core_utils.is_under,
         find_marker_root_upward=find_marker_root_upward,
     )
 
@@ -260,7 +259,7 @@ def tmux_find_panes_for_cwd(target: Path) -> list[PaneRef]:
     return tmux_commands.find_panes_for_cwd(
         target,
         tmux=tmux,
-        is_under=is_under,
+        is_under=core_utils.is_under,
         pane_ref_factory=PaneRef,
     )
 
@@ -292,5 +291,4 @@ def open_with_mode(base_dir: Path, path: Path) -> int:
         tmux_open_new_tab_with_load=tmux_open_new_tab_with_load,
         tmux_open_new_tab=tmux_open_new_tab,
     )
-
 

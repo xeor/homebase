@@ -18,6 +18,7 @@ from ..core import runtime_init
 from ..core import utils as core_utils
 from ..core.constants import DEFAULT_ARCHIVE_TZ_NAME, ENV_BASE_DIR
 from ..ui import run_textual_ui as _run_textual_ui
+from ..ui.context import UIContext
 from ..workspace.projects import run_post_commands
 from ..workspace.rows import (
     cmd_cache_warm,
@@ -38,13 +39,20 @@ def resolve_base_dir(base_folder_arg: str | None) -> Path:
 def run_textual_ui(
     base_dir: Path,
     cwd: Path,
+    ctx: UIContext | None = None,
     start_new: bool = False,
     initial_filter_expr: str = "",
 ) -> tuple[str, Path | None, list[str]]:
-    return _run_textual_ui(base_dir, cwd, start_new, initial_filter_expr)
+    return _run_textual_ui(base_dir, cwd, ctx, start_new, initial_filter_expr)
 
 
-def no_arg_flow(base_dir: Path, cwd: Path, initial_filter_expr: str = "") -> int:
+def no_arg_flow(
+    base_dir: Path,
+    cwd: Path,
+    initial_filter_expr: str = "",
+    *,
+    ctx: UIContext | None = None,
+) -> int:
     from ..tmux.flow import open_shell_in_dir, open_with_mode
 
     return interactive_flow.no_arg_flow(
@@ -55,6 +63,7 @@ def no_arg_flow(base_dir: Path, cwd: Path, initial_filter_expr: str = "") -> int
         run_textual_ui=lambda bd, c, q: run_textual_ui(
             bd,
             c,
+            ctx=ctx,
             initial_filter_expr=q,
         ),
         run_post_commands=run_post_commands,
@@ -86,7 +95,6 @@ def main(argv: list[str]) -> int:
         load_wip_symbol_map,
     )
     from ..config.property_defs import load_property_defs
-    from ..core import constants as app_constants
     from ..tmux.flow import cmd_tmux_load, cmd_tmux_save
     from ..workspace.benchmark import cmd_benchmark, cmd_test
     from ..workspace.projects import cmd_new
@@ -118,27 +126,23 @@ def main(argv: list[str]) -> int:
         load_reconcile_config=load_reconcile_config,
         load_archive_timezone_name=load_archive_timezone_name,
     )
-    # Mutate shared module-level config in place so all importers see the
-    # runtime values without each having to re-read.
-    app_constants.PROPERTY_DEFS[:] = list(runtime_cfg.property_defs)
-    app_constants.WIP_OPEN_SYMBOL_MAP.clear()
-    app_constants.WIP_OPEN_SYMBOL_MAP.update(runtime_cfg.wip_open_symbol_map)
-    app_constants.NAMED_FILTERS.clear()
-    app_constants.NAMED_FILTERS.update(runtime_cfg.named_filters)
-    app_constants.SAVED_FILTER_QUERIES[:] = list(runtime_cfg.saved_filter_queries)
-    app_constants.SUFFIXES[:] = list(runtime_cfg.suffixes)
-    app_constants.FILE_VIEW_EXCLUDE_PATTERNS[:] = list(
-        runtime_cfg.file_view_exclude_patterns
+    ui_ctx = UIContext(
+        base_dir=base_dir,
+        archive_tz=runtime_cfg.archive_tz,
+        archive_tz_name=runtime_cfg.archive_tz_name,
+        property_defs=list(runtime_cfg.property_defs),
+        wip_open_symbol_map=dict(runtime_cfg.wip_open_symbol_map),
+        named_filters=dict(runtime_cfg.named_filters),
+        saved_filter_queries=list(runtime_cfg.saved_filter_queries),
+        suffixes=list(runtime_cfg.suffixes),
+        file_view_exclude_patterns=list(runtime_cfg.file_view_exclude_patterns),
+        custom_actions=list(runtime_cfg.custom_actions),
+        open_mode_config=dict(runtime_cfg.open_mode_config),
+        notes_config=dict(runtime_cfg.notes_config),
+        reconcile_config={
+            mode: dict(conf) for mode, conf in runtime_cfg.reconcile_config.items()
+        },
     )
-    app_constants.CUSTOM_ACTIONS[:] = list(runtime_cfg.custom_actions)
-    app_constants.OPEN_MODE_CONFIG.clear()
-    app_constants.OPEN_MODE_CONFIG.update(runtime_cfg.open_mode_config)
-    app_constants.NOTES_CONFIG.clear()
-    app_constants.NOTES_CONFIG.update(runtime_cfg.notes_config)
-    app_constants.RECONCILE_CONFIG.clear()
-    app_constants.RECONCILE_CONFIG.update(runtime_cfg.reconcile_config)
-    app_constants.ARCHIVE_TZ_NAME = runtime_cfg.archive_tz_name
-    app_constants.ARCHIVE_TZ = runtime_cfg.archive_tz
 
     initial_filter_expr = runtime_init.resolve_initial_filter_expression(
         str(ns.initial_filter or ""),
@@ -156,6 +160,7 @@ def main(argv: list[str]) -> int:
                 bd,
                 cwd_path,
                 initial_filter_expr=initial,
+                ctx=ui_ctx,
             ),
             cmd_status=cmd_status,
             cmd_new=cmd_new,

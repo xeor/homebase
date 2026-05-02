@@ -5,13 +5,13 @@ features.
 
 ## Code follow-ups
 
-- [ ] **Wire `UIContext` through to `BApp`.** `ui/context.py` defines
+- [x] **Wire `UIContext` through to `BApp`.** `ui/context.py` defines
   the carrier and `build_ui_context()` snapshots `core.constants`,
   but `BApp` still reads everything from `core.constants` (mutated
   in-place by `cli/entry.main`). Pass the full context, store on
   `self.ctx`, drop the in-place mutation.
 
-- [ ] **Drop primitive forwarders in `workspace/rows.py`.**
+- [x] **Drop primitive forwarders in `workspace/rows.py`.**
   `is_under`, `archive_now_iso`, `archive_iso_from_ts`,
   `parse_archive_timestamp`, `split_archive_name`,
   `packed_archive_dir_name`, `split_archive_entry_name`, `fmt_ymd` —
@@ -20,8 +20,8 @@ features.
 
 - [ ] **Further split `ui/app.py` (~2880 lines).** Five remaining
   long methods worth extracting to module functions:
-  - `_on_confirm_bulk` (168 lines) → `ui/actions/bulk_dispatch.py`
-  - `_start_archive_action_worker` (128 lines) →
+  - [x] `_on_confirm_bulk` (168 lines) → `ui/actions/bulk_dispatch.py`
+  - [x] `_start_archive_action_worker` (128 lines) →
     `ui/actions/archive_worker.py`
   - `_on_pick_actions` (117 lines) — long if/elif dispatcher; either
     convert to a dispatch dict or keep as-is

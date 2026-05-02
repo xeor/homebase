@@ -43,42 +43,6 @@ DISCOVERY_PRUNE_DIR_NAMES = {
 }
 
 
-def is_under(path: Path, root: Path) -> bool:
-    return core_utils.is_under(path, root)
-
-
-def parse_archive_timestamp(value: str) -> int:
-    return core_utils.parse_archive_timestamp(value, ARCHIVE_TZ)
-
-
-def split_archive_name(name: str) -> tuple[str, int]:
-    return core_utils.split_archive_name(name, parse_archive_timestamp)
-
-
-def split_archive_entry_name(path: Path) -> tuple[str, int]:
-    return core_utils.split_archive_entry_name(
-        path,
-        packed_archive_suffix=PACKED_ARCHIVE_SUFFIX,
-        parse_timestamp=parse_archive_timestamp,
-    )
-
-
-def packed_archive_dir_name(path: Path) -> str:
-    return core_utils.packed_archive_dir_name(path, PACKED_ARCHIVE_SUFFIX)
-
-
-def archive_now_iso() -> str:
-    return core_utils.archive_now_iso(ARCHIVE_TZ)
-
-
-def archive_iso_from_ts(ts: int) -> str:
-    return core_utils.archive_iso_from_ts(ts, ARCHIVE_TZ)
-
-
-def fmt_ymd(ts: int) -> str:
-    return core_utils.fmt_ymd(ts)
-
-
 def _resolve_include_nested(base_dir: Path, include_nested: bool | None) -> bool:
     return discovery_utils.resolve_include_nested(
         base_dir,
@@ -165,7 +129,7 @@ def _discovery_should_skip_active_walk_path(
         base_dir,
         archive_root,
         cur,
-        is_under=is_under,
+        is_under=core_utils.is_under,
     )
 
 
@@ -215,11 +179,14 @@ def collect_projects(
 def archived_restore_target(base_dir: Path, archived_path: Path) -> Path:
     rel = archived_path.relative_to(base_dir / ARCHIVE_DIR_NAME)
     name = (
-        packed_archive_dir_name(rel)
+        core_utils.packed_archive_dir_name(rel, PACKED_ARCHIVE_SUFFIX)
         if str(rel).endswith(PACKED_ARCHIVE_SUFFIX)
         else rel.name
     )
-    stem, ts = split_archive_name(name)
+    stem, ts = core_utils.split_archive_name(
+        name,
+        parse_timestamp=lambda value: core_utils.parse_archive_timestamp(value, ARCHIVE_TZ),
+    )
     if ts > 0:
         rel = rel.with_name(stem)
     elif str(rel).endswith(PACKED_ARCHIVE_SUFFIX):
@@ -244,7 +211,14 @@ def collect_archived(
         resolve_include_nested_fn=_resolve_include_nested,
         marker_allowed=_discovery_marker_allowed,
         has_marker_ancestor=_discovery_has_marker_ancestor,
-        split_archive_entry_name=split_archive_entry_name,
+        split_archive_entry_name=lambda path: core_utils.split_archive_entry_name(
+            path,
+            packed_archive_suffix=PACKED_ARCHIVE_SUFFIX,
+            parse_timestamp=lambda value: core_utils.parse_archive_timestamp(
+                value,
+                ARCHIVE_TZ,
+            ),
+        ),
         archived_restore_target=archived_restore_target,
         project_row=project_row,
         classify_name=classify_name,
@@ -474,7 +448,7 @@ def cmd_recent(base_dir: Path) -> int:
         base_dir,
         collect_projects=collect_projects,
         sort_rows=sort_rows,
-        fmt_ymd=fmt_ymd,
+        fmt_ymd=core_utils.fmt_ymd,
     )
 
 
@@ -549,7 +523,13 @@ def archive_destination(src: Path, base_dir: Path) -> Path:
         src,
         base_dir,
         archive_dir_name=ARCHIVE_DIR_NAME,
-        split_archive_name=split_archive_name,
-        archive_iso_from_ts=archive_iso_from_ts,
-        archive_now_iso=archive_now_iso,
+        split_archive_name=lambda name: core_utils.split_archive_name(
+            name,
+            parse_timestamp=lambda value: core_utils.parse_archive_timestamp(
+                value,
+                ARCHIVE_TZ,
+            ),
+        ),
+        archive_iso_from_ts=lambda ts: core_utils.archive_iso_from_ts(ts, ARCHIVE_TZ),
+        archive_now_iso=lambda: core_utils.archive_now_iso(ARCHIVE_TZ),
     )

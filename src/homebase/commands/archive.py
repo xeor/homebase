@@ -9,6 +9,7 @@ from ..core import prompting
 from ..core import utils as core_utils
 from ..core.constants import (
     ARCHIVE_DIR_NAME,
+    ARCHIVE_TZ,
     BASE_MARKER_FILE,
     ENV_BASE_DIR,
     PACKED_ARCHIVE_SUFFIX,
@@ -21,13 +22,7 @@ from ..metadata.api import (
 )
 from ..workspace.rows import (
     archive_destination,
-    archive_iso_from_ts,
-    archive_now_iso,
     archived_restore_target,
-    is_under,
-    packed_archive_dir_name,
-    parse_archive_timestamp,
-    split_archive_name,
 )
 from . import workspace as commands_workspace
 
@@ -85,7 +80,7 @@ def confirm() -> None:
 
 
 def _ensure_safe_cwd(base_dir: Path, target: Path) -> None:
-    archive_ops.ensure_safe_cwd(base_dir, target, is_under=is_under)
+    archive_ops.ensure_safe_cwd(base_dir, target, is_under=core_utils.is_under)
 
 
 def _archive_root(base_dir: Path) -> Path:
@@ -93,13 +88,13 @@ def _archive_root(base_dir: Path) -> Path:
 
 
 def _policy_reason_outside_base(path: Path, base_dir: Path) -> str | None:
-    if not is_under(path, base_dir):
+    if not core_utils.is_under(path, base_dir):
         return "outside base dir"
     return None
 
 
 def _policy_reason_not_under_archive(path: Path, base_dir: Path) -> str | None:
-    if not is_under(path, _archive_root(base_dir)):
+    if not core_utils.is_under(path, _archive_root(base_dir)):
         return "not under _archive"
     return None
 
@@ -186,7 +181,10 @@ def archive_unpack_internal(base_dir: Path, src: Path) -> Path:
         base_dir,
         src,
         archive_require_packed=_archive_require_packed,
-        packed_archive_dir_name=packed_archive_dir_name,
+        packed_archive_dir_name=lambda path: core_utils.packed_archive_dir_name(
+            path,
+            PACKED_ARCHIVE_SUFFIX,
+        ),
         archive_extract_single_root=_archive_extract_single_root,
         invalidate_packed_cache_path=_packed_cache_invalidate_path,
     )
@@ -295,10 +293,16 @@ def cmd_migrate(
     return commands_workspace.cmd_migrate(
         paths,
         archive_dir_name=ARCHIVE_DIR_NAME,
-        split_archive_name=split_archive_name,
-        archive_iso_from_ts=archive_iso_from_ts,
-        archive_now_iso=archive_now_iso,
-        is_under=is_under,
+        split_archive_name=lambda name: core_utils.split_archive_name(
+            name,
+            parse_timestamp=lambda value: core_utils.parse_archive_timestamp(
+                value,
+                ARCHIVE_TZ,
+            ),
+        ),
+        archive_iso_from_ts=lambda ts: core_utils.archive_iso_from_ts(ts, ARCHIVE_TZ),
+        archive_now_iso=lambda: core_utils.archive_now_iso(ARCHIVE_TZ),
+        is_under=core_utils.is_under,
         archive_destination=archive_destination,
         ensure_safe_cwd=_ensure_safe_cwd,
         ensure_base_marker=ensure_base_marker,
@@ -321,7 +325,7 @@ def find_marker_root_upward(
 
 
 def try_parse_archive_suffix_loose(suffix: str) -> int:
-    return parse_archive_timestamp(suffix)
+    return core_utils.parse_archive_timestamp(suffix, ARCHIVE_TZ)
 
 
 def cmd_fix(path: str = ".") -> int:
@@ -329,7 +333,7 @@ def cmd_fix(path: str = ".") -> int:
         path,
         env_base_dir_key=ENV_BASE_DIR,
         archive_dir_name=ARCHIVE_DIR_NAME,
-        is_under=is_under,
+        is_under=core_utils.is_under,
         suggest_project_root=suggest_project_root,
         base_marker_file=BASE_MARKER_FILE,
         prompt_yes_no=_prompt_yes_no,
@@ -337,5 +341,3 @@ def cmd_fix(path: str = ".") -> int:
         ensure_base_marker=ensure_base_marker,
         confirm=confirm,
     )
-
-

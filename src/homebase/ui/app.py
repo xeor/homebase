@@ -5,12 +5,10 @@ import os
 import random
 import sqlite3
 import subprocess
-import threading
 import time
 from pathlib import Path
 from typing import Callable, Iterable
 
-import yaml
 from textual.app import App, ComposeResult, SystemCommand
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
@@ -52,9 +50,11 @@ from ..config.prefs import (
     resolve_filter_expression,
     save_ui_state,
 )
+from ..core import utils as core_utils
 from ..core.constants import (
     ACTION_SHORT_HELP,
     ARCHIVE_DIR_NAME,
+    ARCHIVE_TZ,
     BASE_MARKER_FILE,
     BUSY_LABEL_IDLE,
     CACHE_BG_REFRESH_S,
@@ -70,20 +70,14 @@ from ..core.constants import (
     COLOR_WARN_HEX,
     CURSOR_BG_HEX,
     CURSOR_FG_HEX,
-    CUSTOM_ACTIONS,
     DYNAMIC_PROPERTY_DEFS,
-    FILE_VIEW_EXCLUDE_PATTERNS,
     LEGACY_BASE_MARKER_FILE,
     LEVEL_INFO,
     LEVEL_WARN,
     MODE_ACTIVE,
     MODE_ARCHIVE,
-    NAMED_FILTERS,
-    NOTES_CONFIG,
-    OPEN_MODE_CONFIG,
     OPEN_MODE_PROFILES,
     PACKED_ARCHIVE_SUFFIX,
-    RECONCILE_CONFIG,
     RECONCILE_STALE_BATCH_SIZE,
     RECONCILE_STALE_INTERVAL_S,
     RECONCILE_STALE_PARALLELISM,
@@ -93,7 +87,6 @@ from ..core.constants import (
     STATE_KEY_SIDE_MAIN,
     STATE_KEY_SIDE_SELECTED,
     STATE_KEY_SIDE_SETTINGS,
-    SUFFIXES,
     TABLE_COLUMN_VIEWS,
     TABLE_SIDE_WIDTH_PRESETS,
     UI_TICK_BUSY_S,
@@ -104,7 +97,6 @@ from ..core.constants import (
     UI_TICK_RECONCILE_USAGE_FLUSH_S,
     UI_TICK_STATE_FLUSH_S,
     WIDGET_PROJECTS,
-    WIP_OPEN_SYMBOL_MAP,
 )
 from ..core.models import (
     ArchiveActionOutcome,
@@ -113,7 +105,7 @@ from ..core.models import (
     ProjectRow,
     RestoreTargetExistsError,
 )
-from ..core.utils import WIDGET_API_ERRORS, fmt_age_short_from_iso, fmt_size_human
+from ..core.utils import WIDGET_API_ERRORS, fmt_age_short_from_iso, fmt_size_human, fmt_ymd
 from ..metadata.api import (
     all_property_defs,
     base_meta_health,
@@ -144,21 +136,20 @@ from ..workspace.rows import (
     _sort_modes_for_view,
     archived_restore_target,
     compile_filter_expr,
-    fmt_ymd,
-    is_under,
     normalize_filter_expression,
-    packed_archive_dir_name,
     query_uses_filter_syntax,
-    split_archive_entry_name,
 )
 from . import runtime_feedback as textual_ui_runtime_feedback
 from .actions import action_items as textual_ui_action_items
+from .actions import archive_worker as textual_ui_archive_worker
 from .actions import bulk_confirm as textual_ui_bulk_confirm
+from .actions import bulk_dispatch as textual_ui_bulk_dispatch
 from .actions import bulk_preflight as textual_ui_bulk_preflight
 from .actions import item_edits as textual_ui_item_edits
 from .actions import project_create as textual_ui_project_create
 from .actions import tag_actions as textual_ui_tag_actions
 from .actions import wip_actions as textual_ui_wip_actions
+from .context import UIContext, build_ui_context
 from .query import edit as textual_ui_query_edit
 from .query import key_input as textual_ui_key_input
 from .query import notes_paths as textual_ui_notes_paths
@@ -314,11 +305,13 @@ class BApp(App[tuple[str, Path | None, list[str]]]):
     def __init__(
         self,
         base_dir: Path,
+        ctx: UIContext | None = None,
         start_new_mode: bool = False,
         initial_filter: str = "",
     ) -> None:
         super().__init__()
         self.base_dir = base_dir
+        self.ctx = ctx if ctx is not None else build_ui_context(base_dir)
         self.start_new_mode = start_new_mode
         persisted = load_ui_state(self.base_dir)
         self._init_rows_state(initial_filter, persisted)
@@ -424,7 +417,7 @@ class BApp(App[tuple[str, Path | None, list[str]]]):
         self.multi_selected: set[Path] = set()
         self.pending_desc_targets: list[Path] = []
         self.pending_rename_target: Path | None = None
-        self.custom_actions = list(CUSTOM_ACTIONS)
+        self.custom_actions = list(self.ctx.custom_actions)
         self.pending_tag_updates: set[Path] = set()
         self.messages: list[tuple[str, str, str]] = []
         self._health_issue_seen: dict[Path, str] = {}
@@ -517,14 +510,14 @@ class BApp(App[tuple[str, Path | None, list[str]]]):
         self.table_settings_index = 0
         self.table_behavior = load_table_behavior_config(self.base_dir)
         self.table_config_index = 0
-        self.open_mode = dict(OPEN_MODE_CONFIG)
-        self.notes_config = dict(NOTES_CONFIG)
+        self.open_mode = dict(self.ctx.open_mode_config)
+        self.notes_config = dict(self.ctx.notes_config)
         self.open_settings_index = 0
 
     def _init_reconcile_state(self) -> None:
         self.reconcile_config = {
-            "active": dict(RECONCILE_CONFIG.get("active", {})),
-            "archive": dict(RECONCILE_CONFIG.get("archive", {})),
+            "active": dict(self.ctx.reconcile_config.get("active", {})),
+            "archive": dict(self.ctx.reconcile_config.get("archive", {})),
         }
         now_ts = time.time()
         self.reconcile_next_due: dict[str, float] = {
@@ -921,7 +914,7 @@ class BApp(App[tuple[str, Path | None, list[str]]]):
         textual_ui_tabs_state.action_cycle_tabs_prev(self)
 
     def _named_filters_sig(self) -> str:
-        return textual_ui_query_runtime.named_filters_sig(NAMED_FILTERS)
+        return textual_ui_query_runtime.named_filters_sig(self.ctx.named_filters)
 
     def _query_eval(
         self, query_text: str
@@ -929,7 +922,7 @@ class BApp(App[tuple[str, Path | None, list[str]]]):
         return textual_ui_query_runtime.query_eval(
             self,
             query_text,
-            named_filters=NAMED_FILTERS,
+            named_filters=self.ctx.named_filters,
             base_dir=self.base_dir,
             query_uses_filter_syntax=query_uses_filter_syntax,
             resolve_filter_expression=resolve_filter_expression,
@@ -1002,7 +995,7 @@ class BApp(App[tuple[str, Path | None, list[str]]]):
         return textual_ui_side_content.build_side_files_text(
             self,
             row,
-            file_view_exclude_patterns=FILE_VIEW_EXCLUDE_PATTERNS,
+            file_view_exclude_patterns=self.ctx.file_view_exclude_patterns,
             fmt_size_human=fmt_size_human,
         )
 
@@ -1315,7 +1308,7 @@ class BApp(App[tuple[str, Path | None, list[str]]]):
             mode_active=MODE_ACTIVE,
             mode_archive=MODE_ARCHIVE,
             level_warn=LEVEL_WARN,
-            is_under=is_under,
+            is_under=core_utils.is_under,
         )
 
     def _maybe_run_micro_reconcile(self) -> None:
@@ -1723,7 +1716,7 @@ class BApp(App[tuple[str, Path | None, list[str]]]):
         return textual_ui_selection_events.apply_category(
             row,
             suffix,
-            suffixes=SUFFIXES,
+            suffixes=self.ctx.suffixes,
         )
 
     def on_data_table_row_highlighted(
@@ -1742,7 +1735,7 @@ class BApp(App[tuple[str, Path | None, list[str]]]):
             self,
             event,
             widget_projects=WIDGET_PROJECTS,
-            wip_open_symbol_map=WIP_OPEN_SYMBOL_MAP,
+            wip_open_symbol_map=self.ctx.wip_open_symbol_map,
         )
 
     def action_toggle_select_mode(self) -> None:
@@ -1833,7 +1826,7 @@ class BApp(App[tuple[str, Path | None, list[str]]]):
     def action_pick_category(self) -> None:
         textual_ui_view_actions.action_pick_category(
             self,
-            suffixes=SUFFIXES,
+            suffixes=self.ctx.suffixes,
             single_choice_screen=SingleChoiceScreen,
         )
 
@@ -1946,7 +1939,10 @@ class BApp(App[tuple[str, Path | None, list[str]]]):
             base_marker_file=BASE_MARKER_FILE,
             legacy_base_marker_file=LEGACY_BASE_MARKER_FILE,
             is_packed_archive_path=is_packed_archive_path,
-            packed_archive_dir_name=packed_archive_dir_name,
+            packed_archive_dir_name=lambda path: core_utils.packed_archive_dir_name(
+                path,
+                PACKED_ARCHIVE_SUFFIX,
+            ),
             policy_reason_outside_base=_policy_reason_outside_base,
             policy_reason_not_under_archive=_policy_reason_not_under_archive,
             policy_reason_archived_entry=_policy_reason_archived_entry,
@@ -2166,7 +2162,7 @@ class BApp(App[tuple[str, Path | None, list[str]]]):
             paths,
             base_dir=self.base_dir,
             archived_restore_target=archived_restore_target,
-            is_under=is_under,
+            is_under=core_utils.is_under,
         )
 
     def _on_set_description(self, value: str | None) -> None:
@@ -2185,7 +2181,14 @@ class BApp(App[tuple[str, Path | None, list[str]]]):
 
     def _build_archived_row_from_entry(self, path: Path) -> ProjectRow:
         restore = archived_restore_target(self.base_dir, path)
-        stem, archived_ts = split_archive_entry_name(path)
+        stem, archived_ts = core_utils.split_archive_entry_name(
+            path,
+            packed_archive_suffix=PACKED_ARCHIVE_SUFFIX,
+            parse_timestamp=lambda value: core_utils.parse_archive_timestamp(
+                value,
+                ARCHIVE_TZ,
+            ),
+        )
         row = project_row(
             path,
             archived=True,
@@ -2197,344 +2200,46 @@ class BApp(App[tuple[str, Path | None, list[str]]]):
         return row
 
     def _start_archive_action_worker(self, action: str, paths: list[Path]) -> None:
-        if self.action_worker_running:
-            self._log("archive action worker is already running", "warn")
-            self._refresh_side()
-            return
-        self.action_worker_running = True
-        self.action_worker_action = action
-        self.action_worker_total = len(paths)
-        self.action_worker_done = 0
-        self.action_worker_current = ""
-        self.action_worker_stage = "queued"
-        self.action_worker_command = ""
-        self.action_worker_started_ts = int(time.time())
-        self._busy_start(f"running {action} on selection")
-        self._worker_debug(
-            f"archive worker start: action={action} items={len(paths)}"
+        textual_ui_archive_worker.start_archive_action_worker(
+            self,
+            action,
+            paths,
+            archive_pack_internal=archive_pack_internal,
+            archive_unpack_internal=archive_unpack_internal,
+            is_packed_archive_path=is_packed_archive_path,
         )
-        self._refresh_side()
-
-        def worker() -> None:
-            success = 0
-            failed = 0
-            removed_paths: list[Path] = []
-            upsert_rows: list[ProjectRow] = []
-            logs: list[tuple[str, str]] = []
-            total = len(paths)
-            for i, path in enumerate(paths, start=1):
-                self.call_from_thread(
-                    self._on_archive_action_worker_progress,
-                    i - 1,
-                    path.name,
-                    "preparing",
-                    "",
-                )
-                try:
-                    if action == "pack":
-                        cmd = f"tar -czf <tmp> -C {path.parent} {path.name}"
-                        self.call_from_thread(
-                            self._on_archive_action_worker_progress,
-                            i - 1,
-                            path.name,
-                            "packing",
-                            cmd,
-                        )
-                        packed_path = archive_pack_internal(self.base_dir, path)
-                        logs.append(
-                            ("info", f"packed: {path.name} -> {packed_path.name}")
-                        )
-                        removed_paths.append(path)
-                        upsert_rows.append(
-                            self._build_archived_row_from_entry(packed_path)
-                        )
-                    elif action == "unpack":
-                        cmd = f"tar -xzf {path.name} -C <tmp>"
-                        self.call_from_thread(
-                            self._on_archive_action_worker_progress,
-                            i - 1,
-                            path.name,
-                            "unpacking",
-                            cmd,
-                        )
-                        unpacked_path = archive_unpack_internal(self.base_dir, path)
-                        logs.append(
-                            (
-                                "info",
-                                f"unpacked: {path.name} -> {unpacked_path.name}",
-                            )
-                        )
-                        removed_paths.append(path)
-                        upsert_rows.append(
-                            self._build_archived_row_from_entry(unpacked_path)
-                        )
-                    elif action == "toggle_pack":
-                        if is_packed_archive_path(path):
-                            stage, verb = "unpacking", "unpacked"
-                            cmd = f"tar -xzf {path.name} -C <tmp>"
-                            op = archive_unpack_internal
-                        else:
-                            stage, verb = "packing", "packed"
-                            cmd = f"tar -czf <tmp> -C {path.parent} {path.name}"
-                            op = archive_pack_internal
-                        self.call_from_thread(
-                            self._on_archive_action_worker_progress,
-                            i - 1,
-                            path.name,
-                            stage,
-                            cmd,
-                        )
-                        new_path = op(self.base_dir, path)
-                        logs.append(("info", f"{verb}: {path.name} -> {new_path.name}"))
-                        removed_paths.append(path)
-                        upsert_rows.append(
-                            self._build_archived_row_from_entry(new_path)
-                        )
-                    else:
-                        logs.append(("error", f"unknown archive action: {action}"))
-                        failed += 1
-                        continue
-                    success += 1
-                except (
-                    OSError,
-                    ValueError,
-                    TypeError,
-                    sqlite3.Error,
-                    subprocess.SubprocessError,
-                    yaml.YAMLError,
-                    json.JSONDecodeError,
-                ) as exc:
-                    failed += 1
-                    logs.append(
-                        ("error", f"{action} failed for {path.name}: {exc}")
-                    )
-
-            self.call_from_thread(
-                self._on_archive_action_worker_done,
-                ArchiveActionOutcome(
-                    action=action,
-                    total=total,
-                    success=success,
-                    failed=failed,
-                    removed_paths=removed_paths,
-                    upsert_rows=upsert_rows,
-                    logs=logs,
-                ),
-            )
-
-        threading.Thread(target=worker, daemon=True).start()
 
     def _on_archive_action_worker_progress(
         self, done: int, current: str, stage: str, command: str
     ) -> None:
-        self.action_worker_done = done
-        self.action_worker_current = current
-        self.action_worker_stage = stage
-        self.action_worker_command = command
-        self._refresh_side()
+        textual_ui_archive_worker.on_archive_action_worker_progress(
+            self,
+            done,
+            current,
+            stage,
+            command,
+        )
 
     def _on_archive_action_worker_done(self, outcome: ArchiveActionOutcome) -> None:
-        self.action_worker_done = outcome.total
-        self.action_worker_current = ""
-        self.action_worker_running = False
-        self.action_worker_action = ""
-        self.action_worker_total = 0
-        self.action_worker_started_ts = 0
-        self.action_worker_stage = ""
-        self.action_worker_command = ""
-        self._busy_stop()
-
-        for level, msg in outcome.logs:
-            self._log(msg, level)
-
-        if outcome.removed_paths:
-            self._remove_paths_local(outcome.removed_paths)
-        for row in outcome.upsert_rows:
-            self._upsert_row_local(row)
-        if outcome.removed_paths or outcome.upsert_rows:
-            self._touch_rows_cache(
-                outcome.upsert_rows, removed=outcome.removed_paths
-            )
-            self._start_cache_refresh(f"{outcome.action} update", force=False)
-        else:
-            self._refresh_data()
-        self._refresh_table()
-        self._log(
-            f"{outcome.action} finished: ok={outcome.success}, failed={outcome.failed}",
-            "info",
-        )
-        self._worker_debug(
-            f"archive worker done: action={outcome.action} ok={outcome.success} failed={outcome.failed}"
-        )
-        self._refresh_side()
+        textual_ui_archive_worker.on_archive_action_worker_done(self, outcome)
 
     def _on_confirm_bulk(self, ok: bool, action: str, paths: list[Path]) -> None:
-        if not ok:
-            self._log(f"{action} cancelled", "warn")
-            self._refresh_side()
-            return
-
-        runnable_paths, skipped_paths = self._preflight_bulk_action(action, paths)
-        if skipped_paths:
-            self._log(
-                f"{action} preflight skipped {len(skipped_paths)} item(s): {self._preflight_skip_summary(skipped_paths)}",
-                "warn",
-            )
-        if not runnable_paths:
-            self._log(f"{action} skipped: no eligible items", "warn")
-            self._refresh_side()
-            return
-
-        if action == "restore":
-            self.pending_restore_queue = list(runnable_paths)
-            self.pending_restore_ok = 0
-            self.pending_restore_failed = 0
-            self._busy_start("restoring selected items")
-            self._process_next_restore()
-            return
-
-        if action in {"pack", "unpack", "toggle_pack"}:
-            self._start_archive_action_worker(action, list(runnable_paths))
-            return
-
-        success = 0
-        failed = 0
-        removed_paths: list[Path] = []
-        upsert_rows: list[ProjectRow] = []
-        self._busy_start(f"running {action} on selection")
-        try:
-            for path in runnable_paths:
-                self._busy_tick()
-                try:
-                    if action == "archive":
-                        dest = archive_move_internal(
-                            self.base_dir, path, sync_tags=False
-                        )
-                        self._log(f"archived: {path.name} -> {dest}", "info")
-                        removed_paths.append(path)
-                        try:
-                            upsert_rows.append(self._build_archived_row_from_entry(dest))
-                        except _ROW_BUILD_ERRORS:
-                            pass
-                    elif action == "restore":
-                        restored = archive_restore_internal(
-                            self.base_dir, path, sync_tags=False
-                        )
-                        self._log(f"restored: {path.name} -> {restored}", "info")
-                    elif action == "pack":
-                        packed_path = archive_pack_internal(self.base_dir, path)
-                        self._log(
-                            f"packed: {path.name} -> {packed_path.name}", "info"
-                        )
-                        removed_paths.append(path)
-                        try:
-                            upsert_rows.append(
-                                self._build_archived_row_from_entry(packed_path)
-                            )
-                        except _ROW_BUILD_ERRORS:
-                            pass
-                    elif action == "unpack":
-                        unpacked_path = archive_unpack_internal(self.base_dir, path)
-                        self._log(
-                            f"unpacked: {path.name} -> {unpacked_path.name}", "info"
-                        )
-                        removed_paths.append(path)
-                        try:
-                            upsert_rows.append(
-                                self._build_archived_row_from_entry(unpacked_path)
-                            )
-                        except _ROW_BUILD_ERRORS:
-                            pass
-                    elif action == "toggle_pack":
-                        if is_packed_archive_path(path):
-                            new_path = archive_unpack_internal(self.base_dir, path)
-                            verb = "unpacked"
-                        else:
-                            new_path = archive_pack_internal(self.base_dir, path)
-                            verb = "packed"
-                        self._log(f"{verb}: {path.name} -> {new_path.name}", "info")
-                        removed_paths.append(path)
-                        try:
-                            upsert_rows.append(
-                                self._build_archived_row_from_entry(new_path)
-                            )
-                        except _ROW_BUILD_ERRORS:
-                            pass
-                    elif action == "delete":
-                        delete_internal(self.base_dir, path, sync_tags=False)
-                        self._log(f"deleted: {path}", "info")
-                        removed_paths.append(path)
-                    elif action == "review_meta":
-                        ok, msg = open_meta_for_review(path)
-                        if not ok:
-                            failed += 1
-                            self._log(
-                                f"review failed for {path.name}: {msg}", "error"
-                            )
-                            continue
-                        self._log(f"review opened: {path.name}", "info")
-                    elif action == "rename_meta_ext":
-                        ok, msg = rename_legacy_base_yaml(path)
-                        if not ok:
-                            failed += 1
-                            self._log(
-                                f"rename failed for {path.name}: {msg}", "error"
-                            )
-                            continue
-                        self._log(
-                            f"renamed metadata extension: {path.name}", "info"
-                        )
-                        try:
-                            cur = self._find_row(path)
-                            if cur is not None:
-                                rws, ridx = cur
-                                cur_row = rws[ridx]
-                                upsert_rows.append(
-                                    project_row(
-                                        path,
-                                        archived=cur_row.archived,
-                                        restore_target=cur_row.restore_target,
-                                        archived_ts=cur_row.archived_ts,
-                                    )
-                                )
-                            else:
-                                upsert_rows.append(
-                                    project_row(path, archived=False)
-                                )
-                        except (
-                            OSError,
-                            ValueError,
-                            TypeError,
-                            subprocess.SubprocessError,
-                            sqlite3.Error,
-                        ):
-                            pass
-                    else:
-                        self._log(f"unknown action: {action}", "error")
-                        failed += 1
-                        continue
-                    success += 1
-                    self.multi_selected.discard(path)
-                except ValueError as exc:
-                    failed += 1
-                    self._log(f"{action} failed for {path.name}: {exc}", "error")
-        finally:
-            self._busy_stop()
-
-        if removed_paths:
-            self._remove_paths_local(removed_paths)
-        if action in {"archive", "restore", "delete"}:
-            self._request_tag_sync(f"{action} update")
-        for row in upsert_rows:
-            self._upsert_row_local(row)
-        if removed_paths or upsert_rows:
-            self._touch_rows_cache(upsert_rows, removed=removed_paths)
-            self._start_cache_refresh(f"{action} update", force=False)
-        else:
-            self._refresh_data()
-        self._refresh_table()
-        self._log(f"{action} finished: ok={success}, failed={failed}", "info")
-        self._refresh_side()
+        textual_ui_bulk_dispatch.on_confirm_bulk(
+            self,
+            ok,
+            action,
+            paths,
+            archive_move_internal=archive_move_internal,
+            archive_restore_internal=archive_restore_internal,
+            archive_pack_internal=archive_pack_internal,
+            archive_unpack_internal=archive_unpack_internal,
+            delete_internal=delete_internal,
+            is_packed_archive_path=is_packed_archive_path,
+            open_meta_for_review=open_meta_for_review,
+            rename_legacy_base_yaml=rename_legacy_base_yaml,
+            project_row=project_row,
+            row_build_errors=_ROW_BUILD_ERRORS,
+        )
 
     def _process_next_restore(self) -> None:
         if not self.pending_restore_queue:
@@ -2692,7 +2397,7 @@ class BApp(App[tuple[str, Path | None, list[str]]]):
         return True
 
     def _open_profile_spec(self) -> dict[str, object]:
-        profile = str(self.open_mode.get("profile", OPEN_MODE_CONFIG["profile"]))
+        profile = str(self.open_mode.get("profile", self.ctx.open_mode_config["profile"]))
         spec = next(
             (p for p in OPEN_MODE_PROFILES if str(p.get("id")) == profile), None
         )
@@ -2878,6 +2583,7 @@ class BApp(App[tuple[str, Path | None, list[str]]]):
 def run_textual_ui(
     base_dir: Path,
     cwd: Path,
+    ctx: UIContext | None = None,
     start_new: bool = False,
     initial_filter_expr: str = "",
 ) -> tuple[str, Path | None, list[str]]:
@@ -2885,6 +2591,7 @@ def run_textual_ui(
     set_filter_manage_base_dir(base_dir)
     return BApp(
         base_dir,
+        ctx=ctx,
         start_new_mode=start_new,
         initial_filter=initial_filter_expr,
     ).run() or (
