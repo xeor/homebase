@@ -43,7 +43,7 @@ COLOR_NAV_HEX = "#4DA3FF"
 COLOR_INTERACTIVE_HEX = "#3BC9B5"
 COLOR_MUTED_HEX = "#8A94A6"
 COLOR_ARCHIVE_HEX = "#8D84C6"
-COLOR_DYNAMIC_ENV_HEX = "#7FB8FF"
+COLOR_DYNAMIC_ENV_HEX = "#FFB347"
 COLOR_DYNAMIC_FILE_HEX = "#4DA3FF"
 COLOR_DYNAMIC_STATE_HEX = "#8D84C6"
 COLOR_PENDING_HEX = "#9AA0A6"
@@ -83,9 +83,6 @@ ACTION_SHORT_HELP: dict[str, str] = {
     "reconcile_all_cache": "Reconcile every cached row now",
 }
 
-PROPERTY_KEY_WARN = "warn"
-PROPERTY_KEY_ERR = "err"
-
 ENV_BASE_DIR = "BASE_DIR"
 WIDGET_PROJECTS = "#projects"
 BUSY_LABEL_IDLE = "idle"
@@ -104,14 +101,7 @@ SIDE_TAB_TABLE_DEFAULT = "table"
 
 
 PROPERTY_DEFS: list[PropertyDef] = []
-DYNAMIC_PROPERTY_DEFS: list[PropertyDef] = [
-    PropertyDef(key="act", label="Active / open", token="ACT"),
-    PropertyDef(key="rm", label="README.md exists", token="RM"),
-    PropertyDef(key="n", label="Notes exists", token="N"),
-    PropertyDef(key="pkg", label="Packed archive", token="PKG"),
-    PropertyDef(key="warn", label="Warning", token="W"),
-    PropertyDef(key="err", label="Error", token="E"),
-]
+DYNAMIC_PROPERTY_DEFS: list[PropertyDef] = []
 WIP_OPEN_SYMBOL_MAP: dict[str, int] = {
     "©": 1,
     "™": 2,

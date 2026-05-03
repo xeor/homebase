@@ -16,7 +16,6 @@ from ..core.constants import (
 )
 from ..core.models import ProjectRow
 from ..metadata.api import (
-    base_meta_health,
     detect_properties,
     ensure_base_marker,
     load_base_meta,
@@ -313,14 +312,7 @@ def project_row(
     else:
         branch, dirty, git_ts = git_info(path, include_dirty=include_git_dirty)
     tags, description, wip, opened_ts = load_base_meta(path)
-    properties = detect_properties(path)
-    if packed:
-        properties.append("pkg")
-    health_level, _health_msg = base_meta_health(path)
-    if health_level == "error":
-        properties.append("err")
-    elif health_level == "warning":
-        properties.append("warn")
+    properties = detect_properties(path, archived=archived)
     properties = normalize_property_keys(properties)
     last_ts = git_ts if git_ts > 0 else mtime_ts
     src = "git" if git_ts > 0 else "fs"

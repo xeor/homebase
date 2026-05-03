@@ -74,6 +74,53 @@ everything; `cli/` ⇽ everything.
 
 See `AGENTS.md` for the full architecture rules and conventions.
 
+## Property Config
+
+`properties` is a token-keyed map in `.base-conf.yaml`.
+
+Each property entry must define exactly one detector:
+
+- `file-exists`
+- `dir-exists`
+- `path-exists`
+- `queries`
+
+Example:
+
+```yaml
+properties:
+  GIT:
+    label: Git
+    key: git
+    dir-exists: [.git]
+
+  ACT:
+    label: active tmux pane
+    key: act
+    cache_ttl_s: 3
+    queries:
+      - type: tmux_open_panes
+
+  EDT:
+    label: editor active for project
+    key: edt
+    cache_ttl_s: 8
+    queries:
+      - type: tmux_editor_commands
+        commands: [code, code-insiders, codium, cursor, zed, nvim, vim]
+      - type: sqlite_recent_paths
+        db_path: "~/Library/Application Support/VSCodium/User/globalStorage/state.vscdb"
+        table: ItemTable
+        value_column: value
+        where_like: "%file://%"
+```
+
+Query types currently supported:
+
+- `tmux_open_panes`
+- `tmux_editor_commands`
+- `sqlite_recent_paths`
+
 ## Package
 
 Build sdist + wheel:

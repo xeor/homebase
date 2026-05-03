@@ -63,14 +63,12 @@ from ..core.constants import (
     COLOR_ACCENT_HEX,
     COLOR_ARCHIVE_HEX,
     COLOR_ERROR_HEX,
-    COLOR_INFO_HEX,
     COLOR_INTERACTIVE_HEX,
     COLOR_NAV_HEX,
     COLOR_SUCCESS_HEX,
     COLOR_WARN_HEX,
     CURSOR_BG_HEX,
     CURSOR_FG_HEX,
-    DYNAMIC_PROPERTY_DEFS,
     LEGACY_BASE_MARKER_FILE,
     LEVEL_INFO,
     LEVEL_WARN,
@@ -183,6 +181,7 @@ from .side import tabs as textual_ui_side_tabs
 from .sync import cache_refresh as textual_ui_cache_refresh
 from .sync import cache_state as textual_ui_cache_state
 from .sync import git_refresh as textual_ui_git_refresh
+from .sync import indicator_queries as textual_ui_indicator_queries
 from .sync import pane_probe as textual_ui_pane_probe
 from .sync import reconcile as textual_ui_reconcile
 from .sync import reconcile_worker as textual_ui_reconcile_worker
@@ -476,10 +475,14 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
         self.pane_probe_running = False
         self.pane_state_sig = ""
         self.pane_probe_next_due_at = 0.0
+        self.pane_probe_last_done_ts = 0.0
+        self.pane_probe_min_interval_s = 0.5
         self.pane_probe_fast_until_ts = 0.0
-        self.pane_probe_interval_fast_s = 1.0
+        self.pane_probe_interval_fast_s = 0.5
         self.pane_probe_interval_slow_s = 6.0
         self.pending_pane_choices: dict[str, PaneRef] = {}
+        self.dynamic_indicator_cache: dict[str, tuple[float, set[Path]]] = {}
+        self.dynamic_indicator_row_cache: dict[tuple[str, Path], tuple[float, bool]] = {}
 
     def _init_query_state(self) -> None:
         self.select_mode = False
@@ -959,10 +962,6 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
         return textual_ui_side_content.cheat_columns(
             self,
             all_property_defs=all_property_defs,
-            dynamic_property_defs=DYNAMIC_PROPERTY_DEFS,
-            color_error_hex=COLOR_ERROR_HEX,
-            color_warn_hex=COLOR_WARN_HEX,
-            color_info_hex=COLOR_INFO_HEX,
         )
 
     def _preview_entries(self, path: Path, limit: int = 8) -> list[str]:
@@ -1016,33 +1015,56 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
         return textual_ui_row_helpers.same_path(a, b)
 
     def _has_open_pane(self, path: Path) -> bool:
-        return textual_ui_row_helpers.has_open_pane(
-            path,
-            self.open_pane_count_by_project,
-        )
+        return textual_ui_row_helpers.has_open_pane(path, self.open_pane_count_by_project)
 
-    def _has_readme_file(self, row: ProjectRow) -> bool:
-        return textual_ui_row_helpers.has_readme_file(row)
-
-    def _has_notes_file(self, row: ProjectRow) -> bool:
-        return textual_ui_row_helpers.has_notes_file(
-            row,
-            resolve_notes_path_for_row=self._resolve_notes_path_for_row,
+    def _dynamic_indicator_matches(self, key: str, row: ProjectRow) -> bool:
+        pdef = next((p for p in self.ctx.property_defs if str(p.key) == key), None)
+        if pdef is None or not pdef.queries:
+            return False
+        path_query_types = {"tmux_open_panes", "tmux_editor_commands", "sqlite_recent_paths"}
+        cached = self.dynamic_indicator_cache.get(key)
+        if cached is None or textual_ui_indicator_queries.cache_due(cached[0]):
+            paths: set[Path] = set()
+            for query in pdef.queries:
+                qtype = str(query.get("type", "")).strip()
+                if qtype in path_query_types:
+                    paths.update(textual_ui_indicator_queries.evaluate_query_paths(self, query))
+            self.dynamic_indicator_cache[key] = (time.time() + float(pdef.cache_ttl_s), paths)
+            cached = self.dynamic_indicator_cache[key]
+        if row.path in cached[1]:
+            return True
+        row_cache_key = (key, row.path)
+        row_cached = self.dynamic_indicator_row_cache.get(row_cache_key)
+        if row_cached is not None and not textual_ui_indicator_queries.cache_due(row_cached[0]):
+            return bool(row_cached[1])
+        matched = False
+        for query in pdef.queries:
+            qtype = str(query.get("type", "")).strip()
+            if qtype in path_query_types:
+                continue
+            if textual_ui_indicator_queries.evaluate_query_match(self, row, query):
+                matched = True
+                break
+        self.dynamic_indicator_row_cache[row_cache_key] = (
+            time.time() + float(pdef.cache_ttl_s),
+            matched,
         )
+        return matched
 
     def _apply_dynamic_properties_to_row(self, row: ProjectRow) -> None:
-        props = [p for p in row.properties if p not in {"act", "rm", "n", "pkg"}]
-        if self._has_open_pane(row.path):
-            props.append("act")
-        if self._has_readme_file(row):
-            props.append("rm")
-        if self._has_notes_file(row):
-            props.append("n")
-        if row.packed:
-            props.append("pkg")
+        dynamic_keys = {str(p.key) for p in self.ctx.property_defs if p.queries}
+        props = [p for p in row.properties if p not in dynamic_keys]
+        for key in sorted(dynamic_keys):
+            if self._dynamic_indicator_matches(key, row):
+                props.append(key)
         row.properties = normalize_property_keys(props)
 
     def _apply_dynamic_properties_all_rows(self) -> None:
+        self.dynamic_indicator_cache = {}
+        now = time.time()
+        self.dynamic_indicator_row_cache = {
+            k: v for k, v in self.dynamic_indicator_row_cache.items() if v[0] > now
+        }
         for row in self.active_rows:
             self._apply_dynamic_properties_to_row(row)
         for row in self.archived_rows:

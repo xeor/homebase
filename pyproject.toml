@@ -55,3 +55,8 @@ include = [
   ".cursorrules",
   ".windsurfrules",
 ]
+
+[dependency-groups]
+dev = [
+    "pyinstrument>=5.1.2",
+]

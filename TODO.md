@@ -76,8 +76,8 @@ features.
 
 ## Feature backlog
 
-- [ ] **"Running vscode" property** — `ACT` and `vscode` shown in
-  orange; detection command must be configurable in global config.
+- [x] **Editor-running property** — `ACT` and `EDT` are shown in
+  orange; editor detection commands are configurable in global config.
 
 - [ ] **Hotkeys for custom actions** — e.g. an F-key bound to start
   vscode for the focused project.

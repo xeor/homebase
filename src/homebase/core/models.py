@@ -17,10 +17,13 @@ class PropertyDef:
     key: str
     label: str
     token: str
+    color: str = ""
     matcher: Callable[[Path], bool] | None = None
     file_exists: tuple[str, ...] = ()
     dir_exists: tuple[str, ...] = ()
     path_exists: tuple[str, ...] = ()
+    queries: tuple[dict[str, object], ...] = ()
+    cache_ttl_s: float = 15.0
 
     def matches(self, root: Path) -> bool:
         if self.matcher is not None:
@@ -131,4 +134,3 @@ class RegressionCaseResult:
     ok: bool
     detail: str
     elapsed_s: float
-

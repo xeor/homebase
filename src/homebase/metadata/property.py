@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+import re
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -7,11 +9,59 @@ from typing import Any
 from rich.text import Text
 
 
-def detect_properties(path: Path, *, property_defs: list[Any], normalize_keys: Callable[[list[str]], list[str]]) -> list[str]:
+def _render_template(text: str, context: dict[str, str]) -> str:
+    pattern = re.compile(r"\{\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}\}")
+    return pattern.sub(lambda m: str(context.get(m.group(1), "")), text)
+
+
+def _strip_wrapping_quotes(text: str) -> str:
+    if len(text) >= 2 and text[0] == text[-1] and text[0] in {'"', "'"}:
+        return text[1:-1]
+    return text
+
+
+def _resolve_check_path(raw: str, *, root: Path, template_context: dict[str, str] | None) -> Path:
+    rendered = _render_template(raw, template_context or {}).strip()
+    rendered = _strip_wrapping_quotes(rendered)
+    expanded = os.path.expandvars(rendered)
+    candidate = Path(expanded).expanduser()
+    if candidate.is_absolute():
+        return candidate
+    return root / candidate
+
+
+def detect_properties(
+    path: Path,
+    *,
+    property_defs: list[Any],
+    normalize_keys: Callable[[list[str]], list[str]],
+    template_context: dict[str, str] | None = None,
+) -> list[str]:
     props: list[str] = []
     for pdef in property_defs:
         try:
-            if pdef.matches(path):
+            if getattr(pdef, "matcher", None) is not None and pdef.matches(path):
+                props.append(str(pdef.key))
+                continue
+            matched = False
+            for rel in getattr(pdef, "file_exists", ()):
+                target = _resolve_check_path(str(rel), root=path, template_context=template_context)
+                if target.is_file():
+                    matched = True
+                    break
+            if not matched:
+                for rel in getattr(pdef, "dir_exists", ()):
+                    target = _resolve_check_path(str(rel), root=path, template_context=template_context)
+                    if target.is_dir():
+                        matched = True
+                        break
+            if not matched:
+                for rel in getattr(pdef, "path_exists", ()):
+                    target = _resolve_check_path(str(rel), root=path, template_context=template_context)
+                    if target.exists():
+                        matched = True
+                        break
+            if matched:
                 props.append(str(pdef.key))
         except (OSError, TypeError, ValueError, AttributeError):
             continue
@@ -68,19 +118,9 @@ def property_tokens_text(
     keys: list[str],
     *,
     all_defs: list[Any],
-    dynamic_property_defs: list[Any],
     normalize_keys: Callable[[list[str]], list[str]],
-    property_key_err: str,
-    property_key_warn: str,
-    color_error_hex: str,
-    color_warn_hex: str,
-    color_dynamic_env_hex: str,
-    color_dynamic_file_hex: str,
-    color_dynamic_state_hex: str,
-    color_info_hex: str,
 ) -> Text:
     by_key = {str(p.key): p for p in all_defs}
-    dynamic_keys = {str(p.key) for p in dynamic_property_defs}
     out = Text()
     first = True
     for key in normalize_keys(keys):
@@ -90,19 +130,10 @@ def property_tokens_text(
         if not first:
             out.append(" ")
         first = False
-        style = ""
-        if key == property_key_err:
-            style = color_error_hex
-        elif key == property_key_warn:
-            style = color_warn_hex
-        elif key == "act":
-            style = color_dynamic_env_hex
-        elif key in {"rm", "n"}:
-            style = color_dynamic_file_hex
-        elif key == "pkg":
-            style = color_dynamic_state_hex
-        elif key in dynamic_keys:
-            style = color_info_hex
+        style = str(getattr(pdef, "color", "") or "").strip()
+        if style:
+            out.append(str(pdef.token), style=style)
+            continue
         out.append(str(pdef.token), style=style)
     if not out.plain:
         out.append("-")
@@ -113,19 +144,9 @@ def property_display_lines(
     keys: list[str],
     *,
     all_defs: list[Any],
-    dynamic_property_defs: list[Any],
     normalize_keys: Callable[[list[str]], list[str]],
-    property_key_err: str,
-    property_key_warn: str,
-    color_error_hex: str,
-    color_warn_hex: str,
-    color_dynamic_env_hex: str,
-    color_dynamic_file_hex: str,
-    color_dynamic_state_hex: str,
-    color_info_hex: str,
 ) -> list[str]:
     by_key = {str(p.key): p for p in all_defs}
-    dynamic_keys = {str(p.key) for p in dynamic_property_defs}
     lines: list[str] = []
     for key in normalize_keys(keys):
         pdef = by_key.get(key)
@@ -133,18 +154,9 @@ def property_display_lines(
             continue
         token = str(pdef.token)
         label = str(pdef.label)
-        if key == property_key_err:
-            lines.append(f"[{color_error_hex}]{token}[/] ({label})")
-        elif key == property_key_warn:
-            lines.append(f"[{color_warn_hex}]{token}[/] ({label})")
-        elif key == "act":
-            lines.append(f"[{color_dynamic_env_hex}]{token}[/] ({label})")
-        elif key in {"rm", "n"}:
-            lines.append(f"[{color_dynamic_file_hex}]{token}[/] ({label})")
-        elif key == "pkg":
-            lines.append(f"[{color_dynamic_state_hex}]{token}[/] ({label})")
-        elif key in dynamic_keys:
-            lines.append(f"[{color_info_hex}]{token}[/] ({label})")
+        style = str(getattr(pdef, "color", "") or "").strip()
+        if style:
+            lines.append(f"[{style}]{token}[/] ({label})")
         else:
             lines.append(f"{token} ({label})")
     return lines

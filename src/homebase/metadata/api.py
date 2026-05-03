@@ -1,30 +1,26 @@
 from __future__ import annotations
 
+import os
+import shlex
 from pathlib import Path
 
 import yaml
 from rich.text import Text
 
 from ..archive import io as archive_io
+from ..config.property_defs import load_property_defs
 from ..core import utils as core_utils
 from ..core.constants import (
     ARCHIVE_TZ,
     BASE_MARKER_FILE,
     BASE_META_ALLOWED_KEYS,
     COLOR_AGE_UNIT_HEX,
-    COLOR_DYNAMIC_ENV_HEX,
-    COLOR_DYNAMIC_FILE_HEX,
-    COLOR_DYNAMIC_STATE_HEX,
-    COLOR_ERROR_HEX,
-    COLOR_INFO_HEX,
-    COLOR_WARN_HEX,
     DYNAMIC_PROPERTY_DEFS,
+    ENV_BASE_DIR,
     LEGACY_BASE_MARKER_FILE,
     LEVEL_ERROR,
     PACKED_ARCHIVE_SUFFIX,
     PROPERTY_DEFS,
-    PROPERTY_KEY_ERR,
-    PROPERTY_KEY_WARN,
 )
 from ..core.models import ProjectRow, PropertyDef
 from ..filter import tag_index
@@ -201,17 +197,24 @@ def append_base_log(
     )
 
 
-def detect_properties(path: Path) -> list[str]:
+def detect_properties(path: Path, *, archived: bool = False) -> list[str]:
+    runtime_property_defs = _runtime_property_defs()
+    template_context = _property_template_context(path, archived=archived)
     return property_utils.detect_properties(
         path,
-        property_defs=PROPERTY_DEFS,
+        property_defs=runtime_property_defs,
         normalize_keys=normalize_property_keys,
+        template_context=template_context,
     )
 
 
 def all_property_defs() -> list[PropertyDef]:
     return [
-        p for p in property_utils.all_property_defs(DYNAMIC_PROPERTY_DEFS, PROPERTY_DEFS)
+        p
+        for p in property_utils.all_property_defs(
+            DYNAMIC_PROPERTY_DEFS,
+            _runtime_property_defs(),
+        )
         if isinstance(p, PropertyDef)
     ]
 
@@ -220,8 +223,42 @@ def normalize_property_keys(keys: list[str]) -> list[str]:
     return property_utils.normalize_property_keys(
         keys,
         dynamic_property_defs=DYNAMIC_PROPERTY_DEFS,
-        property_defs=PROPERTY_DEFS,
+        property_defs=_runtime_property_defs(),
     )
+
+
+def _runtime_property_defs() -> list[PropertyDef]:
+    base = os.environ.get(ENV_BASE_DIR, "").strip()
+    if not base:
+        return list(PROPERTY_DEFS)
+    return load_property_defs(Path(base))
+
+
+def _property_template_context(path: Path, *, archived: bool) -> dict[str, str]:
+    base_dir = os.environ.get(ENV_BASE_DIR, "").strip()
+    base_path = Path(base_dir).expanduser().resolve() if base_dir else path.parent
+    rel_path = path
+    try:
+        rel_path = path.relative_to(base_path)
+    except ValueError:
+        pass
+    archive_prefix = "_archive/" if archived else ""
+    archive_prefixed_name = f"{archive_prefix}{path.name}"
+    out = {
+        "NAME": path.name,
+        "PROJECT_NAME": path.name,
+        "NAME_WITH_ARCHIVE_PREFIX": archive_prefixed_name,
+        "ARCHIVE_PREFIX": archive_prefix,
+        "PROJECT_PATH": str(path),
+        "FULL_PATH": str(path),
+        "REL_PATH": str(rel_path),
+        "BASE_DIR": str(base_path),
+    }
+    for key, value in list(out.items()):
+        out[key.lower()] = value
+    out["NAME_WITH_ARCHIVE_PREFIX_Q"] = shlex.quote(archive_prefixed_name)
+    out["name_with_archive_prefix_q"] = out["NAME_WITH_ARCHIVE_PREFIX_Q"]
+    return out
 
 
 def property_tokens(keys: list[str]) -> str:
@@ -236,16 +273,7 @@ def property_tokens_text(keys: list[str]) -> Text:
     return property_utils.property_tokens_text(
         keys,
         all_defs=all_property_defs(),
-        dynamic_property_defs=DYNAMIC_PROPERTY_DEFS,
         normalize_keys=normalize_property_keys,
-        property_key_err=PROPERTY_KEY_ERR,
-        property_key_warn=PROPERTY_KEY_WARN,
-        color_error_hex=COLOR_ERROR_HEX,
-        color_warn_hex=COLOR_WARN_HEX,
-        color_dynamic_env_hex=COLOR_DYNAMIC_ENV_HEX,
-        color_dynamic_file_hex=COLOR_DYNAMIC_FILE_HEX,
-        color_dynamic_state_hex=COLOR_DYNAMIC_STATE_HEX,
-        color_info_hex=COLOR_INFO_HEX,
     )
 
 
@@ -253,16 +281,7 @@ def property_display_lines(keys: list[str]) -> list[str]:
     return property_utils.property_display_lines(
         keys,
         all_defs=all_property_defs(),
-        dynamic_property_defs=DYNAMIC_PROPERTY_DEFS,
         normalize_keys=normalize_property_keys,
-        property_key_err=PROPERTY_KEY_ERR,
-        property_key_warn=PROPERTY_KEY_WARN,
-        color_error_hex=COLOR_ERROR_HEX,
-        color_warn_hex=COLOR_WARN_HEX,
-        color_dynamic_env_hex=COLOR_DYNAMIC_ENV_HEX,
-        color_dynamic_file_hex=COLOR_DYNAMIC_FILE_HEX,
-        color_dynamic_state_hex=COLOR_DYNAMIC_STATE_HEX,
-        color_info_hex=COLOR_INFO_HEX,
     )
 
 

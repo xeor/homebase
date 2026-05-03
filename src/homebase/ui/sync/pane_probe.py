@@ -103,7 +103,6 @@ def on_probe_open_panes_done(app: Any, mapping: dict[Path, list[PaneRef]]) -> No
     app.open_pane_overflow_projects = {
         path for path, panes in mapping.items() if len(panes) > 9
     }
-    app._apply_dynamic_properties_all_rows()
 
     sig_parts = [
         f"{str(path)}:{len(mapping[path])}" for path in sorted(mapping.keys(), key=str)
@@ -111,12 +110,14 @@ def on_probe_open_panes_done(app: Any, mapping: dict[Path, list[PaneRef]]) -> No
     sig = "|".join(sig_parts)
     if sig != app.pane_state_sig:
         app.pane_state_sig = sig
+        app._apply_dynamic_properties_all_rows()
         try:
             app._refresh_table()
             app._refresh_side()
         except (*WIDGET_API_ERRORS, NoMatches):
             return
 
+    app.pane_probe_last_done_ts = time.time()
     app.pane_probe_next_due_at = time.time() + app._pane_probe_desired_interval_s()
 
 
@@ -145,6 +146,10 @@ def maybe_probe_open_panes(app: Any) -> None:
     if app.pane_probe_running:
         return
     now = time.time()
+    if (now - float(getattr(app, "pane_probe_last_done_ts", 0.0))) < float(
+        getattr(app, "pane_probe_min_interval_s", 0.5)
+    ):
+        return
     if now < app.pane_probe_next_due_at:
         return
     app._start_probe_open_panes()

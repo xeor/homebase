@@ -54,10 +54,6 @@ def cheat_columns(
     app: Any,
     *,
     all_property_defs: Callable[[], list[Any]],
-    dynamic_property_defs: list[Any],
-    color_error_hex: str,
-    color_warn_hex: str,
-    color_info_hex: str,
 ) -> tuple[str, str]:
     rows = app._current_rows()
     active_total = len(app.active_rows)
@@ -101,9 +97,7 @@ def cheat_columns(
     left.append("- restore conflicts offer skip or restore-to-other-location")
     left.append("- bulk actions continue on failures and log per-item result")
     left.append("- properties are auto-detected from project context")
-    left.append(
-        f"- dynamic properties: [{color_error_hex}]E[/]=metadata error, [{color_warn_hex}]W[/]=metadata warning"
-    )
+    left.append("- dynamic properties are defined in .base-conf.yaml")
     left.append("- metadata issues are explained in Selected -> Overview")
     left.append("")
     left.append("- filter syntax examples (combine with AND/OR and parentheses):")
@@ -130,9 +124,9 @@ def cheat_columns(
     right.append(f"- active untagged:{untagged_total}")
     right.append("")
     prop_counts = property_count_map(app, all_property_defs=all_property_defs)
-    dynamic_keys = {p.key for p in dynamic_property_defs}
     for pdef in all_property_defs():
-        token = f"[{color_info_hex}]{pdef.token}[/]" if pdef.key in dynamic_keys else pdef.token
+        style = str(getattr(pdef, "color", "") or "").strip()
+        token = f"[{style}]{pdef.token}[/]" if style else pdef.token
         right.append(f"- {token:<14} {pdef.key:<8} {prop_counts.get(pdef.key, 0)}")
     right.append("")
     top_tags = tag_count_map(app)
