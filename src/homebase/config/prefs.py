@@ -4,6 +4,7 @@ import re
 from pathlib import Path
 
 from ..core.constants import (
+    CACHE_PROFILE_CONFIG,
     DEFAULT_ARCHIVE_TZ_NAME,
     NAMED_FILTERS,
     NEW_PROJECT_DEFAULTS,
@@ -31,6 +32,7 @@ from ..core.constants import (
 )
 from ..core.models import PostCommandOption
 from ..filter import engine as filter_engine
+from . import cache_profile as cache_profile_config
 from . import open_mode as open_mode_config
 from . import store as config_store
 from . import workspace as workspace_settings
@@ -163,7 +165,29 @@ def load_reconcile_config(base_dir: Path) -> dict[str, dict[str, object]]:
     return workspace_settings.load_reconcile_config(
         load_global_config_dict(base_dir),
         defaults=RECONCILE_CONFIG,
+        default_cache_profiles=CACHE_PROFILE_CONFIG,
     )
+
+
+def load_cache_profile_table(base_dir: Path) -> dict[str, dict[str, dict[str, object]]]:
+    raw = load_global_config_dict(base_dir)
+    merged = dict(raw) if isinstance(raw, dict) else {}
+    merged_profiles = {
+        "all": dict(CACHE_PROFILE_CONFIG.get("all", {})),
+        "active": dict(CACHE_PROFILE_CONFIG.get("active", {})),
+        "archive": dict(CACHE_PROFILE_CONFIG.get("archive", {})),
+    }
+    raw_profiles = merged.get("cache_profile", {})
+    if isinstance(raw_profiles, dict):
+        for scope in ("all", "active", "archive"):
+            scope_raw = raw_profiles.get(scope, {})
+            if not isinstance(scope_raw, dict):
+                continue
+            cur = merged_profiles.get(scope, {})
+            cur.update(scope_raw)
+            merged_profiles[scope] = cur
+    merged["cache_profile"] = merged_profiles
+    return cache_profile_config.load_cache_profile_table(merged)
 
 
 def nested_discovery_enabled(base_dir: Path) -> bool:

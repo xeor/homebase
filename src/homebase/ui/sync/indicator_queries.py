@@ -99,10 +99,13 @@ def evaluate_query_match(app: Any, row: Any, query: dict[str, object]) -> bool:
         level = str(query.get("level", "")).strip().lower()
         if level not in {"warning", "error"}:
             return False
-        from ...metadata.api import base_meta_health
-
-        health_level, _health_msg = base_meta_health(row.path)
-        return str(health_level).strip().lower() == level
+        cached = app.metadata_health_cache.get(row.path)
+        if cached is None:
+            return False
+        if cache_due(float(cached[1])):
+            return False
+        health_level = str(cached[0]).strip().lower()
+        return health_level == level
     if qtype in {"tmux_open_panes", "tmux_editor_commands", "sqlite_recent_paths"}:
         return row.path in evaluate_query_paths(app, query)
     return False

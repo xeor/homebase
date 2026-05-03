@@ -12,40 +12,41 @@ def mode_has_stale_rows(app: Any, mode: str) -> bool:
     return any(bool(row.stale) for row in rows)
 
 
+def _reconcile_mode_cfg(app: Any, mode: str) -> dict[str, object]:
+    cfg = app.reconcile_config.get(mode, {})
+    return cfg if isinstance(cfg, dict) else {}
+
+
 def effective_reconcile_wait_s(
     app: Any,
     mode: str,
-    *,
-    reconcile_stale_interval_s: float,
 ) -> float:
-    cfg = app.reconcile_config.get(mode, {})
+    cfg = _reconcile_mode_cfg(app, mode)
     base_wait = max(1.0, float(cfg.get("interval_s", 5.0)))
-    if mode_has_stale_rows(app, mode):
-        return reconcile_stale_interval_s
+    if mode_has_stale_rows(app, mode) and bool(cfg.get("stale_boost", True)):
+        return max(0.05, float(cfg.get("stale_interval_s", base_wait)))
     return base_wait
 
 
 def effective_reconcile_parallelism(
     app: Any,
     mode: str,
-    *,
-    reconcile_stale_parallelism: int,
 ) -> int:
-    if mode_has_stale_rows(app, mode):
-        return reconcile_stale_parallelism
-    return 1
+    cfg = _reconcile_mode_cfg(app, mode)
+    base_parallelism = max(1, int(cfg.get("parallelism", 1)))
+    if mode_has_stale_rows(app, mode) and bool(cfg.get("stale_boost", True)):
+        return max(base_parallelism, int(cfg.get("stale_parallelism", base_parallelism)))
+    return base_parallelism
 
 
 def effective_reconcile_batch_size(
     app: Any,
     mode: str,
-    *,
-    reconcile_stale_batch_size: int,
 ) -> int:
-    cfg = app.reconcile_config.get(mode, {})
+    cfg = _reconcile_mode_cfg(app, mode)
     base_batch = max(1, int(cfg.get("batch_size", 1)))
-    if mode_has_stale_rows(app, mode):
-        return max(base_batch, reconcile_stale_batch_size)
+    if mode_has_stale_rows(app, mode) and bool(cfg.get("stale_boost", True)):
+        return max(base_batch, int(cfg.get("stale_batch_size", base_batch)))
     return base_batch
 
 
@@ -105,6 +106,10 @@ def pick_reconcile_candidates(
     if not rows:
         return []
     stale_rows = [row for row in rows if row.stale]
+    cfg = _reconcile_mode_cfg(app, mode)
+    use_usage_score = bool(cfg.get("use_usage_score", True))
+    usage_weight = max(0.0, float(cfg.get("usage_weight", 1.0)))
+    stale_boost = bool(cfg.get("stale_boost", True))
     pool = stale_rows if stale_rows else list(rows)
     out: list[ProjectRow] = []
     limit = max(1, int(batch_size))
@@ -117,14 +122,22 @@ def pick_reconcile_candidates(
                 else max(0, now_ts - row.last_ts)
             )
             age_w = min(40.0, since_reconcile / 5.0)
-            usage_w = min(25.0, float(app.row_usage_score.get(row.path, 0.0)))
-            hit_w = min(8.0, float(app.row_usage_hits.get(row.path, 0)) * 0.1)
+            usage_w = (
+                min(25.0, float(app.row_usage_score.get(row.path, 0.0))) * usage_weight
+                if use_usage_score
+                else 0.0
+            )
+            hit_w = (
+                min(8.0, float(app.row_usage_hits.get(row.path, 0)) * 0.1) * usage_weight
+                if use_usage_score
+                else 0.0
+            )
             used_ts = int(app.row_usage_last_used_ts.get(row.path, 0))
             recency_w = 0.0
             if used_ts > 0:
                 since_used = max(0, now_ts - used_ts)
                 recency_w = max(0.0, 6.0 - min(6.0, since_used / 60.0))
-            stale_w = 6.0 if row.stale else 0.0
+            stale_w = 6.0 if row.stale and stale_boost else 0.0
             dirty_w = 10.0 if row.dirty in {"~", "?", "*"} else 0.0
             weights.append(1.0 + age_w + usage_w + hit_w + recency_w + stale_w + dirty_w)
         picked = random_choices(pool, weights=weights, k=1)[0]

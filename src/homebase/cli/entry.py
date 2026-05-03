@@ -85,6 +85,7 @@ def main(argv: list[str]) -> int:
     from ..config import prefs as app_prefs  # noqa: F401  (alias for clarity)
     from ..config.prefs import (
         load_archive_timezone_name,
+        load_cache_profile_table,
         load_custom_actions,
         load_file_view_exclude_patterns,
         load_notes_config,
@@ -124,6 +125,7 @@ def main(argv: list[str]) -> int:
         load_open_mode_config=load_open_mode_config,
         load_notes_config=load_notes_config,
         load_reconcile_config=load_reconcile_config,
+        load_cache_profile_table=load_cache_profile_table,
         load_archive_timezone_name=load_archive_timezone_name,
     )
     ui_ctx = UIContext(
@@ -141,6 +143,10 @@ def main(argv: list[str]) -> int:
         notes_config=dict(runtime_cfg.notes_config),
         reconcile_config={
             mode: dict(conf) for mode, conf in runtime_cfg.reconcile_config.items()
+        },
+        cache_profile_table={
+            scope: {name: dict(profile) for name, profile in table.items()}
+            for scope, table in runtime_cfg.cache_profile_table.items()
         },
     )
 

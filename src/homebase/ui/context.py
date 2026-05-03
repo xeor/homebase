@@ -25,6 +25,9 @@ class UIContext:
     open_mode_config: dict[str, str] = field(default_factory=dict)
     notes_config: dict[str, str] = field(default_factory=dict)
     reconcile_config: dict[str, dict[str, object]] = field(default_factory=dict)
+    cache_profile_table: dict[str, dict[str, dict[str, object]]] = field(
+        default_factory=dict
+    )
 
 
 def build_ui_context(base_dir: Path) -> UIContext:
@@ -46,5 +49,9 @@ def build_ui_context(base_dir: Path) -> UIContext:
         notes_config=dict(_const.NOTES_CONFIG),
         reconcile_config={
             mode: dict(cfg) for mode, cfg in _const.RECONCILE_CONFIG.items()
+        },
+        cache_profile_table={
+            scope: {name: dict(profile) for name, profile in table.items()}
+            for scope, table in _const.CACHE_PROFILE_CONFIG.items()
         },
     )

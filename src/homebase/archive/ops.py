@@ -85,6 +85,8 @@ def archive_extract_single_root(
             proc = subprocess.run(
                 [tar_bin, "-xzf", str(src), "-C", str(tmp_dir)],
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 capture_output=True,
                 check=False,
             )

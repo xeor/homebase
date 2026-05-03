@@ -275,6 +275,8 @@ def tty_process_rows(tty: str) -> list[tuple[int, int, int, int, str]]:
     proc = subprocess.run(
         ["ps", "-t", t, "-o", "pid=,ppid=,pgid=,tpgid=,command="],
         text=True,
+        encoding="utf-8",
+        errors="replace",
         capture_output=True,
         check=False,
     )
@@ -321,6 +323,8 @@ def pid_command_line(pid: int) -> str:
     proc = subprocess.run(
         ["ps", "-p", str(pid), "-o", "command="],
         text=True,
+        encoding="utf-8",
+        errors="replace",
         capture_output=True,
         check=False,
     )

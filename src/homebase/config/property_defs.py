@@ -4,6 +4,7 @@ import re
 from pathlib import Path
 
 from ..core.models import PropertyDef
+from . import cache_profile as cache_profile_config
 from .store import load_global_config_dict
 
 _VAR_PATTERN = re.compile(r"\{\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}\}")
@@ -54,6 +55,7 @@ def _to_tuple(value: object) -> tuple[str, ...]:
 
 def load_property_defs(base_dir: Path) -> list[PropertyDef]:
     raw = load_global_config_dict(base_dir)
+    profile_table = cache_profile_config.load_cache_profile_table(raw)
     vars_ctx = _variables_context(raw) if isinstance(raw, dict) else {}
     properties_raw = raw.get("properties", {}) if isinstance(raw, dict) else {}
     if not isinstance(properties_raw, dict):
@@ -92,6 +94,54 @@ def load_property_defs(base_dir: Path) -> list[PropertyDef]:
             cache_ttl_s = float(item.get("cache_ttl_s", 15.0))
         except (TypeError, ValueError):
             cache_ttl_s = 15.0
+        explicit_cache_fields = {
+            str(k): v
+            for k, v in item.items()
+            if str(k)
+            in {
+                "update_interval_s",
+                "update_batch_size",
+                "update_priority",
+                "cache_mode",
+                "cache_ttl_s",
+                "use_usage_score",
+                "usage_weight",
+                "stale_boost",
+                "max_parallelism",
+                "min_interval_s",
+                "refresh_on_event",
+                "jitter_pct",
+            }
+        }
+        cache_profile = str(item.get("cache_profile", "")).strip()
+        profile_overrides = item.get("cache_profile_overrides", None)
+        cache_profiles_by_view: dict[str, dict[str, object]] | None = None
+        if cache_profile:
+            try:
+                active_profile = cache_profile_config.resolve_cache_profile(
+                    profile_name=cache_profile,
+                    view="active",
+                    profile_table=profile_table,
+                    explicit_fields=explicit_cache_fields,
+                    profile_overrides=profile_overrides,
+                )
+                archive_profile = cache_profile_config.resolve_cache_profile(
+                    profile_name=cache_profile,
+                    view="archive",
+                    profile_table=profile_table,
+                    explicit_fields=explicit_cache_fields,
+                    profile_overrides=profile_overrides,
+                )
+            except ValueError as exc:
+                raise ValueError(f"invalid cache profile for property {token}: {exc}") from exc
+            cache_profiles_by_view = {
+                "active": active_profile,
+                "archive": archive_profile,
+            }
+            try:
+                cache_ttl_s = float(active_profile.get("cache_ttl_s", cache_ttl_s))
+            except (TypeError, ValueError):
+                pass
         defs.append(
             PropertyDef(
                 key=key,
@@ -103,6 +153,8 @@ def load_property_defs(base_dir: Path) -> list[PropertyDef]:
                 path_exists=path_exists,
                 queries=queries,
                 cache_ttl_s=max(1.0, cache_ttl_s),
+                cache_profile=cache_profile,
+                cache_profiles_by_view=cache_profiles_by_view,
             )
         )
     return defs

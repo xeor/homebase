@@ -9,9 +9,11 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+from textual.css.query import NoMatches
 
 from ...cache.api import cache_store_rows
 from ...core.models import CacheRefreshOutcome, OperationResult, ProjectRow
+from ...core.utils import WIDGET_API_ERRORS
 from ...workspace.rows import collect_workspace_rows
 
 
@@ -103,7 +105,10 @@ def on_cache_refresh_done(app: Any, *, base_dir: Path, outcome: CacheRefreshOutc
             "cache_refresh",
             f"cache refresh failed: {outcome.result.error}",
         )
-        app._refresh_side()
+        try:
+            app._refresh_side()
+        except (*WIDGET_API_ERRORS, NoMatches):
+            pass
     elif (
         outcome.epoch == app.cache_refresh_epoch
         and outcome.fresh_active is not None
@@ -124,9 +129,12 @@ def on_cache_refresh_done(app: Any, *, base_dir: Path, outcome: CacheRefreshOutc
             app._worker_debug(
                 f"cache refresh done: epoch={outcome.epoch} active={len(app.active_rows)} archive={len(app.archived_rows)}"
             )
-            app._refresh_table()
-            app._restore_table_position()
-            app._refresh_side()
+            try:
+                app._refresh_table()
+                app._restore_table_position()
+                app._refresh_side()
+            except (*WIDGET_API_ERRORS, NoMatches):
+                pass
 
     if app.cache_refresh_pending:
         reason = app.cache_refresh_pending_reason or "pending"

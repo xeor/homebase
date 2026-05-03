@@ -64,6 +64,8 @@ def archive_pack_internal(
             proc = subprocess.run(
                 [tar_bin, "-czf", str(tmp), "-C", str(src.parent), src.name],
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 capture_output=True,
                 check=False,
             )

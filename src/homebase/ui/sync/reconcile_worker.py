@@ -10,7 +10,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable
 
+from textual.css.query import NoMatches
+
 from ...core.models import ProjectRow
+from ...core.utils import WIDGET_API_ERRORS
 from ...workspace.projects import project_row
 from ...workspace.rows import reconcile_queue_pop_next, reconcile_queue_push
 
@@ -203,8 +206,11 @@ def on_reconcile_rows_done(
             kind = mode_archive if is_under(path, base_dir / archive_dir_name) else mode_active
             app._record_reconcile_recent(kind, f"{path.name} [removed] ({reason})")
     if refreshed_rows or removed_paths:
-        app._refresh_table()
-        app._refresh_side()
+        try:
+            app._refresh_table()
+            app._refresh_side()
+        except (*WIDGET_API_ERRORS, NoMatches):
+            pass
     if failed > 0:
         if fatal_error:
             app._log(f"reconcile {mode}: fatal worker failure: {fatal_error}", "error")

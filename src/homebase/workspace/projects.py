@@ -79,7 +79,13 @@ def run_post_commands(target_dir: Path, commands: list[str]) -> None:
         print(f"$ {cmd}")
         try:
             result = subprocess.run(
-                cmd, cwd=target_dir, shell=True, check=False, text=True
+                cmd,
+                cwd=target_dir,
+                shell=True,
+                check=False,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
             )
         except subprocess.CalledProcessError as exc:
             details = exc.stderr.strip() or exc.stdout.strip() or str(exc)
@@ -123,6 +129,8 @@ def create_project(
                     ["copier", "copy", "--trust", str(template_dir), str(target)],
                     check=True,
                     text=True,
+                    encoding="utf-8",
+                    errors="replace",
                     capture_output=True,
                 )
             except subprocess.CalledProcessError as exc:
@@ -201,6 +209,8 @@ def git_info(path: Path, include_dirty: bool = True) -> tuple[str, str, int]:
                     "--",
                 ],
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 capture_output=True,
                 check=False,
             )
@@ -216,6 +226,8 @@ def git_info(path: Path, include_dirty: bool = True) -> tuple[str, str, int]:
                     "--",
                 ],
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 capture_output=True,
                 check=False,
             )

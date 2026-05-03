@@ -12,7 +12,14 @@ WIDGET_API_ERRORS = (AttributeError, RuntimeError, ValueError, TypeError)
 
 
 def run_out(*cmd: str, check: bool = True) -> str:
-    p = subprocess.run(cmd, check=check, text=True, capture_output=True)
+    p = subprocess.run(
+        cmd,
+        check=check,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        capture_output=True,
+    )
     return p.stdout.strip()
 
 

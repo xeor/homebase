@@ -42,6 +42,7 @@ from ..commands.archive import (
     delete_internal,
     is_packed_archive_path,
 )
+from ..config import cache_profile as cache_profile_config
 from ..config.prefs import (
     _merge_table_columns_for_view,
     load_table_behavior_config,
@@ -76,9 +77,12 @@ from ..core.constants import (
     MODE_ARCHIVE,
     OPEN_MODE_PROFILES,
     PACKED_ARCHIVE_SUFFIX,
-    RECONCILE_STALE_BATCH_SIZE,
-    RECONCILE_STALE_INTERVAL_S,
-    RECONCILE_STALE_PARALLELISM,
+    PROFILE_GIT_REFRESH_ACTIVE,
+    PROFILE_GIT_REFRESH_ARCHIVE,
+    PROFILE_METADATA_HEALTH_ACTIVE,
+    PROFILE_METADATA_HEALTH_ARCHIVE,
+    PROFILE_PANE_PROBE_ACTIVE,
+    PROFILE_PANE_PROBE_ARCHIVE,
     SIDE_CHILD_TABS,
     SIDE_TOP_TABS,
     STATE_KEY_SIDE_INFO,
@@ -180,8 +184,10 @@ from .side import settings as textual_ui_settings_panel
 from .side import tabs as textual_ui_side_tabs
 from .sync import cache_refresh as textual_ui_cache_refresh
 from .sync import cache_state as textual_ui_cache_state
+from .sync import dynamic_props as textual_ui_dynamic_props
 from .sync import git_refresh as textual_ui_git_refresh
 from .sync import indicator_queries as textual_ui_indicator_queries
+from .sync import metadata_health as textual_ui_metadata_health
 from .sync import pane_probe as textual_ui_pane_probe
 from .sync import reconcile as textual_ui_reconcile
 from .sync import reconcile_worker as textual_ui_reconcile_worker
@@ -462,7 +468,12 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
         self.git_refresh_running = False
         self.git_refresh_paths: set[Path] = set()
         self.git_refresh_last_ts = 0.0
+        self.git_refresh_next_due_at = 0.0
         self.git_refresh_reason = ""
+        self.metadata_health_cache: dict[Path, tuple[str, float]] = {}
+        self.metadata_health_refresh_running = False
+        self.metadata_health_refresh_last_ts = 0.0
+        self.metadata_health_refresh_next_due_at = 0.0
         self.detail_worker_running = False
         self.detail_worker_path: Path | None = None
         self.detail_worker_token = 0
@@ -476,13 +487,12 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
         self.pane_state_sig = ""
         self.pane_probe_next_due_at = 0.0
         self.pane_probe_last_done_ts = 0.0
-        self.pane_probe_min_interval_s = 0.5
         self.pane_probe_fast_until_ts = 0.0
-        self.pane_probe_interval_fast_s = 0.5
-        self.pane_probe_interval_slow_s = 6.0
         self.pending_pane_choices: dict[str, PaneRef] = {}
         self.dynamic_indicator_cache: dict[str, tuple[float, set[Path]]] = {}
         self.dynamic_indicator_row_cache: dict[tuple[str, Path], tuple[float, bool]] = {}
+        self.dynamic_property_refresh_queue: list[Path] = []
+        self.dynamic_property_refresh_next_due_at = 0.0
 
     def _init_query_state(self) -> None:
         self.select_mode = False
@@ -1022,6 +1032,8 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
         if pdef is None or not pdef.queries:
             return False
         path_query_types = {"tmux_open_panes", "tmux_editor_commands", "sqlite_recent_paths"}
+        view = MODE_ARCHIVE if row.archived else MODE_ACTIVE
+        ttl_s = pdef.cache_ttl_for_view(view)
         cached = self.dynamic_indicator_cache.get(key)
         if cached is None or textual_ui_indicator_queries.cache_due(cached[0]):
             paths: set[Path] = set()
@@ -1029,7 +1041,7 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
                 qtype = str(query.get("type", "")).strip()
                 if qtype in path_query_types:
                     paths.update(textual_ui_indicator_queries.evaluate_query_paths(self, query))
-            self.dynamic_indicator_cache[key] = (time.time() + float(pdef.cache_ttl_s), paths)
+            self.dynamic_indicator_cache[key] = (time.time() + ttl_s, paths)
             cached = self.dynamic_indicator_cache[key]
         if row.path in cached[1]:
             return True
@@ -1046,7 +1058,7 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
                 matched = True
                 break
         self.dynamic_indicator_row_cache[row_cache_key] = (
-            time.time() + float(pdef.cache_ttl_s),
+            time.time() + ttl_s,
             matched,
         )
         return matched
@@ -1070,6 +1082,64 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
         for row in self.archived_rows:
             self._apply_dynamic_properties_to_row(row)
         self._invalidate_current_rows_cache()
+
+    def _queue_dynamic_property_refresh(self, paths: list[Path]) -> None:
+        textual_ui_dynamic_props.queue_dynamic_property_refresh(self, paths)
+        if paths:
+            self.dynamic_property_refresh_next_due_at = 0.0
+
+    def _run_dynamic_property_refresh_tick(self) -> None:
+        now = time.time()
+        if now < float(self.dynamic_property_refresh_next_due_at):
+            return
+        textual_ui_dynamic_props.run_dynamic_property_refresh_tick(
+            self,
+            batch_size=self._dynamic_property_refresh_batch_size(),
+        )
+        if self.dynamic_property_refresh_queue:
+            self.dynamic_property_refresh_next_due_at = (
+                now + self._dynamic_property_refresh_interval_s()
+            )
+        else:
+            self.dynamic_property_refresh_next_due_at = 0.0
+
+    def _dynamic_property_refresh_batch_size(self) -> int:
+        view = MODE_ACTIVE if self.view_mode == MODE_ACTIVE else MODE_ARCHIVE
+        batch_size = 24
+        for pdef in self.ctx.property_defs:
+            if not pdef.queries:
+                continue
+            if not isinstance(pdef.cache_profiles_by_view, dict):
+                continue
+            profile = pdef.cache_profiles_by_view.get(view, {})
+            if not isinstance(profile, dict):
+                continue
+            try:
+                batch_size = max(
+                    batch_size,
+                    max(1, int(profile.get("update_batch_size", batch_size))),
+                )
+            except (TypeError, ValueError):
+                continue
+        return batch_size
+
+    def _dynamic_property_refresh_interval_s(self) -> float:
+        view = MODE_ACTIVE if self.view_mode == MODE_ACTIVE else MODE_ARCHIVE
+        interval_s: float | None = None
+        for pdef in self.ctx.property_defs:
+            if not pdef.queries:
+                continue
+            if not isinstance(pdef.cache_profiles_by_view, dict):
+                continue
+            profile = pdef.cache_profiles_by_view.get(view, {})
+            if not isinstance(profile, dict):
+                continue
+            try:
+                candidate = max(0.05, float(profile.get("update_interval_s", 0.25)))
+                interval_s = candidate if interval_s is None else min(interval_s, candidate)
+            except (TypeError, ValueError):
+                continue
+        return interval_s if interval_s is not None else 0.25
 
     def _find_row(self, path: Path) -> tuple[list[ProjectRow], int] | None:
         for rows in (self.active_rows, self.archived_rows):
@@ -1184,25 +1254,13 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
         return textual_ui_reconcile.mode_has_stale_rows(self, mode)
 
     def _effective_reconcile_wait_s(self, mode: str) -> float:
-        return textual_ui_reconcile.effective_reconcile_wait_s(
-            self,
-            mode,
-            reconcile_stale_interval_s=RECONCILE_STALE_INTERVAL_S,
-        )
+        return textual_ui_reconcile.effective_reconcile_wait_s(self, mode)
 
     def _effective_reconcile_parallelism(self, mode: str) -> int:
-        return textual_ui_reconcile.effective_reconcile_parallelism(
-            self,
-            mode,
-            reconcile_stale_parallelism=RECONCILE_STALE_PARALLELISM,
-        )
+        return textual_ui_reconcile.effective_reconcile_parallelism(self, mode)
 
     def _effective_reconcile_batch_size(self, mode: str) -> int:
-        return textual_ui_reconcile.effective_reconcile_batch_size(
-            self,
-            mode,
-            reconcile_stale_batch_size=RECONCILE_STALE_BATCH_SIZE,
-        )
+        return textual_ui_reconcile.effective_reconcile_batch_size(self, mode)
 
     def _bump_row_usage(self, path: Path | None, weight: float = 1.0) -> None:
         textual_ui_reconcile.bump_row_usage(self, path, weight=weight)
@@ -1280,6 +1338,8 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
         if self.fast_exit_requested:
             self._set_reconcile_skip_reason("fast exit")
             return
+        self._maybe_refresh_metadata_health()
+        self._run_dynamic_property_refresh_tick()
         if self._critical_job_active():
             self._set_reconcile_skip_reason(
                 f"blocked by critical job ({self._critical_job_label()})"
@@ -1327,6 +1387,107 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
     def _maybe_refresh_visible_git(self) -> None:
         textual_ui_git_refresh.maybe_refresh_visible_git(self)
 
+    def _git_refresh_profile_name(self) -> str:
+        return (
+            PROFILE_GIT_REFRESH_ACTIVE
+            if self.view_mode == MODE_ACTIVE
+            else PROFILE_GIT_REFRESH_ARCHIVE
+        )
+
+    def _git_refresh_profile(self) -> dict[str, object]:
+        try:
+            return cache_profile_config.resolve_cache_profile(
+                profile_name=self._git_refresh_profile_name(),
+                view=MODE_ACTIVE if self.view_mode == MODE_ACTIVE else MODE_ARCHIVE,
+                profile_table=self.ctx.cache_profile_table,
+            )
+        except ValueError:
+            return {}
+
+    def _git_refresh_interval_s(self) -> float:
+        profile = self._git_refresh_profile()
+        try:
+            return max(0.05, float(profile.get("update_interval_s", 0.8)))
+        except (TypeError, ValueError):
+            return 0.8
+
+    def _git_refresh_min_interval_s(self) -> float:
+        profile = self._git_refresh_profile()
+        try:
+            return max(
+                0.05,
+                float(profile.get("min_interval_s", profile.get("update_interval_s", 0.5))),
+            )
+        except (TypeError, ValueError):
+            return 0.5
+
+    def _git_refresh_batch_size(self) -> int:
+        profile = self._git_refresh_profile()
+        try:
+            return max(1, int(profile.get("update_batch_size", 8)))
+        except (TypeError, ValueError):
+            return 8
+
+    def _metadata_health_profile_name(self) -> str:
+        return (
+            PROFILE_METADATA_HEALTH_ACTIVE
+            if self.view_mode == MODE_ACTIVE
+            else PROFILE_METADATA_HEALTH_ARCHIVE
+        )
+
+    def _metadata_health_profile(self) -> dict[str, object]:
+        try:
+            return cache_profile_config.resolve_cache_profile(
+                profile_name=self._metadata_health_profile_name(),
+                view=MODE_ACTIVE if self.view_mode == MODE_ACTIVE else MODE_ARCHIVE,
+                profile_table=self.ctx.cache_profile_table,
+            )
+        except ValueError:
+            return {}
+
+    def _metadata_health_interval_s(self) -> float:
+        profile = self._metadata_health_profile()
+        try:
+            return max(0.05, float(profile.get("update_interval_s", 1.0)))
+        except (TypeError, ValueError):
+            return 1.0
+
+    def _metadata_health_min_interval_s(self) -> float:
+        profile = self._metadata_health_profile()
+        try:
+            return max(
+                0.05,
+                float(profile.get("min_interval_s", profile.get("update_interval_s", 0.4))),
+            )
+        except (TypeError, ValueError):
+            return 0.4
+
+    def _metadata_health_batch_size(self) -> int:
+        profile = self._metadata_health_profile()
+        try:
+            return max(1, int(profile.get("update_batch_size", 12)))
+        except (TypeError, ValueError):
+            return 12
+
+    def _metadata_health_ttl_s(self) -> float:
+        profile = self._metadata_health_profile()
+        try:
+            return max(0.2, float(profile.get("cache_ttl_s", 8.0)))
+        except (TypeError, ValueError):
+            return 8.0
+
+    def _maybe_refresh_metadata_health(self) -> None:
+        textual_ui_metadata_health.maybe_refresh_metadata_health(
+            self,
+            base_meta_health=base_meta_health,
+        )
+
+    def _on_metadata_health_refresh_done(
+        self,
+        updated: list[tuple[Path, str, float]],
+    ) -> None:
+        textual_ui_metadata_health.on_metadata_health_refresh_done(self, updated)
+
     def _start_git_refresh(self, paths: list[Path], reason: str) -> None:
         textual_ui_git_refresh.start_git_refresh(self, paths, reason)
 
@@ -1343,6 +1504,57 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
 
     def _pane_probe_desired_interval_s(self) -> float:
         return textual_ui_pane_probe.pane_probe_desired_interval_s(self)
+
+    def _pane_probe_profile_name(self) -> str:
+        return (
+            PROFILE_PANE_PROBE_ACTIVE
+            if self.view_mode == MODE_ACTIVE
+            else PROFILE_PANE_PROBE_ARCHIVE
+        )
+
+    def _pane_probe_profile(self) -> dict[str, object]:
+        try:
+            return cache_profile_config.resolve_cache_profile(
+                profile_name=self._pane_probe_profile_name(),
+                view=MODE_ACTIVE if self.view_mode == MODE_ACTIVE else MODE_ARCHIVE,
+                profile_table=self.ctx.cache_profile_table,
+            )
+        except ValueError:
+            return {}
+
+    def _pane_probe_project_scan_limit(self) -> int:
+        profile = self._pane_probe_profile()
+        try:
+            return max(1, int(profile.get("update_batch_size", 400)))
+        except (TypeError, ValueError):
+            return 400
+
+    def _pane_probe_profile_min_interval_s(self) -> float:
+        probe_profile = self._pane_probe_profile()
+        try:
+            return max(
+                0.05,
+                float(
+                    probe_profile.get(
+                        "min_interval_s",
+                        probe_profile.get("update_interval_s", 0.5),
+                    )
+                ),
+            )
+        except (TypeError, ValueError):
+            return 0.5
+
+    def _pane_probe_profile_slow_interval_s(self) -> float:
+        probe_profile = self._pane_probe_profile()
+        try:
+            return max(0.05, float(probe_profile.get("update_interval_s", 6.0)))
+        except (TypeError, ValueError):
+            return 6.0
+
+    def _pane_probe_profile_fast_interval_s(self) -> float:
+        min_interval_s = self._pane_probe_profile_min_interval_s()
+        slow_interval_s = self._pane_probe_profile_slow_interval_s()
+        return min(min_interval_s, slow_interval_s)
 
     def _maybe_probe_open_panes(self) -> None:
         textual_ui_pane_probe.maybe_probe_open_panes(self)
@@ -2112,12 +2324,16 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
         p1 = subprocess.run(
             [*_tmux_command_prefix(), "select-window", "-t", target_window],
             text=True,
+            encoding="utf-8",
+            errors="replace",
             capture_output=True,
             check=False,
         )
         p2 = subprocess.run(
             [*_tmux_command_prefix(), "select-pane", "-t", pane.pane_id],
             text=True,
+            encoding="utf-8",
+            errors="replace",
             capture_output=True,
             check=False,
         )

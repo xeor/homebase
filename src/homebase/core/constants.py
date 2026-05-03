@@ -22,6 +22,15 @@ LEVEL_INFO = "info"
 LEVEL_WARN = "warn"
 LEVEL_ERROR = "error"
 
+PROFILE_RECONCILE_ACTIVE = "reconcile-active"
+PROFILE_RECONCILE_ARCHIVE = "reconcile-archive"
+PROFILE_GIT_REFRESH_ACTIVE = "git-refresh-active"
+PROFILE_GIT_REFRESH_ARCHIVE = "git-refresh-archive"
+PROFILE_METADATA_HEALTH_ACTIVE = "metadata-health-active"
+PROFILE_METADATA_HEALTH_ARCHIVE = "metadata-health-archive"
+PROFILE_PANE_PROBE_ACTIVE = "pane-probe-active"
+PROFILE_PANE_PROBE_ARCHIVE = "pane-probe-archive"
+
 BASE_MARKER_FILE = ".base.yml"
 LEGACY_BASE_MARKER_FILE = ".base.yaml"
 ARCHIVE_DIR_NAME = "_archive"
@@ -189,9 +198,6 @@ CACHE_SCHEMA_VERSION = 5
 CACHE_MAX_AGE_S = 120
 CACHE_BG_REFRESH_S = 30
 SIZE_REFRESH_EVERY_N = 10
-RECONCILE_STALE_INTERVAL_S = 0.5
-RECONCILE_STALE_PARALLELISM = 4
-RECONCILE_STALE_BATCH_SIZE = 8
 
 UI_TICK_BUSY_S = 0.12
 UI_TICK_QUERY_FLUSH_S = 0.05
@@ -207,14 +213,113 @@ BENCHMARK_SCORE_REF_DAY_VALUE = 1.0
 RECONCILE_CONFIG: dict[str, dict[str, object]] = {
     "active": {
         "enabled": True,
-        "interval_s": 5.0,
-        "batch_size": 1,
+        "cache_profile": PROFILE_RECONCILE_ACTIVE,
+        "cache_profile_overrides": {
+            "active": {
+                "update_interval_s": 5.0,
+                "update_batch_size": 1,
+                "max_parallelism": 1,
+                "stale_boost": True,
+                "use_usage_score": True,
+                "usage_weight": 1.0,
+            }
+        },
     },
     "archive": {
         "enabled": True,
-        "interval_s": 12.0,
-        "batch_size": 1,
+        "cache_profile": PROFILE_RECONCILE_ARCHIVE,
+        "cache_profile_overrides": {
+            "archive": {
+                "update_interval_s": 12.0,
+                "update_batch_size": 1,
+                "max_parallelism": 1,
+                "stale_boost": True,
+                "use_usage_score": True,
+                "usage_weight": 1.0,
+            }
+        },
     },
+}
+
+CACHE_PROFILE_CONFIG: dict[str, dict[str, dict[str, object]]] = {
+    "all": {
+        PROFILE_RECONCILE_ACTIVE: {
+            "update_interval_s": 5.0,
+            "update_batch_size": 1,
+            "update_priority": 30,
+            "cache_mode": "ttl",
+            "cache_ttl_s": 30.0,
+            "use_usage_score": True,
+            "usage_weight": 1.0,
+            "stale_boost": True,
+            "max_parallelism": 1,
+        },
+        PROFILE_RECONCILE_ARCHIVE: {
+            "update_interval_s": 12.0,
+            "update_batch_size": 1,
+            "update_priority": 60,
+            "cache_mode": "ttl",
+            "cache_ttl_s": 120.0,
+            "use_usage_score": True,
+            "usage_weight": 1.0,
+            "stale_boost": True,
+            "max_parallelism": 1,
+        },
+        PROFILE_GIT_REFRESH_ACTIVE: {
+            "update_interval_s": 0.8,
+            "update_batch_size": 8,
+            "update_priority": 20,
+            "cache_mode": "ttl",
+            "cache_ttl_s": 5.0,
+            "max_parallelism": 1,
+            "min_interval_s": 0.5,
+        },
+        PROFILE_GIT_REFRESH_ARCHIVE: {
+            "update_interval_s": 2.0,
+            "update_batch_size": 4,
+            "update_priority": 50,
+            "cache_mode": "ttl",
+            "cache_ttl_s": 20.0,
+            "max_parallelism": 1,
+            "min_interval_s": 1.0,
+        },
+        PROFILE_METADATA_HEALTH_ACTIVE: {
+            "update_interval_s": 1.0,
+            "update_batch_size": 12,
+            "update_priority": 25,
+            "cache_mode": "ttl",
+            "cache_ttl_s": 8.0,
+            "max_parallelism": 1,
+            "min_interval_s": 0.4,
+        },
+        PROFILE_METADATA_HEALTH_ARCHIVE: {
+            "update_interval_s": 4.0,
+            "update_batch_size": 4,
+            "update_priority": 70,
+            "cache_mode": "ttl",
+            "cache_ttl_s": 25.0,
+            "max_parallelism": 1,
+            "min_interval_s": 1.0,
+        },
+        PROFILE_PANE_PROBE_ACTIVE: {
+            "update_interval_s": 0.5,
+            "update_batch_size": 400,
+            "update_priority": 15,
+            "cache_mode": "ttl",
+            "cache_ttl_s": 5.0,
+            "max_parallelism": 1,
+            "min_interval_s": 0.2,
+        },
+        PROFILE_PANE_PROBE_ARCHIVE: {
+            "update_interval_s": 6.0,
+            "update_batch_size": 120,
+            "update_priority": 65,
+            "cache_mode": "ttl",
+            "cache_ttl_s": 30.0,
+            "max_parallelism": 1,
+            "min_interval_s": 0.8,
+        },
+    }
 }
 
 
@@ -348,3 +453,11 @@ SORT_MODE_SPECS: list[dict[str, object]] = [
     {"id": "archived", "label": "archived date", "views": ["archive"]},
     {"id": "restore_to", "label": "restore target", "views": ["archive"]},
 ]
+PROFILE_RECONCILE_ACTIVE = "reconcile-active"
+PROFILE_RECONCILE_ARCHIVE = "reconcile-archive"
+PROFILE_GIT_REFRESH_ACTIVE = "git-refresh-active"
+PROFILE_GIT_REFRESH_ARCHIVE = "git-refresh-archive"
+PROFILE_METADATA_HEALTH_ACTIVE = "metadata-health-active"
+PROFILE_METADATA_HEALTH_ARCHIVE = "metadata-health-archive"
+PROFILE_PANE_PROBE_ACTIVE = "pane-probe-active"
+PROFILE_PANE_PROBE_ARCHIVE = "pane-probe-archive"

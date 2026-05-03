@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from . import cache_profile as cache_profile_config
+
 
 def load_suffixes(data: object, *, default_suffixes: list[str]) -> list[str]:
     if not isinstance(data, dict):
@@ -98,6 +100,7 @@ def load_reconcile_config(
     data: object,
     *,
     defaults: dict[str, dict[str, object]],
+    default_cache_profiles: dict[str, dict[str, dict[str, object]]] | None = None,
 ) -> dict[str, dict[str, object]]:
     out = {
         "active": dict(defaults["active"]),
@@ -107,26 +110,142 @@ def load_reconcile_config(
     if not isinstance(raw, dict):
         return out
 
+    profile_source: dict[str, object] = dict(data) if isinstance(data, dict) else {}
+    default_profiles = default_cache_profiles or {}
+    if isinstance(default_profiles, dict):
+        merged_profiles = {
+            "all": dict(default_profiles.get("all", {})),
+            "active": dict(default_profiles.get("active", {})),
+            "archive": dict(default_profiles.get("archive", {})),
+        }
+        raw_profiles = profile_source.get("cache_profile", {})
+        if isinstance(raw_profiles, dict):
+            for scope in ("all", "active", "archive"):
+                scope_raw = raw_profiles.get(scope, {})
+                if not isinstance(scope_raw, dict):
+                    continue
+                cur = merged_profiles.get(scope, {})
+                cur.update(scope_raw)
+                merged_profiles[scope] = cur
+        profile_source["cache_profile"] = merged_profiles
+    profile_table = cache_profile_config.load_cache_profile_table(profile_source)
+
+    def _apply_profile(mode: str, mode_data: dict[str, object]) -> None:
+        profile_name = str(mode_data.get("cache_profile", "")).strip()
+        if not profile_name:
+            return
+        resolved = cache_profile_config.resolve_cache_profile(
+            profile_name=profile_name,
+            view=mode,
+            profile_table=profile_table,
+            explicit_fields={},
+            profile_overrides=mode_data.get("cache_profile_overrides", None),
+        )
+        out[mode]["interval_s"] = max(1.0, float(resolved.get("update_interval_s", 5.0)))
+        out[mode]["batch_size"] = max(1, int(resolved.get("update_batch_size", 1)))
+        out[mode]["parallelism"] = max(1, int(resolved.get("max_parallelism", 1)))
+        out[mode]["use_usage_score"] = bool(resolved.get("use_usage_score", True))
+        out[mode]["usage_weight"] = max(0.0, float(resolved.get("usage_weight", 1.0)))
+        out[mode]["stale_boost"] = bool(resolved.get("stale_boost", True))
+
     for mode in ("active", "archive"):
-        mode_data = raw.get(mode, {})
-        if not isinstance(mode_data, dict):
-            continue
-        if "enabled" in mode_data:
-            out[mode]["enabled"] = bool(mode_data.get("enabled"))
+        mode_raw = raw.get(mode, {})
+        mode_data = dict(out[mode])
+        if isinstance(mode_raw, dict):
+            mode_data.update(mode_raw)
+        _apply_profile(mode, mode_data)
+        if isinstance(mode_raw, dict) and "enabled" in mode_raw:
+            out[mode]["enabled"] = bool(mode_raw.get("enabled"))
         try:
             out[mode]["interval_s"] = max(
                 1.0,
-                float(mode_data.get("interval_s", out[mode]["interval_s"])),
+                float(
+                    mode_raw.get("interval_s", out[mode].get("interval_s", 5.0))
+                    if isinstance(mode_raw, dict)
+                    else out[mode].get("interval_s", 5.0)
+                ),
             )
         except (TypeError, ValueError):
             pass
         try:
             out[mode]["batch_size"] = max(
                 1,
-                int(mode_data.get("batch_size", out[mode]["batch_size"])),
+                int(
+                    mode_raw.get("batch_size", out[mode].get("batch_size", 1))
+                    if isinstance(mode_raw, dict)
+                    else out[mode].get("batch_size", 1)
+                ),
             )
         except (TypeError, ValueError):
             pass
+        try:
+            out[mode]["stale_interval_s"] = max(
+                0.05,
+                float(
+                    mode_raw.get(
+                        "stale_interval_s",
+                        out[mode].get("stale_interval_s", out[mode]["interval_s"]),
+                    )
+                    if isinstance(mode_raw, dict)
+                    else out[mode].get("stale_interval_s", out[mode]["interval_s"])
+                ),
+            )
+        except (TypeError, ValueError):
+            pass
+        try:
+            out[mode]["stale_batch_size"] = max(
+                1,
+                int(
+                    mode_raw.get(
+                        "stale_batch_size",
+                        out[mode].get("stale_batch_size", out[mode]["batch_size"]),
+                    )
+                    if isinstance(mode_raw, dict)
+                    else out[mode].get("stale_batch_size", out[mode]["batch_size"])
+                ),
+            )
+        except (TypeError, ValueError):
+            pass
+        try:
+            out[mode]["stale_parallelism"] = max(
+                1,
+                int(
+                    mode_raw.get(
+                        "stale_parallelism",
+                        out[mode].get("stale_parallelism", out[mode].get("parallelism", 1)),
+                    )
+                    if isinstance(mode_raw, dict)
+                    else out[mode].get("stale_parallelism", out[mode].get("parallelism", 1))
+                ),
+            )
+        except (TypeError, ValueError):
+            pass
+        try:
+            out[mode]["parallelism"] = max(
+                1,
+                int(
+                    mode_raw.get("parallelism", out[mode].get("parallelism", 1))
+                    if isinstance(mode_raw, dict)
+                    else out[mode].get("parallelism", 1)
+                ),
+            )
+        except (TypeError, ValueError):
+            pass
+        if isinstance(mode_raw, dict) and "use_usage_score" in mode_raw:
+            out[mode]["use_usage_score"] = bool(mode_raw.get("use_usage_score"))
+        try:
+            out[mode]["usage_weight"] = max(
+                0.0,
+                float(
+                    mode_raw.get("usage_weight", out[mode].get("usage_weight", 1.0))
+                    if isinstance(mode_raw, dict)
+                    else out[mode].get("usage_weight", 1.0)
+                ),
+            )
+        except (TypeError, ValueError):
+            pass
+        if isinstance(mode_raw, dict) and "stale_boost" in mode_raw:
+            out[mode]["stale_boost"] = bool(mode_raw.get("stale_boost"))
     return out
 
 

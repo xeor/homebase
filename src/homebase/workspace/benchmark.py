@@ -603,6 +603,8 @@ def _benchmark_git_context(cwd: Path) -> dict[str, object]:
             ["git", "rev-parse", "--is-inside-work-tree"],
             cwd=cwd,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             capture_output=True,
             check=False,
         )
@@ -613,6 +615,8 @@ def _benchmark_git_context(cwd: Path) -> dict[str, object]:
             ["git", "rev-parse", "HEAD"],
             cwd=cwd,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             capture_output=True,
             check=False,
         )
@@ -622,6 +626,8 @@ def _benchmark_git_context(cwd: Path) -> dict[str, object]:
             ["git", "rev-parse", "--abbrev-ref", "HEAD"],
             cwd=cwd,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             capture_output=True,
             check=False,
         )
@@ -631,6 +637,8 @@ def _benchmark_git_context(cwd: Path) -> dict[str, object]:
             ["git", "status", "--porcelain"],
             cwd=cwd,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             capture_output=True,
             check=False,
         )
@@ -1200,5 +1208,4 @@ def cmd_test(
     if failures > 0 or notes:
         return 1
     return 0
-
 

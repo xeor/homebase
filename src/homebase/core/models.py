@@ -24,6 +24,18 @@ class PropertyDef:
     path_exists: tuple[str, ...] = ()
     queries: tuple[dict[str, object], ...] = ()
     cache_ttl_s: float = 15.0
+    cache_profile: str = ""
+    cache_profiles_by_view: dict[str, dict[str, object]] | None = None
+
+    def cache_ttl_for_view(self, view: str) -> float:
+        if isinstance(self.cache_profiles_by_view, dict):
+            profile = self.cache_profiles_by_view.get(view, {})
+            if isinstance(profile, dict):
+                try:
+                    return max(1.0, float(profile.get("cache_ttl_s", self.cache_ttl_s)))
+                except (TypeError, ValueError):
+                    return max(1.0, float(self.cache_ttl_s))
+        return max(1.0, float(self.cache_ttl_s))
 
     def matches(self, root: Path) -> bool:
         if self.matcher is not None:

@@ -165,7 +165,15 @@ def preview_entries(path: Path, *, limit: int = 8) -> list[str]:
 
 def run_cmd(cwd: Path, *cmd: str) -> tuple[str, str | None]:
     try:
-        process = subprocess.run(list(cmd), cwd=cwd, text=True, capture_output=True, check=False)
+        process = subprocess.run(
+            list(cmd),
+            cwd=cwd,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            capture_output=True,
+            check=False,
+        )
     except (subprocess.SubprocessError, OSError, ValueError) as exc:
         return "", str(exc)
     out = (process.stdout or "").strip()

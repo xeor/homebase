@@ -26,6 +26,8 @@ def load_profile_window(
         ["tmuxp", "load", "-a", str(profile)],
         check=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         capture_output=True,
     )
     created = sorted(list_window_ids() - before)
@@ -176,6 +178,8 @@ def tmux_open_new_tab(
             "#{window_id}",
         ],
         text=True,
+        encoding="utf-8",
+        errors="replace",
         capture_output=True,
         check=False,
     )

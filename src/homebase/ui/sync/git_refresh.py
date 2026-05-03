@@ -6,8 +6,11 @@ import time
 from pathlib import Path
 from typing import Any
 
+from textual.css.query import NoMatches
+
 from ...core import utils as core_utils
 from ...core.models import ProjectRow
+from ...core.utils import WIDGET_API_ERRORS
 from ...workspace.projects import git_info
 
 
@@ -20,13 +23,18 @@ def maybe_refresh_visible_git(app: Any) -> None:
         return
     if app.cache_worker_running:
         return
-    if time.time() - app.git_refresh_last_ts < 0.5:
+    now = time.time()
+    if now < float(app.git_refresh_next_due_at):
+        return
+    if now - app.git_refresh_last_ts < app._git_refresh_min_interval_s():
         return
 
     rows = app._current_rows()
     if not rows:
         return
 
+    refresh_batch_size = app._git_refresh_batch_size()
+    row_scan_limit = max(refresh_batch_size * 4, refresh_batch_size)
     candidates: list[Path] = []
     selected = app._selected_row()
     if (
@@ -36,13 +44,13 @@ def maybe_refresh_visible_git(app: Any) -> None:
     ):
         candidates.append(selected.path)
 
-    for row in rows[:36]:
+    for row in rows[:row_scan_limit]:
         if row.branch in {"-", "?"}:
             continue
         if row.dirty not in {"~", "?"}:
             continue
         candidates.append(row.path)
-        if len(candidates) >= 8:
+        if len(candidates) >= refresh_batch_size:
             break
 
     if not candidates:
@@ -77,8 +85,12 @@ def start_git_refresh(app: Any, paths: list[Path], reason: str) -> None:
     app.git_refresh_paths = set(specs)
     app.git_refresh_reason = reason
     app.git_refresh_last_ts = time.time()
-    app._refresh_table()
-    app._refresh_side()
+    app.git_refresh_next_due_at = app.git_refresh_last_ts + app._git_refresh_interval_s()
+    try:
+        app._refresh_table()
+        app._refresh_side()
+    except (*WIDGET_API_ERRORS, NoMatches):
+        pass
 
     def worker() -> None:
         updated: list[tuple[Path, str, str, int]] = []
@@ -100,6 +112,7 @@ def on_git_refresh_done(app: Any, updated: list[tuple[Path, str, str, int]]) -> 
     app.git_refresh_paths = set()
     app.git_refresh_reason = ""
     app.git_refresh_last_ts = time.time()
+    app.git_refresh_next_due_at = app.git_refresh_last_ts + app._git_refresh_interval_s()
     now_ts = int(time.time())
     touched: list[ProjectRow] = []
     for path, branch, dirty, git_ts in updated:
@@ -121,5 +134,8 @@ def on_git_refresh_done(app: Any, updated: list[tuple[Path, str, str, int]]) -> 
         touched.append(row)
     if touched:
         app._touch_rows_cache(touched)
-    app._refresh_table()
-    app._refresh_side()
+    try:
+        app._refresh_table()
+        app._refresh_side()
+    except (*WIDGET_API_ERRORS, NoMatches):
+        pass
