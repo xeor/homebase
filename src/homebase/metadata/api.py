@@ -29,6 +29,10 @@ from . import property as property_utils
 from . import store as metadata_store
 from . import utils as metadata_utils
 
+_RUNTIME_PROPERTY_DEFS_BASE: Path | None = None
+_RUNTIME_PROPERTY_DEFS_MTIME_NS: int = -1
+_RUNTIME_PROPERTY_DEFS_CACHE: list[PropertyDef] = []
+
 
 def _is_packed_archive_path(path: Path) -> bool:
     return core_utils.is_packed_archive_path(path, PACKED_ARCHIVE_SUFFIX)
@@ -228,10 +232,24 @@ def normalize_property_keys(keys: list[str]) -> list[str]:
 
 
 def _runtime_property_defs() -> list[PropertyDef]:
+    global _RUNTIME_PROPERTY_DEFS_BASE, _RUNTIME_PROPERTY_DEFS_MTIME_NS, _RUNTIME_PROPERTY_DEFS_CACHE
     base = os.environ.get(ENV_BASE_DIR, "").strip()
     if not base:
         return list(PROPERTY_DEFS)
-    return load_property_defs(Path(base))
+    base_path = Path(base)
+    base_res = base_path.resolve()
+    conf = base_path / ".base-conf.yaml"
+    try:
+        mtime_ns = int(conf.stat().st_mtime_ns) if conf.is_file() else -1
+    except OSError:
+        mtime_ns = -1
+    if _RUNTIME_PROPERTY_DEFS_BASE == base_res and _RUNTIME_PROPERTY_DEFS_MTIME_NS == mtime_ns:
+        return list(_RUNTIME_PROPERTY_DEFS_CACHE)
+    loaded = load_property_defs(base_path)
+    _RUNTIME_PROPERTY_DEFS_BASE = base_res
+    _RUNTIME_PROPERTY_DEFS_MTIME_NS = mtime_ns
+    _RUNTIME_PROPERTY_DEFS_CACHE = list(loaded)
+    return list(loaded)
 
 
 def _property_template_context(path: Path, *, archived: bool) -> dict[str, str]:

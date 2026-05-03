@@ -1148,7 +1148,7 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
                     return rows, idx
         return None
 
-    def _upsert_row_local(self, row: ProjectRow) -> None:
+    def _upsert_row_local(self, row: ProjectRow, *, invalidate_cache: bool = True) -> None:
         self._apply_dynamic_properties_to_row(row)
         now_ts = int(time.time())
         if row.last_cached_ts <= 0:
@@ -1161,12 +1161,14 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
                 row.stale = False
                 row.cache_age_s = 0
                 target_rows[idx] = row
-                self._invalidate_current_rows_cache()
+                if invalidate_cache:
+                    self._invalidate_current_rows_cache()
                 return
         row.stale = False
         row.cache_age_s = 0
         target_rows.append(row)
-        self._invalidate_current_rows_cache()
+        if invalidate_cache:
+            self._invalidate_current_rows_cache()
 
     def _remove_paths_local(self, paths: list[Path]) -> None:
         remove = {p.resolve() for p in paths}

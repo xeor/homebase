@@ -195,9 +195,10 @@ def on_reconcile_rows_done(
     app.reconcile_worker_started_ts = 0.0
     if refreshed_rows:
         for row in refreshed_rows:
-            app._upsert_row_local(row)
+            app._upsert_row_local(row, invalidate_cache=False)
             kind = mode_archive if row.archived else mode_active
             app._record_reconcile_recent(kind, f"{row.name} ({reason})")
+        app._invalidate_current_rows_cache()
         app._touch_rows_cache(refreshed_rows)
     if removed_paths:
         app._remove_paths_local(removed_paths)

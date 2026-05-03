@@ -63,6 +63,7 @@ def refresh_table(
     is_active_view = app.view_mode == "active"
     tags_width = max(40, int(table_width * (0.36 if is_active_view else 0.30)))
     restore_width = max(14, int(table_width * 0.16))
+    property_cell_cache: dict[tuple[str, ...], object] = {}
 
     def trunc_ellipsis(value: str, width: int) -> str:
         text = value.strip()
@@ -138,6 +139,14 @@ def refresh_table(
                 pass
             restore_short = trunc_ellipsis(str(restore_rel), restore_width)
 
+        prop_key = tuple(row.properties)
+        prop_cell = property_cell_cache.get(prop_key)
+        if prop_cell is None:
+            prop_cell = property_tokens_text(row.properties)
+            property_cell_cache[prop_key] = prop_cell
+        elif isinstance(prop_cell, Text):
+            prop_cell = prop_cell.copy()
+
         row_cells: dict[str, object] = {
             "mark": mark,
             "name": name_cell,
@@ -145,7 +154,7 @@ def refresh_table(
             "last_modified": row.last,
             "created": row.created,
             "last_opened": fmt_ymd(row.opened_ts) if row.opened_ts > 0 else "-",
-            "properties": property_tokens_text(row.properties),
+            "properties": prop_cell,
             "tags": Text(trunc_ellipsis(",".join(row.tags), tags_width)),
             "description": Text(
                 trunc_ellipsis(str(row.description), max(12, int(table_width * 0.22)))

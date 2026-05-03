@@ -214,30 +214,10 @@ RECONCILE_CONFIG: dict[str, dict[str, object]] = {
     "active": {
         "enabled": True,
         "cache_profile": PROFILE_RECONCILE_ACTIVE,
-        "cache_profile_overrides": {
-            "active": {
-                "update_interval_s": 5.0,
-                "update_batch_size": 1,
-                "max_parallelism": 1,
-                "stale_boost": True,
-                "use_usage_score": True,
-                "usage_weight": 1.0,
-            }
-        },
     },
     "archive": {
         "enabled": True,
         "cache_profile": PROFILE_RECONCILE_ARCHIVE,
-        "cache_profile_overrides": {
-            "archive": {
-                "update_interval_s": 12.0,
-                "update_batch_size": 1,
-                "max_parallelism": 1,
-                "stale_boost": True,
-                "use_usage_score": True,
-                "usage_weight": 1.0,
-            }
-        },
     },
 }
 
