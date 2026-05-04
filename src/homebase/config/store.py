@@ -9,6 +9,21 @@ _GLOBAL_CONFIG_BASE: Path | None = None
 _GLOBAL_CONFIG_DATA: dict[str, object] | None = None
 
 
+def clear_global_config_cache(base_dir: Path | None = None) -> None:
+    global _GLOBAL_CONFIG_BASE, _GLOBAL_CONFIG_DATA
+    if base_dir is None:
+        _GLOBAL_CONFIG_BASE = None
+        _GLOBAL_CONFIG_DATA = None
+        return
+    try:
+        base_res = base_dir.resolve()
+    except (OSError, RuntimeError, ValueError):
+        base_res = base_dir
+    if _GLOBAL_CONFIG_BASE == base_res:
+        _GLOBAL_CONFIG_BASE = None
+        _GLOBAL_CONFIG_DATA = None
+
+
 def load_global_config_dict(base_dir: Path) -> dict[str, object]:
     global _GLOBAL_CONFIG_BASE, _GLOBAL_CONFIG_DATA
 
@@ -18,6 +33,10 @@ def load_global_config_dict(base_dir: Path) -> dict[str, object]:
             return _GLOBAL_CONFIG_DATA
 
     config = base_dir / ".base-conf.yaml"
+    if not config.is_file():
+        legacy = base_dir / ".base-conf.yml"
+        if legacy.is_file():
+            config = legacy
     if not config.is_file():
         _GLOBAL_CONFIG_BASE = base_res
         _GLOBAL_CONFIG_DATA = {}

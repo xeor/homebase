@@ -145,6 +145,10 @@ def load_custom_actions(base_dir: Path) -> list[dict[str, str]]:
     return workspace_settings.load_custom_actions(load_global_config_dict(base_dir))
 
 
+def load_custom_hotkeys(base_dir: Path) -> list[dict[str, str]]:
+    return workspace_settings.load_custom_hotkeys(load_global_config_dict(base_dir))
+
+
 def load_open_mode_config(base_dir: Path) -> dict[str, str]:
     data = load_global_config_dict(base_dir)
     return open_mode_config.load_open_mode_config(

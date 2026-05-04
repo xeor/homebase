@@ -53,10 +53,15 @@ def refresh_side(app: Any, *, base_dir: Path, color_accent_hex: str, level_warn:
     readme_edit_btn = app.query_one("#side_readme_edit", Button)
     notes_create_btn = app.query_one("#side_notes_create", Button)
     notes_open_btn = app.query_one("#side_notes_open", Button)
+    global_reload_btn = app.query_one("#side_global_config_reload", Button)
+    global_edit_btn = app.query_one("#side_global_config_edit", Button)
+    global_info = app.query_one("#side_global_info", Static)
     readme_create_btn.display = False
     readme_edit_btn.display = False
     notes_create_btn.display = False
     notes_open_btn.display = False
+    global_reload_btn.display = False
+    global_edit_btn.display = False
     selected = app._selected_row()
     app._update_readme_tab_state()
     lines: list[str] = []
@@ -87,9 +92,13 @@ def refresh_side(app: Any, *, base_dir: Path, color_accent_hex: str, level_warn:
             else:
                 lines.append("[dim]no recent events[/]")
     elif app.side_main_tab == "settings":
-        if app.side_settings_tab in {"table", "table_config", "open"}:
+        if app.side_settings_tab in {"table", "table_config", "open", "global"}:
             app._refresh_settings_table()
             lines.append(f"[dim]{app.side_settings_tab} settings active[/]")
+            if app.side_settings_tab == "global":
+                global_info.update(app._global_config_status_text())
+                global_reload_btn.display = True
+                global_edit_btn.display = True
         else:
             lines.append("[dim]no settings view[/]")
     elif not selected:
@@ -302,7 +311,15 @@ def on_button_pressed(app: Any, event: Any) -> None:
         "side_readme_edit",
         "side_notes_create",
         "side_notes_open",
+        "side_global_config_reload",
+        "side_global_config_edit",
     }:
+        return
+    if button_id == "side_global_config_reload":
+        app._reload_global_config()
+        return
+    if button_id == "side_global_config_edit":
+        app._edit_global_config_and_reload()
         return
     if button_id in {"side_notes_create", "side_notes_open"}:
         action_id = "notes_create" if button_id == "side_notes_create" else "notes_open"

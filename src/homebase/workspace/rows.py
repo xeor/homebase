@@ -4,6 +4,7 @@ from pathlib import Path
 
 from ..archive import ops as archive_ops
 from ..cache import queue as queue_utils
+from ..cache.api import cache_load_opened_map
 from ..core import utils as core_utils
 from ..core.constants import (
     ARCHIVE_DIR_NAME,
@@ -88,18 +89,21 @@ def collect_workspace_rows(
     include_nested: bool | None = None,
     size_cache: dict[Path, tuple[int, int]] | None = None,
 ) -> tuple[list[ProjectRow], list[ProjectRow]]:
+    opened_ts_map = cache_load_opened_map(base_dir)
     nested = _resolve_include_nested(base_dir, include_nested)
     active = collect_projects(
         base_dir,
         include_git_dirty=include_git_dirty,
         include_nested=nested,
         size_cache=size_cache,
+        opened_ts_map=opened_ts_map,
     )
     archived = collect_archived(
         base_dir,
         include_git_dirty=include_git_dirty,
         include_nested=nested,
         size_cache=size_cache,
+        opened_ts_map=opened_ts_map,
     )
     return active, archived
 
@@ -109,7 +113,20 @@ def collect_projects(
     include_git_dirty: bool = True,
     include_nested: bool | None = None,
     size_cache: dict[Path, tuple[int, int]] | None = None,
+    opened_ts_map: dict[Path, int] | None = None,
 ) -> list[ProjectRow]:
+    opened_map = opened_ts_map if opened_ts_map is not None else cache_load_opened_map(base_dir)
+
+    def _project_row_with_opened(path: Path, **kwargs: object) -> ProjectRow:
+        opened_ts = int(opened_map.get(path, 0))
+        if opened_ts <= 0:
+            try:
+                opened_ts = int(opened_map.get(path.resolve(), 0))
+            except (OSError, RuntimeError, ValueError):
+                opened_ts = 0
+        opened_ts = max(0, opened_ts)
+        return project_row(path, opened_ts_override=opened_ts, **kwargs)
+
     rows = discovery_utils.collect_projects(
         base_dir,
         include_git_dirty=include_git_dirty,
@@ -120,7 +137,7 @@ def collect_projects(
         resolve_include_nested_fn=_resolve_include_nested,
         skip_active_walk_path=_discovery_should_skip_active_walk_path,
         prune_walk_dirnames=_discovery_prune_walk_dirnames,
-        project_row=project_row,
+        project_row=_project_row_with_opened,
     )
     return [row for row in rows if isinstance(row, ProjectRow)]
 
@@ -148,7 +165,20 @@ def collect_archived(
     include_git_dirty: bool = True,
     include_nested: bool | None = None,
     size_cache: dict[Path, tuple[int, int]] | None = None,
+    opened_ts_map: dict[Path, int] | None = None,
 ) -> list[ProjectRow]:
+    opened_map = opened_ts_map if opened_ts_map is not None else cache_load_opened_map(base_dir)
+
+    def _project_row_with_opened(path: Path, **kwargs: object) -> ProjectRow:
+        opened_ts = int(opened_map.get(path, 0))
+        if opened_ts <= 0:
+            try:
+                opened_ts = int(opened_map.get(path.resolve(), 0))
+            except (OSError, RuntimeError, ValueError):
+                opened_ts = 0
+        opened_ts = max(0, opened_ts)
+        return project_row(path, opened_ts_override=opened_ts, **kwargs)
+
     rows = discovery_utils.collect_archived(
         base_dir,
         include_git_dirty=include_git_dirty,
@@ -169,7 +199,7 @@ def collect_archived(
             ),
         ),
         archived_restore_target=archived_restore_target,
-        project_row=project_row,
+        project_row=_project_row_with_opened,
         classify_name=classify_name,
     )
     return [row for row in rows if isinstance(row, ProjectRow)]

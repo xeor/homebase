@@ -18,7 +18,7 @@ features.
   all wrappers that bind constants. After `UIContext` is wired,
   callers can call `core.utils.X(…, ARCHIVE_TZ)` directly.
 
-- [ ] **Further split `ui/app.py` (~2880 lines).** Five remaining
+- [x] **Further split `ui/app.py` (~2880 lines).** Five remaining
   long methods worth extracting to module functions:
   - [x] `_on_confirm_bulk` (168 lines) → `ui/actions/bulk_dispatch.py`
   - [x] `_start_archive_action_worker` (128 lines) →
@@ -79,22 +79,34 @@ features.
 - [x] **Editor-running property** — `ACT` and `EDT` are shown in
   orange; editor detection commands are configurable in global config.
 
-- [ ] **Hotkeys for custom actions** — e.g. an F-key bound to start
+- [x] **Hotkeys for custom actions** — e.g. an F-key bound to start
   vscode for the focused project.
 
-- [ ] **Dedupe `opened_at` and `opened_ts`** in `.base.yml`. Pick one.
+- [x] **Dedupe `opened_at` and `opened_ts`** in `.base.yml`. Pick one.
 
-- [ ] **Standardize on `.yaml`** suffix; migrate from `.yml` (the
-  `.base.yml` marker, the optional `.base.yaml` legacy form, and the
-  global config file).
+- [x] **Standardize on `.yaml`** suffix; migrate from `.yml` (the
+  legacy `.base.yml` marker and legacy `.base-conf.yml` global config
+  file).
+  - Manual migration command (macOS-safe, supports spaces):
+    ```sh
+find . -type f \( -name '.base.yml' -o -name '.base-conf.yml' \) -print0 | while IFS= read -r -d '' f; do
+  case "$f" in
+    */.base.yml) new="${f%/.base.yml}/.base.yaml" ;;
+    */.base-conf.yml) new="${f%/.base-conf.yml}/.base-conf.yaml" ;;
+  esac
+  [ -e "$new" ] && { printf 'skip (exists): %s -> %s\n' "$f" "$new"; continue; }
+  echo $f to $new
+  # mv "$f" "$new"
+done
+    ```
 
-- [ ] **Stable `ctrl+p` ordering**: `item`, `selected`, `global` — no
+- [x] **Stable `ctrl+p` ordering**: `item`, `selected`, `global` — no
   special logic, just naming.
 
-- [ ] **Hide the `selected` group** in the `ctrl+p` menu when no
+- [x] **Hide the `selected` group** in the `ctrl+p` menu when no
   items are selected.
 
-- [ ] **"Edit global config"** entry in the (global setting) menu —
+- [x] **"Edit global config"** entry in the (global setting) menu —
   opens the file in `$EDITOR`, then `b` reloads when the editor
   exits.
 

@@ -14,6 +14,17 @@ PROJECT_CACHE_INSERT_SQL = (
 )
 
 
+def _path_candidates(path: Path) -> tuple[str, ...]:
+    raw = str(path)
+    try:
+        resolved = str(path.resolve())
+    except (OSError, RuntimeError, ValueError):
+        resolved = raw
+    if resolved == raw:
+        return (raw,)
+    return (raw, resolved)
+
+
 def cache_db_path(base_dir: Path) -> Path:
     return base_dir / ".base-cache.sqlite3"
 
@@ -79,10 +90,104 @@ def cache_init(conn: sqlite3.Connection, *, cache_schema_version: int) -> None:
     conn.execute("CREATE INDEX IF NOT EXISTS idx_project_cache_last_ts ON project_cache(last_ts)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_project_cache_wip ON project_cache(wip)")
     conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS project_opened (
+            path TEXT PRIMARY KEY,
+            opened_ts INTEGER NOT NULL
+        )
+        """
+    )
+    conn.execute(
         "INSERT OR REPLACE INTO cache_meta(key, value) VALUES('schema_version', ?)",
         (str(cache_schema_version),),
     )
     conn.commit()
+
+
+def cache_load_opened_map(
+    base_dir: Path,
+    *,
+    cache_schema_version: int,
+) -> dict[Path, int]:
+    db = cache_db_path(base_dir)
+    if not db.is_file():
+        return {}
+    try:
+        conn = cache_connect(base_dir)
+        cache_init(conn, cache_schema_version=cache_schema_version)
+        rows = conn.execute("SELECT path, opened_ts FROM project_opened").fetchall()
+        conn.close()
+    except sqlite3.Error:
+        return {}
+    out: dict[Path, int] = {}
+    for rec in rows:
+        try:
+            ts = max(0, int(rec["opened_ts"]))
+            out[Path(str(rec["path"]))] = ts
+        except (TypeError, ValueError, KeyError):
+            continue
+    return out
+
+
+def cache_set_opened_ts(
+    base_dir: Path,
+    *,
+    cache_schema_version: int,
+    path: Path,
+    opened_ts: int,
+) -> None:
+    conn = cache_connect(base_dir)
+    cache_init(conn, cache_schema_version=cache_schema_version)
+    key = _path_candidates(path)[-1]
+    conn.execute(
+        "INSERT OR REPLACE INTO project_opened(path, opened_ts) VALUES(?, ?)",
+        (key, max(0, int(opened_ts))),
+    )
+    conn.commit()
+    conn.close()
+
+
+def cache_move_opened_ts(
+    base_dir: Path,
+    *,
+    cache_schema_version: int,
+    src: Path,
+    dst: Path,
+) -> None:
+    conn = cache_connect(base_dir)
+    cache_init(conn, cache_schema_version=cache_schema_version)
+    row = None
+    for src_key in _path_candidates(src):
+        row = conn.execute(
+            "SELECT opened_ts FROM project_opened WHERE path = ?",
+            (src_key,),
+        ).fetchone()
+        if row is not None:
+            break
+    if row is not None:
+        dst_key = _path_candidates(dst)[-1]
+        conn.execute(
+            "INSERT OR REPLACE INTO project_opened(path, opened_ts) VALUES(?, ?)",
+            (dst_key, max(0, int(row["opened_ts"]))),
+        )
+        for src_key in _path_candidates(src):
+            conn.execute("DELETE FROM project_opened WHERE path = ?", (src_key,))
+    conn.commit()
+    conn.close()
+
+
+def cache_delete_opened_ts(
+    base_dir: Path,
+    *,
+    cache_schema_version: int,
+    path: Path,
+) -> None:
+    conn = cache_connect(base_dir)
+    cache_init(conn, cache_schema_version=cache_schema_version)
+    for key in _path_candidates(path):
+        conn.execute("DELETE FROM project_opened WHERE path = ?", (key,))
+    conn.commit()
+    conn.close()
 
 
 def cache_load_rows(

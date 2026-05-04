@@ -313,6 +313,7 @@ def project_row(
     prev_size_bytes: int | None = None,
     prev_size_refresh_count: int = 0,
     force_size_refresh: bool = False,
+    opened_ts_override: int | None = None,
 ) -> ProjectRow:
     st = path.stat()
     mtime_ts = int(st.st_mtime)
@@ -323,7 +324,8 @@ def project_row(
         branch, dirty, git_ts = "-", "", 0
     else:
         branch, dirty, git_ts = git_info(path, include_dirty=include_git_dirty)
-    tags, description, wip, opened_ts = load_base_meta(path)
+    tags, description, wip = load_base_meta(path)
+    opened_ts = max(0, int(opened_ts_override or 0))
     properties = detect_properties(path, archived=archived)
     properties = normalize_property_keys(properties)
     last_ts = git_ts if git_ts > 0 else mtime_ts

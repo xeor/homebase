@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import shutil
 import subprocess
-import time
-from datetime import datetime
 from pathlib import Path
 from typing import Callable
 
@@ -90,25 +88,6 @@ def append_base_log(
     log_val["events"] = events[-500:]
     data["log"] = log_val
     save_base_data_fn(path, data)
-
-
-def save_base_opened(
-    path: Path,
-    opened_ts: int | None,
-    *,
-    ensure_base_marker_fn: Callable[[Path], None],
-    load_base_data_fn: Callable[[Path], dict[str, object]],
-    save_base_data_fn: Callable[[Path, dict[str, object]], None],
-) -> int:
-    ensure_base_marker_fn(path)
-    ts = int(opened_ts if opened_ts is not None else time.time())
-    if ts < 0:
-        ts = int(time.time())
-    data = load_base_data_fn(path)
-    data["opened_ts"] = ts
-    data["opened_at"] = datetime.fromtimestamp(ts).isoformat(timespec="seconds")
-    save_base_data_fn(path, data)
-    return ts
 
 
 def repair_base_metadata(

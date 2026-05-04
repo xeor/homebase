@@ -32,8 +32,8 @@ def test_build_project_info_text_contains_name_and_description(tmp_path: Path) -
     row = Row(name="proj", path=tmp_path / "proj", description="desc")
     text = project_info.build_project_info_text(
         row,
-        base_marker_file=".base.yml",
-        legacy_base_marker_file=".base.yaml",
+        base_marker_file=".base.yaml",
+        legacy_base_marker_file=".base.yml",
         color_age_unit_hex="#7CFC7C",
         wip_hotkey=None,
         include_meta_checks=False,

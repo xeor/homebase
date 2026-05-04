@@ -70,9 +70,9 @@ def build_bulk_confirm_payload(
         lines.append("[cyan]what to look for[/]:")
         lines.append("  - YAML must parse and root must be key:value mapping")
         lines.append("  - unknown top-level keys should be removed/renamed")
-        lines.append("  - expected keys (optional): tags, description, wip, opened_ts, log")
+        lines.append("  - expected keys (optional): tags, description, wip, log")
     elif action == "rename_meta_ext":
-        lines.append("[cyan]effect[/]: rename legacy .base.yaml file to .base.yml")
+        lines.append("[cyan]effect[/]: rename legacy .base.yml file to .base.yaml")
         lines.append("[cyan]kept[/]: metadata content and project files are unchanged")
 
     lines.append("")

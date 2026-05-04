@@ -53,6 +53,14 @@ def on_pick_actions(app: Any, value: str | None) -> None:
         app._refresh_side()
         return True
 
+    def _handle_edit_global_config() -> bool:
+        app._edit_global_config_and_reload()
+        return True
+
+    def _handle_reload_global_config() -> bool:
+        app._reload_global_config()
+        return True
+
     def _handle_reconcile_all_cache() -> bool:
         all_paths = [r.path for r in (app.active_rows + app.archived_rows)]
         if not all_paths:
@@ -112,6 +120,8 @@ def on_pick_actions(app: Any, value: str | None) -> None:
         "suffix_set": _handle_suffix_set,
         "refresh_cache": _handle_refresh_cache,
         "full_reconcile": _handle_full_reconcile,
+        "edit_global_config": _handle_edit_global_config,
+        "reload_global_config": _handle_reload_global_config,
         "reconcile_all_cache": _handle_reconcile_all_cache,
         "reconcile_selection_cache": _handle_reconcile_selection_cache,
         "rename_item": _handle_rename_item,

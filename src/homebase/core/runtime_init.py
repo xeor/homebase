@@ -15,6 +15,7 @@ class RuntimeConfig:
     suffixes: list[str]
     file_view_exclude_patterns: list[str]
     custom_actions: list[Any]
+    custom_hotkeys: list[Any]
     open_mode_config: dict[str, str]
     notes_config: dict[str, str]
     reconcile_config: dict[str, dict[str, object]]
@@ -33,6 +34,7 @@ def load_runtime_config(
     load_suffixes: Callable[[Path], list[str]],
     load_file_view_exclude_patterns: Callable[[Path], list[str]],
     load_custom_actions: Callable[[Path], list[Any]],
+    load_custom_hotkeys: Callable[[Path], list[Any]],
     load_open_mode_config: Callable[[Path], dict[str, str]],
     load_notes_config: Callable[[Path], dict[str, str]],
     load_reconcile_config: Callable[[Path], dict[str, dict[str, object]]],
@@ -58,6 +60,7 @@ def load_runtime_config(
         suffixes=load_suffixes(base_dir),
         file_view_exclude_patterns=load_file_view_exclude_patterns(base_dir),
         custom_actions=load_custom_actions(base_dir),
+        custom_hotkeys=load_custom_hotkeys(base_dir),
         open_mode_config=load_open_mode_config(base_dir),
         notes_config=load_notes_config(base_dir),
         reconcile_config=load_reconcile_config(base_dir),
@@ -65,6 +68,36 @@ def load_runtime_config(
         archive_tz_name=archive_tz_name,
         archive_tz=archive_tz,
     )
+
+
+def validate_custom_hotkeys(
+    custom_hotkeys: list[dict[str, object]],
+    *,
+    reserved_hotkeys: set[str],
+) -> str | None:
+    seen: dict[str, str] = {}
+    reserved = {str(key).strip().lower() for key in reserved_hotkeys if str(key).strip()}
+
+    for idx, binding in enumerate(custom_hotkeys, start=1):
+        hotkey = str(binding.get("hotkey", "")).strip().lower()
+        if not hotkey:
+            continue
+        binding_id = str(binding.get("id", "")).strip() or f"custom_hotkey_{idx}"
+
+        if hotkey in reserved:
+            return (
+                "custom action hotkey conflict: "
+                f"{hotkey!r} for custom hotkey {binding_id!r} is already in use"
+            )
+
+        previous = seen.get(hotkey)
+        if previous is not None:
+            return (
+                "custom action hotkey conflict: "
+                f"{hotkey!r} is used by both {previous!r} and {binding_id!r}"
+            )
+        seen[hotkey] = binding_id
+    return None
 
 
 def resolve_initial_filter_expression(

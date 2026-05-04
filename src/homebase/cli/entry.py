@@ -24,7 +24,11 @@ from ..commands.setup import (
 )
 from ..core import runtime_init
 from ..core import utils as core_utils
-from ..core.constants import DEFAULT_ARCHIVE_TZ_NAME, ENV_BASE_DIR
+from ..core.constants import (
+    CUSTOM_ACTION_RESERVED_HOTKEYS,
+    DEFAULT_ARCHIVE_TZ_NAME,
+    ENV_BASE_DIR,
+)
 from ..ui import run_textual_ui as _run_textual_ui
 from ..ui.context import UIContext
 from ..workspace.projects import run_post_commands
@@ -87,6 +91,7 @@ def main(argv: list[str]) -> int:
         load_archive_timezone_name,
         load_cache_profile_table,
         load_custom_actions,
+        load_custom_hotkeys,
         load_file_view_exclude_patterns,
         load_notes_config,
         load_open_mode_config,
@@ -122,12 +127,22 @@ def main(argv: list[str]) -> int:
         load_suffixes=load_suffixes,
         load_file_view_exclude_patterns=load_file_view_exclude_patterns,
         load_custom_actions=load_custom_actions,
+        load_custom_hotkeys=load_custom_hotkeys,
         load_open_mode_config=load_open_mode_config,
         load_notes_config=load_notes_config,
         load_reconcile_config=load_reconcile_config,
         load_cache_profile_table=load_cache_profile_table,
         load_archive_timezone_name=load_archive_timezone_name,
     )
+    custom_action_hotkey_err = runtime_init.validate_custom_hotkeys(
+        list(runtime_cfg.custom_hotkeys),
+        reserved_hotkeys=CUSTOM_ACTION_RESERVED_HOTKEYS
+        | {str(key).strip().lower() for key in runtime_cfg.wip_open_symbol_map},
+    )
+    if custom_action_hotkey_err is not None:
+        print(custom_action_hotkey_err, file=sys.stderr)
+        return 1
+
     ui_ctx = UIContext(
         base_dir=base_dir,
         archive_tz=runtime_cfg.archive_tz,
@@ -139,6 +154,7 @@ def main(argv: list[str]) -> int:
         suffixes=list(runtime_cfg.suffixes),
         file_view_exclude_patterns=list(runtime_cfg.file_view_exclude_patterns),
         custom_actions=list(runtime_cfg.custom_actions),
+        custom_hotkeys=list(runtime_cfg.custom_hotkeys),
         open_mode_config=dict(runtime_cfg.open_mode_config),
         notes_config=dict(runtime_cfg.notes_config),
         reconcile_config={

@@ -22,6 +22,7 @@ class UIContext:
     suffixes: list[str] = field(default_factory=list)
     file_view_exclude_patterns: list[str] = field(default_factory=list)
     custom_actions: list[dict[str, Any]] = field(default_factory=list)
+    custom_hotkeys: list[dict[str, str]] = field(default_factory=list)
     open_mode_config: dict[str, str] = field(default_factory=dict)
     notes_config: dict[str, str] = field(default_factory=dict)
     reconcile_config: dict[str, dict[str, object]] = field(default_factory=dict)
@@ -45,6 +46,7 @@ def build_ui_context(base_dir: Path) -> UIContext:
         suffixes=list(_const.SUFFIXES),
         file_view_exclude_patterns=list(_const.FILE_VIEW_EXCLUDE_PATTERNS),
         custom_actions=list(_const.CUSTOM_ACTIONS),
+        custom_hotkeys=list(_const.CUSTOM_HOTKEYS),
         open_mode_config=dict(_const.OPEN_MODE_CONFIG),
         notes_config=dict(_const.NOTES_CONFIG),
         reconcile_config={

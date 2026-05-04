@@ -121,6 +121,79 @@ Query types currently supported:
 - `tmux_editor_commands`
 - `sqlite_recent_paths`
 
+## Custom Action Hotkeys
+
+Custom actions are configured in `~/<base>/.base-conf.yaml` (same file
+as other global settings).
+
+Minimal shape:
+
+```yaml
+custom_actions:
+  - id: vscode
+    label: Open in VS Code
+    scope: item
+    command: code "{{ full_path }}"
+
+  - id: cursor
+    label: Open in Cursor
+    scope: item
+    command: cursor "{{ full_path }}"
+
+  - id: zed
+    label: Open in Zed
+    scope: item
+    command: zed "{{ full_path }}"
+
+  - id: reveal_finder
+    label: Reveal in Finder
+    scope: item
+    command: open -R "{{ full_path }}"
+
+  - id: open_iterm
+    label: Open iTerm here
+    scope: item
+    command: open -a iTerm "{{ full_path }}"
+
+custom_hotkeys:
+  - id: hk_vscode
+    hotkey: f5
+    target: action:custom:vscode
+  - id: hk_cursor
+    hotkey: f6
+    target: action:custom:cursor
+  - id: hk_reveal
+    hotkey: alt+f6
+    target: action:custom:reveal_finder
+  - id: hk_archive
+    hotkey: ctrl+f7
+    target: action:archive
+  - id: hk_tab_notes
+    hotkey: ctrl+f8
+    target: tab:selected/notes
+```
+
+- `id`: unique action id
+- `label`: shown in action picker
+- `scope`: `item` | `selection` | `global`
+- `command`: shell command template; context vars from custom actions
+  still apply (`{{ full_path }}`, `{{ rel_path }}`, ...)
+- `custom_hotkeys[].hotkey`: key name from Textual key syntax (for
+  example `f1`..`f12`, `ctrl+f5`, `alt+v`, `ç`, `†` on macOS option keys)
+- `custom_hotkeys[].target`: command-palette id to trigger. Supported:
+  `action:<action_id>` and `tab:<top_key>` / `tab:<top_key>/<child_key>`.
+  Example action ids: `action:archive`, `action:refresh_cache`,
+  `action:custom:<custom_action_id>`.
+
+Notes:
+
+- Hotkeys are matched case-insensitively.
+- Startup fails if two `custom_hotkeys` entries use the same hotkey.
+- Startup fails if a custom hotkey collides with an existing app
+  hotkey.
+- Hotkeys trigger when the main projects table has focus and no modal
+  is open.
+
 ## Package
 
 Build sdist + wheel:

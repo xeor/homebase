@@ -50,7 +50,7 @@ def _archive_now_iso() -> str:
     return core_utils.archive_now_iso(ARCHIVE_TZ)
 
 
-def load_base_meta(path: Path) -> tuple[list[str], str, bool, int]:
+def load_base_meta(path: Path) -> tuple[list[str], str, bool]:
     return metadata_utils.extract_base_meta_fields(load_base_data(path))
 
 
@@ -107,16 +107,6 @@ def base_meta_health(path: Path) -> tuple[str, str]:
         return LEVEL_ERROR, msg
     msg = "; ".join(msg for _level, _code, msg in issues)
     return "warning", msg
-
-
-def save_base_opened(path: Path, opened_ts: int | None = None) -> int:
-    return metadata_store.save_base_opened(
-        path,
-        opened_ts,
-        ensure_base_marker_fn=ensure_base_marker,
-        load_base_data_fn=load_base_data,
-        save_base_data_fn=save_base_data,
-    )
 
 
 def load_base_data(path: Path) -> dict[str, object]:

@@ -26,4 +26,5 @@ class AppEventsMixin:
             event,
             widget_projects="#projects",
             wip_open_symbol_map=self.ctx.wip_open_symbol_map,
+            custom_hotkey_targets=self._custom_hotkey_target_map(),
         )

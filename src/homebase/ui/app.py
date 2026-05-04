@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import random
+import re
 import sqlite3
 import subprocess
 import time
@@ -27,7 +28,9 @@ from textual.widgets import (
 from ..cache.api import (
     cache_load_reconcile_usage,
     cache_load_rows,
+    cache_move_opened_ts,
     cache_save_reconcile_usage,
+    cache_set_opened_ts,
 )
 from ..commands.archive import (
     _policy_reason_archived_dir,
@@ -117,7 +120,6 @@ from ..metadata.api import (
     open_meta_for_review,
     rename_legacy_base_yaml,
     save_base_description,
-    save_base_opened,
     save_base_tags,
     save_base_wip,
 )
@@ -255,6 +257,10 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
     #side_notes { height: 1fr; }
     #side_notes_create { width: 1fr; margin: 1 1 0 1; }
     #side_notes_open { width: 1fr; margin: 1 1 0 1; }
+    #side_global_panel { height: 1fr; display: none; }
+    #side_global_info { height: 1fr; }
+    #side_global_config_reload { width: 1fr; margin: 1 1 0 1; }
+    #side_global_config_edit { width: 1fr; margin: 1 1 0 1; }
     #wip_bar { height: 1; background: $surface-darken-1; color: $text; content-align: left middle; }
     #confirm_box { width: 70; height: 16; border: round $warning; background: $surface; padding: 1 2; }
     #new_project_box { width: 100%; height: 100%; border: round $accent; background: $surface; padding: 1 2; }
@@ -425,6 +431,7 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
         self.pending_desc_targets: list[Path] = []
         self.pending_rename_target: Path | None = None
         self.custom_actions = list(self.ctx.custom_actions)
+        self.custom_hotkeys = list(self.ctx.custom_hotkeys)
         self.pending_tag_updates: set[Path] = set()
         self.messages: list[tuple[str, str, str]] = []
         self._health_issue_seen: dict[Path, str] = {}
@@ -737,6 +744,22 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
                             compact=True,
                             flat=True,
                         )
+                    with Vertical(id="side_global_panel"):
+                        yield Static("", id="side_global_info")
+                        yield Button(
+                            "Reload global config",
+                            id="side_global_config_reload",
+                            variant="default",
+                            compact=True,
+                            flat=True,
+                        )
+                        yield Button(
+                            "Edit global config in $EDITOR",
+                            id="side_global_config_edit",
+                            variant="primary",
+                            compact=True,
+                            flat=True,
+                        )
                 yield Static("", id="side_settings_notes")
                 yield DataTable(id="side_settings_table", cursor_type="row")
         yield Static("", id="wip_bar")
@@ -769,6 +792,8 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
             self.query_one("#side_readme", ReadmeMarkdownViewer),
             self.query_one("#side_notes_panel", Vertical),
             self.query_one("#side_notes", ReadmeMarkdownViewer),
+            self.query_one("#side_global_panel", Vertical),
+            self.query_one("#side_global_info", Static),
             self.query_one("#side_settings_table", DataTable),
             self.query_one("#side_settings_notes", Static),
             self.query_one("#wip_bar", Static),
@@ -873,6 +898,7 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
         # Command palette includes tab navigation and currently valid actions.
 
         for top_key, top_label in SIDE_TOP_TABS:
+            command_id = f"tab:{top_key}"
             is_top_active = self.side_main_tab == top_key
             top_title = (
                 f"Tab: {top_label}"
@@ -881,11 +907,12 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
             )
             yield SystemCommand(
                 top_title,
-                f"Go to main tab: {top_label}",
+                f"Go to main tab: {top_label} (id={command_id})",
                 lambda top=top_key: self._jump_to_side_tab(top),
             )
 
             for child_key, child_label in SIDE_CHILD_TABS.get(top_key, []):
+                command_id = f"tab:{top_key}/{child_key}"
                 is_active = (
                     self.side_main_tab == top_key
                     and self._child_key_for_top(top_key) == child_key
@@ -897,19 +924,115 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
                 )
                 yield SystemCommand(
                     title,
-                    f"Go to tab: {top_label} / {child_label}",
+                    f"Go to tab: {top_label} / {child_label} (id={command_id})",
                     lambda top=top_key, child=child_key: self._jump_to_side_tab(
                         top, child
                     ),
                 )
 
+        custom_scope_by_id: dict[str, str] = {}
+        for act in self.custom_actions:
+            cid = str(act.get("id", "")).strip()
+            scope = str(act.get("scope", "item")).strip().lower()
+            if cid:
+                custom_scope_by_id[f"custom:{cid}"] = scope
+
+        item_actions = {
+            "readme_create",
+            "readme_edit",
+            "notes_create",
+            "notes_open",
+            "rename_item",
+            "review_meta",
+            "rename_meta_ext",
+        }
+        selected_actions = {
+            "tags_set",
+            "reconcile_selection_cache",
+            "suffix_set",
+            "archive",
+            "restore",
+            "pack",
+            "unpack",
+            "toggle_pack",
+            "delete",
+            "set_desc",
+        }
+        global_actions = {
+            "refresh_cache",
+            "full_reconcile",
+            "reconcile_all_cache",
+            "reload_global_config",
+            "edit_global_config",
+        }
+
+        def _scope_for_action(action_id: str) -> str:
+            if action_id in custom_scope_by_id:
+                scope = custom_scope_by_id[action_id]
+                if scope == "selection":
+                    return "selected"
+                if scope in {"item", "global"}:
+                    return scope
+            if action_id in item_actions:
+                return "item"
+            if action_id in selected_actions:
+                return "selected"
+            if action_id in global_actions:
+                return "global"
+            return "selected"
+
+        def _natural_key(text: str) -> tuple[object, ...]:
+            parts = re.split(r"(\d+)", text.lower())
+            out: list[object] = []
+            for part in parts:
+                if part.isdigit():
+                    out.append(int(part))
+                else:
+                    out.append(part)
+            return tuple(out)
+
+        grouped: dict[str, list[tuple[str, str]]] = {"item": [], "selected": [], "global": []}
         for action_id, label in self._valid_action_items():
-            plain = self._label_plain(label)
-            yield SystemCommand(
-                f"Action: {plain}",
-                self._action_help_text(action_id, label),
-                lambda aid=action_id: self._on_pick_actions(aid),
-            )
+            grouped[_scope_for_action(action_id)].append((action_id, label))
+
+        show_selected_scope = bool(self.multi_selected)
+
+        for scope in ("item", "selected", "global"):
+            if scope == "selected" and not show_selected_scope:
+                continue
+            for action_id, label in sorted(
+                grouped[scope],
+                key=lambda pair: _natural_key(self._label_plain(pair[1])),
+            ):
+                plain = self._label_plain(label)
+                if scope == "item":
+                    scope_prefix = "[#7DFF9B]Action > Item[/]"
+                elif scope == "selected":
+                    scope_prefix = "[#8ECFFF]Action > Selected[/]"
+                else:
+                    scope_prefix = "[#ffb347]Action > Global[/]"
+                yield SystemCommand(
+                    f"{scope_prefix}: {plain}",
+                    f"{self._action_help_text(action_id, label)} (id=action:{action_id})",
+                    lambda aid=action_id: self._on_pick_actions(aid),
+                )
+
+    def _dispatch_hotkey_target(self, target: str) -> None:
+        value = str(target or "").strip()
+        if not value:
+            return
+        if value.startswith("action:"):
+            self._on_pick_actions(value.split(":", 1)[1])
+            return
+        if value.startswith("tab:"):
+            payload = value.split(":", 1)[1]
+            if "/" in payload:
+                top_key, child_key = payload.split("/", 1)
+                self._jump_to_side_tab(top_key, child_key=child_key)
+                return
+            self._jump_to_side_tab(payload)
+            return
+        self._on_pick_actions(value)
 
     def _apply_side_tab_state_to_widgets(self) -> None:
         textual_ui_tabs_state.apply_side_tab_state_to_widgets(self)
@@ -1197,6 +1320,18 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
             rows=rows,
             removed=removed,
         )
+
+    def _set_opened_ts_local(self, path: Path, opened_ts: int) -> None:
+        try:
+            cache_set_opened_ts(self.base_dir, path, opened_ts)
+        except (OSError, sqlite3.Error, TypeError, ValueError):
+            return
+
+    def _move_opened_ts_local(self, src: Path, dst: Path) -> None:
+        try:
+            cache_move_opened_ts(self.base_dir, src, dst)
+        except (OSError, sqlite3.Error, TypeError, ValueError):
+            return
 
     def _reload_rows_from_cache(self) -> bool:
         return textual_ui_cache_state.reload_rows_from_cache(
@@ -1770,6 +1905,15 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
             base_dir=self.base_dir,
         )
 
+    def _edit_global_config_and_reload(self) -> None:
+        textual_ui_settings_panel.edit_global_config_and_reload(self, base_dir=self.base_dir)
+
+    def _reload_global_config(self) -> None:
+        textual_ui_settings_panel.reload_global_config(self, base_dir=self.base_dir)
+
+    def _global_config_status_text(self) -> str:
+        return textual_ui_settings_panel.global_config_status_text(self, base_dir=self.base_dir)
+
     def _cache_info_lines(self) -> list[str]:
         return textual_ui_side_panel.cache_info_lines(
             self,
@@ -1948,6 +2092,9 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
             color_accent_hex=COLOR_ACCENT_HEX,
         )
 
+    def _hotkey_target_label_map(self) -> dict[str, str]:
+        return textual_ui_action_items.hotkey_target_label_map(self)
+
     def _valid_action_items(self) -> list[tuple[str, str]]:
         return textual_ui_action_items.valid_action_items(
             self,
@@ -1967,6 +2114,9 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
 
     def _custom_action_by_id(self, cid: str) -> dict[str, str] | None:
         return textual_ui_action_items.custom_action_by_id(self, cid)
+
+    def _custom_hotkey_target_map(self) -> dict[str, str]:
+        return textual_ui_action_items.custom_hotkey_target_map(self)
 
     def _custom_action_context(
         self,
@@ -2037,7 +2187,21 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
     def action_pick_actions(self) -> None:
         targets = self._target_rows()
         selected = self._selected_row()
-        button_actions = self._readme_button_actions() + self._notes_button_actions()
+        hotkey_map = self._hotkey_target_label_map()
+
+        def with_hotkeys(items: list[tuple[str, str]]) -> list[tuple[str, str]]:
+            out: list[tuple[str, str]] = []
+            for aid, label in items:
+                hotkey = hotkey_map.get(aid, "")
+                if hotkey:
+                    out.append((aid, f"{label} [dim]({self._esc(hotkey)})[/]"))
+                else:
+                    out.append((aid, label))
+            return out
+
+        button_actions = with_hotkeys(
+            self._readme_button_actions() + self._notes_button_actions()
+        )
 
         selection_actions: list[tuple[str, str]] = [
             ("tags_set", "[white]Tags...[/]"),
@@ -2070,13 +2234,13 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
             }
             if issue_codes and not selected.packed:
                 item_actions.append(
-                    ("review_meta", "[white]Open .base.yml and review warnings[/]")
+                    ("review_meta", "[white]Open .base.yaml and review warnings[/]")
                 )
             if (
                 "legacy_only" in issue_codes or "legacy_conflict" in issue_codes
             ) and not selected.packed:
                 item_actions.append(
-                    ("rename_meta_ext", "[white]Rename .base.yaml -> .base.yml[/]")
+                    ("rename_meta_ext", "[white]Rename .base.yml -> .base.yaml[/]")
                 )
 
         global_actions: list[tuple[str, str]] = [
@@ -2096,9 +2260,9 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
         self.push_screen(
             ActionPickerScreen(
                 button_actions,
-                selection_actions,
-                item_actions,
-                global_actions,
+                with_hotkeys(selection_actions),
+                with_hotkeys(item_actions),
+                with_hotkeys(global_actions),
             ),
             self._on_pick_actions,
         )
@@ -2477,10 +2641,7 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
         # In archive view this means opening the archived folder itself,
         # not the restore target.
         opened_ts = int(time.time())
-        try:
-            opened_ts = save_base_opened(row.path, opened_ts)
-        except (sqlite3.Error, OSError, ValueError, TypeError):
-            pass
+        self._set_opened_ts_local(row.path, opened_ts)
         try:
             hit = self._find_row(row.path)
             if hit is not None:

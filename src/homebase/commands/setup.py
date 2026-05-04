@@ -42,7 +42,7 @@ def print_help() -> None:
         ("b tags sync-_tags [--debug]", "rebuild _tags symlink index (verbose)"),
         (
             "b utils opt-in-nested-discovery",
-            "inspect nested .base.yml in subfolders and enable nested discovery",
+            "inspect nested .base.yaml in subfolders and enable nested discovery",
         ),
         ("b tmux load [dir]", "load .tmuxp.yaml into tmux"),
         ("b tmux save [dir]", "save current tmux window to .tmuxp.yaml"),

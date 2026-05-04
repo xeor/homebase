@@ -31,8 +31,8 @@ PROFILE_METADATA_HEALTH_ARCHIVE = "metadata-health-archive"
 PROFILE_PANE_PROBE_ACTIVE = "pane-probe-active"
 PROFILE_PANE_PROBE_ARCHIVE = "pane-probe-archive"
 
-BASE_MARKER_FILE = ".base.yml"
-LEGACY_BASE_MARKER_FILE = ".base.yaml"
+BASE_MARKER_FILE = ".base.yaml"
+LEGACY_BASE_MARKER_FILE = ".base.yml"
 ARCHIVE_DIR_NAME = "_archive"
 PACKED_ARCHIVE_SUFFIX = ".base-pkg.tgz"
 TMUX_BIN_CANDIDATES = (
@@ -86,10 +86,45 @@ ACTION_SHORT_HELP: dict[str, str] = {
     "set_desc": "Set description on selected entries",
     "rename_item": "Rename focused project folder",
     "review_meta": "Open metadata file for manual fix",
-    "rename_meta_ext": "Rename .base.yaml to .base.yml",
+    "rename_meta_ext": "Rename .base.yml to .base.yaml",
     "refresh_cache": "Force full cache refresh now",
     "full_reconcile": "Run full reconcile scan now",
     "reconcile_all_cache": "Reconcile every cached row now",
+    "edit_global_config": "Open global config in editor and reload",
+    "reload_global_config": "Reload global config without opening editor",
+}
+
+CUSTOM_ACTION_RESERVED_HOTKEYS: set[str] = {
+    "ctrl+n",
+    "ctrl+p",
+    "ctrl+s",
+    "ctrl+f",
+    "ctrl+c",
+    "ctrl+l",
+    "ctrl+k",
+    "ctrl+d",
+    "ctrl+w",
+    "ctrl+a",
+    "ctrl+o",
+    "ctrl+g",
+    "ctrl+q",
+    "enter",
+    "left",
+    "right",
+    "home",
+    "end",
+    "alt+left",
+    "alt+right",
+    "tab",
+    "shift+tab",
+    "backtab",
+    "ctrl+e",
+    "backspace",
+    "delete",
+    "space",
+    "a",
+    "c",
+    "u",
 }
 
 ENV_BASE_DIR = "BASE_DIR"
@@ -127,6 +162,7 @@ SAVED_FILTER_QUERIES: list[str] = []
 SUFFIXES: list[str] = ["tmp", "fork"]
 FILE_VIEW_EXCLUDE_PATTERNS: list[str] = []
 CUSTOM_ACTIONS: list[dict[str, str]] = []
+CUSTOM_HOTKEYS: list[dict[str, str]] = []
 OPEN_MODE_CONFIG: dict[str, str] = {
     "profile": "shell_cd",
 }
@@ -190,8 +226,6 @@ BASE_META_ALLOWED_KEYS: set[str] = {
     "tags",
     "description",
     "wip",
-    "opened_ts",
-    "opened_at",
     "log",
 }
 CACHE_SCHEMA_VERSION = 5
@@ -328,6 +362,7 @@ SIDE_CHILD_TABS: dict[str, list[tuple[str, str]]] = {
         ("table", "Table"),
         ("table_config", "Table config"),
         ("open", "Open"),
+        ("global", "Global config"),
     ],
 }
 

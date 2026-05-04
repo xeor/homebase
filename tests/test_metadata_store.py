@@ -11,13 +11,13 @@ def test_save_and_load_base_data_roundtrip(tmp_path: Path) -> None:
         {"tags": ["x"]},
         is_packed_archive_path=lambda _p: False,
         packed_write_base_data=lambda _p, _d: None,
-        base_marker_file=".base.yml",
+        base_marker_file=".base.yaml",
     )
     loaded = metadata_store.load_base_data(
         tmp_path,
         is_packed_archive_path=lambda _p: False,
         packed_read_base_data=lambda _p: {},
-        base_marker_file=".base.yml",
+        base_marker_file=".base.yaml",
     )
     assert loaded.get("tags") == ["x"]
 

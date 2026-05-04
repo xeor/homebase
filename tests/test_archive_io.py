@@ -12,7 +12,7 @@ from homebase.archive import io as archive_io
 def _write_packed(path: Path, data: dict[str, object]) -> None:
     payload = yaml.safe_dump(data, sort_keys=False, default_flow_style=False).encode("utf-8")
     with tarfile.open(path, "w:gz") as tf:
-        info = tarfile.TarInfo(name=".base.yml")
+        info = tarfile.TarInfo(name=".base.yaml")
         info.size = len(payload)
         tf.addfile(info, fileobj=BytesIO(payload))
 
@@ -21,15 +21,15 @@ def test_packed_read_write_roundtrip(tmp_path: Path) -> None:
     archive_path = tmp_path / "project.base-pkg.tgz"
     _write_packed(archive_path, {"tags": ["a"]})
 
-    loaded = archive_io.packed_read_base_data(archive_path, base_marker_file=".base.yml")
+    loaded = archive_io.packed_read_base_data(archive_path, base_marker_file=".base.yaml")
     assert loaded.get("tags") == ["a"]
 
     archive_io.packed_write_base_data(
         archive_path,
         {"tags": ["b"], "wip": True},
-        base_marker_file=".base.yml",
+        base_marker_file=".base.yaml",
     )
-    loaded2 = archive_io.packed_read_base_data(archive_path, base_marker_file=".base.yml")
+    loaded2 = archive_io.packed_read_base_data(archive_path, base_marker_file=".base.yaml")
     assert loaded2.get("tags") == ["b"]
     assert loaded2.get("wip") is True
 

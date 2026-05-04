@@ -12,6 +12,7 @@ def on_key(
     *,
     widget_projects: str,
     wip_open_symbol_map: dict[str, int],
+    custom_hotkey_targets: dict[str, str],
 ) -> None:
     if app._modal_active():
         return
@@ -70,6 +71,14 @@ def on_key(
 
     table = app.query_one(widget_projects, DataTable)
     if not table.has_focus:
+        return
+
+    custom_target = custom_hotkey_targets.get(event.key.lower())
+    if not custom_target and event.character:
+        custom_target = custom_hotkey_targets.get(event.character.lower())
+    if custom_target:
+        app._dispatch_hotkey_target(custom_target)
+        event.stop()
         return
 
     if event.key == "left":

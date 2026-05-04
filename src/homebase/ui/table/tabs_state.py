@@ -49,6 +49,7 @@ def sync_side_tab_visibility(app: Any, *, widget_projects: str) -> None:
     side_body = app.query_one("#side_body")
     side_readme_panel = app.query_one("#side_readme_panel")
     side_notes_panel = app.query_one("#side_notes_panel")
+    side_global_panel = app.query_one("#side_global_panel")
     settings_table = app.query_one("#side_settings_table")
     settings_notes = app.query_one("#side_settings_notes")
     app._refresh_settings_tab_labels(settings_tabs)
@@ -66,6 +67,9 @@ def sync_side_tab_visibility(app: Any, *, widget_projects: str) -> None:
     selected_notes_active = (
         app.side_main_tab == "selected" and app.side_selected_tab == "notes"
     )
+    settings_global_active = (
+        app.side_main_tab == "settings" and app.side_settings_tab == "global"
+    )
 
     try:
         side_pct = app._table_side_width_pct()
@@ -77,10 +81,14 @@ def sync_side_tab_visibility(app: Any, *, widget_projects: str) -> None:
 
     side_scroll.display = not settings_active
     side_body.display = (
-        not settings_active and not selected_readme_active and not selected_notes_active
+        not settings_active
+        and not selected_readme_active
+        and not selected_notes_active
+        and not settings_global_active
     )
     side_readme_panel.display = not settings_active and selected_readme_active
     side_notes_panel.display = not settings_active and selected_notes_active
+    side_global_panel.display = settings_global_active
     settings_table.display = settings_active
     settings_notes.display = app.side_main_tab == "settings" and app.side_settings_tab in {
         "table",

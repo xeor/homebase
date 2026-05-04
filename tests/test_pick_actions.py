@@ -17,6 +17,8 @@ class _AppStub:
     def __init__(self) -> None:
         self.custom_called = ""
         self.pending_rename_target = None
+        self.global_edit_called = False
+        self.global_reload_called = False
         self._selected = _Row(Path("/tmp/a"))
         self.pushed = []
 
@@ -55,6 +57,12 @@ class _AppStub:
     def _on_confirm_bulk(self, _ok: bool, _action: str, _paths: list[Path]) -> None:
         pass
 
+    def _edit_global_config_and_reload(self) -> None:
+        self.global_edit_called = True
+
+    def _reload_global_config(self) -> None:
+        self.global_reload_called = True
+
 
 def test_on_pick_actions_dispatches_custom_action() -> None:
     app = _AppStub()
@@ -67,3 +75,15 @@ def test_on_pick_actions_dispatches_rename_item() -> None:
     pick_actions.on_pick_actions(app, "rename_item")
     assert app.pending_rename_target == Path("/tmp/a")
     assert app.pushed
+
+
+def test_on_pick_actions_dispatches_edit_global_config() -> None:
+    app = _AppStub()
+    pick_actions.on_pick_actions(app, "edit_global_config")
+    assert app.global_edit_called is True
+
+
+def test_on_pick_actions_dispatches_reload_global_config() -> None:
+    app = _AppStub()
+    pick_actions.on_pick_actions(app, "reload_global_config")
+    assert app.global_reload_called is True

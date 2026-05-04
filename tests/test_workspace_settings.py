@@ -21,7 +21,7 @@ def test_load_file_view_exclude_patterns_merges_legacy() -> None:
 def test_load_custom_actions_filters_invalid_rows() -> None:
     out = workspace_settings.load_custom_actions(
         {
-            "custom_actions": [
+                "custom_actions": [
                 {"command": "echo ok", "scope": "bad"},
                 {"id": "x", "command": ""},
             ]
@@ -35,6 +35,37 @@ def test_load_custom_actions_filters_invalid_rows() -> None:
             "command": "echo ok",
         }
     ]
+
+
+def test_load_custom_actions_accepts_action_without_command() -> None:
+    out = workspace_settings.load_custom_actions(
+        {
+            "custom_actions": [
+                {"id": "x", "scope": "item", "action": "custom:open_item"},
+            ]
+        }
+    )
+    assert out == [
+        {
+            "id": "x",
+            "label": "x",
+            "scope": "item",
+            "action": "custom:open_item",
+        }
+    ]
+
+
+def test_load_custom_hotkeys_filters_invalid_rows() -> None:
+    out = workspace_settings.load_custom_hotkeys(
+        {
+            "custom_hotkeys": [
+                {"id": "one", "hotkey": "F5", "target": "custom:open_item"},
+                {"id": "two", "hotkey": "", "target": "custom:open_item"},
+                {"id": "three", "hotkey": "f6", "target": ""},
+            ]
+        }
+    )
+    assert out == [{"id": "one", "hotkey": "f5", "target": "custom:open_item"}]
 
 
 def test_load_reconcile_config_applies_bounds() -> None:

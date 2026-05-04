@@ -4,19 +4,17 @@ from homebase.metadata import utils as metadata_utils
 
 
 def test_extract_base_meta_fields_handles_invalid_shapes() -> None:
-    tags, description, wip, opened_ts = metadata_utils.extract_base_meta_fields(
+    tags, description, wip = metadata_utils.extract_base_meta_fields(
         {
             "tags": ["api", "", "api", 42],
             "description": "  desc  ",
             "wip": 1,
-            "opened_ts": "-3",
         }
     )
 
     assert tags == ["api", "api", "42"]
     assert description == "desc"
     assert wip is True
-    assert opened_ts == 0
 
 
 def test_normalize_base_data_coerces_and_deduplicates() -> None:
@@ -25,7 +23,6 @@ def test_normalize_base_data_coerces_and_deduplicates() -> None:
             "tags": ["a", "", "a", "b"],
             "description": 12,
             "wip": "yes",
-            "opened_ts": "bad",
             "log": {"events": [{"ok": 1}, "bad", {"ok": 2}]},
         }
     )
@@ -33,11 +30,9 @@ def test_normalize_base_data_coerces_and_deduplicates() -> None:
     assert normalized["tags"] == ["a", "b"]
     assert normalized["description"] == "12"
     assert normalized["wip"] is True
-    assert normalized["opened_ts"] == 0
     assert normalized["log"] == {"events": [{"ok": 1}, {"ok": 2}]}
     assert "normalized description" in notes
     assert "normalized wip" in notes
-    assert "normalized opened_ts" in notes
     assert "normalized log.events entries" in notes
 
 
@@ -49,7 +44,7 @@ def test_base_meta_schema_issues_reports_warnings() -> None:
             "wip": "yes",
             "extra": "x",
         },
-        allowed_keys={"tags", "description", "wip", "opened_ts", "log", "opened_at"},
+        allowed_keys={"tags", "description", "wip", "log"},
     )
 
     assert len(issues) == 1

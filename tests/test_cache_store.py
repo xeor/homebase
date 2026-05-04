@@ -77,3 +77,35 @@ def test_cache_reconcile_usage_roundtrip(tmp_path: Path) -> None:
     assert loaded_score[path] > 0
     assert loaded_hits[path] == 7
     assert loaded_last_used[path] == 100
+
+
+def test_cache_opened_ts_roundtrip_and_move(tmp_path: Path) -> None:
+    src = tmp_path / "a"
+    dst = tmp_path / "b"
+
+    cache_store.cache_set_opened_ts(
+        tmp_path,
+        cache_schema_version=5,
+        path=src,
+        opened_ts=123,
+    )
+    loaded = cache_store.cache_load_opened_map(tmp_path, cache_schema_version=5)
+    assert loaded[src] == 123
+
+    cache_store.cache_move_opened_ts(
+        tmp_path,
+        cache_schema_version=5,
+        src=src,
+        dst=dst,
+    )
+    loaded = cache_store.cache_load_opened_map(tmp_path, cache_schema_version=5)
+    assert src not in loaded
+    assert loaded[dst] == 123
+
+    cache_store.cache_delete_opened_ts(
+        tmp_path,
+        cache_schema_version=5,
+        path=dst,
+    )
+    loaded = cache_store.cache_load_opened_map(tmp_path, cache_schema_version=5)
+    assert dst not in loaded

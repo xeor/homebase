@@ -3,9 +3,9 @@ from __future__ import annotations
 from collections.abc import Mapping
 
 
-def extract_base_meta_fields(data: object) -> tuple[list[str], str, bool, int]:
+def extract_base_meta_fields(data: object) -> tuple[list[str], str, bool]:
     if not isinstance(data, Mapping):
-        return [], "", False, 0
+        return [], "", False
 
     tags_value = data.get("tags", [])
     if isinstance(tags_value, str):
@@ -17,15 +17,7 @@ def extract_base_meta_fields(data: object) -> tuple[list[str], str, bool, int]:
     description = str(data.get("description", "")).strip()
     wip = bool(data.get("wip", False))
 
-    opened_raw = data.get("opened_ts", 0)
-    try:
-        opened_ts = int(opened_raw)
-    except (TypeError, ValueError):
-        opened_ts = 0
-    if opened_ts < 0:
-        opened_ts = 0
-
-    return tags, description, wip, opened_ts
+    return tags, description, wip
 
 
 def normalize_base_data(data: Mapping[str, object]) -> tuple[dict[str, object], list[str]]:
@@ -59,17 +51,6 @@ def normalize_base_data(data: Mapping[str, object]) -> tuple[dict[str, object], 
         notes.append("normalized wip")
         wip = bool(wip)
     out["wip"] = wip
-
-    opened = out.get("opened_ts", 0)
-    try:
-        opened_i = int(opened)
-    except (TypeError, ValueError):
-        notes.append("normalized opened_ts")
-        opened_i = 0
-    if opened_i < 0:
-        notes.append("normalized opened_ts")
-        opened_i = 0
-    out["opened_ts"] = opened_i
 
     log_val = out.get("log", {})
     if not isinstance(log_val, dict):
@@ -109,13 +90,6 @@ def base_meta_schema_issues(
 
     if "wip" in raw and not isinstance(raw.get("wip"), bool):
         warns.append("wip should be boolean")
-
-    if "opened_ts" in raw:
-        try:
-            if int(raw.get("opened_ts", 0)) < 0:
-                warns.append("opened_ts should be non-negative")
-        except (TypeError, ValueError):
-            warns.append("opened_ts should be integer")
 
     log_val = raw.get("log", {})
     if "log" in raw and not isinstance(log_val, Mapping):

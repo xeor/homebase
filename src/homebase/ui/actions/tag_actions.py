@@ -184,7 +184,7 @@ def on_pick_tags(
                 failed += 1
                 app._log(f"tag update failed for {path.name}: not found", "error")
                 continue
-            existing_tags, _desc, _wip, _opened_ts = load_base_meta(path)
+            existing_tags, _desc, _wip = load_base_meta(path)
             tags = set(existing_tags)
             for tag, op in plan.items():
                 if op == "add":

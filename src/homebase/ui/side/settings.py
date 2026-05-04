@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from pathlib import Path
 from typing import Any
 
@@ -8,12 +9,32 @@ from textual.events import Key
 from textual.widgets import DataTable, Static
 
 from ...config.prefs import (
+    load_archive_timezone_name,
+    load_cache_profile_table,
+    load_custom_actions,
+    load_custom_hotkeys,
+    load_file_view_exclude_patterns,
+    load_notes_config,
+    load_open_mode_config,
+    load_reconcile_config,
+    load_saved_filter_queries,
+    load_suffixes,
+    load_wip_symbol_map,
     save_open_mode_config,
     save_table_behavior_config,
     save_table_columns_config,
 )
-from ...core.constants import OPEN_MODE_CONFIG, OPEN_MODE_PROFILES, TABLE_SIDE_WIDTH_PRESETS
+from ...config.property_defs import load_property_defs
+from ...config.store import clear_global_config_cache
+from ...core import runtime_init
+from ...core.constants import (
+    DEFAULT_ARCHIVE_TZ_NAME,
+    OPEN_MODE_CONFIG,
+    OPEN_MODE_PROFILES,
+    TABLE_SIDE_WIDTH_PRESETS,
+)
 from ...core.utils import WIDGET_API_ERRORS
+from ..context import UIContext
 
 
 def refresh_settings_table(app: Any) -> None:
@@ -74,6 +95,24 @@ def refresh_settings_table(app: Any) -> None:
             "space/enter cycles value\n"
             "pin WIP keeps WIP rows fixed at top while still sorted by current SORT\n"
             "info panel width applies immediately"
+        )
+        return
+
+    if app.side_settings_tab == "global":
+        try:
+            notes_widget.styles.height = 15
+        except WIDGET_API_ERRORS:
+            pass
+        table.add_column("", width=3)
+        table.add_column("ACTION", width=54)
+        table.add_row(Text("*"), "Edit global config in $EDITOR", key="0")
+        try:
+            table.cursor_coordinate = (0, 0)
+        except WIDGET_API_ERRORS:
+            pass
+        notes_widget.update(
+            "enter/space opens .base-conf.yaml in $EDITOR\n"
+            "when editor exits, runtime config is reloaded"
         )
         return
 
@@ -279,7 +318,13 @@ def handle_settings_table_key(app: Any, event: Key, *, base_dir: Path) -> bool:
         "table",
         "table_config",
         "open",
+        "global",
     }:
+        return False
+    if app.side_settings_tab == "global":
+        if event.key in {"space", "enter"}:
+            edit_global_config_and_reload(app, base_dir=base_dir)
+            return True
         return False
     if app.side_settings_tab == "open":
         rows_count = len(app._open_mode_rows())
@@ -334,3 +379,112 @@ def handle_settings_table_key(app: Any, event: Key, *, base_dir: Path) -> bool:
         table_settings_adjust_width(app, 1, base_dir=base_dir)
         return True
     return False
+
+
+def edit_global_config_and_reload(app: Any, *, base_dir: Path) -> None:
+    config_path = base_dir / ".base-conf.yaml"
+    try:
+        config_path.touch(exist_ok=True)
+    except OSError as exc:
+        app._show_runtime_error("prepare global config", exc)
+        return
+
+    try:
+        app._open_editor_for_path(config_path)
+    except (OSError, ValueError) as exc:
+        app._show_runtime_error("open global config in editor", exc)
+        return
+
+    reload_global_config(app, base_dir=base_dir)
+
+
+def reload_global_config(app: Any, *, base_dir: Path) -> None:
+    clear_global_config_cache(base_dir)
+    try:
+        runtime_cfg = runtime_init.load_runtime_config(
+            base_dir,
+            default_archive_tz_name=DEFAULT_ARCHIVE_TZ_NAME,
+            load_property_defs=load_property_defs,
+            load_wip_symbol_map=load_wip_symbol_map,
+            load_saved_filter_queries=load_saved_filter_queries,
+            load_suffixes=load_suffixes,
+            load_file_view_exclude_patterns=load_file_view_exclude_patterns,
+            load_custom_actions=load_custom_actions,
+            load_custom_hotkeys=load_custom_hotkeys,
+            load_open_mode_config=load_open_mode_config,
+            load_notes_config=load_notes_config,
+            load_reconcile_config=load_reconcile_config,
+            load_cache_profile_table=load_cache_profile_table,
+            load_archive_timezone_name=load_archive_timezone_name,
+        )
+    except (OSError, TypeError, ValueError) as exc:
+        app._show_runtime_error("reload global config", exc)
+        return
+
+    app.ctx = UIContext(
+        base_dir=base_dir,
+        archive_tz=runtime_cfg.archive_tz,
+        archive_tz_name=runtime_cfg.archive_tz_name,
+        property_defs=list(runtime_cfg.property_defs),
+        wip_open_symbol_map=dict(runtime_cfg.wip_open_symbol_map),
+        named_filters=dict(runtime_cfg.named_filters),
+        saved_filter_queries=list(runtime_cfg.saved_filter_queries),
+        suffixes=list(runtime_cfg.suffixes),
+        file_view_exclude_patterns=list(runtime_cfg.file_view_exclude_patterns),
+        custom_actions=list(runtime_cfg.custom_actions),
+        custom_hotkeys=list(runtime_cfg.custom_hotkeys),
+        open_mode_config=dict(runtime_cfg.open_mode_config),
+        notes_config=dict(runtime_cfg.notes_config),
+        reconcile_config={mode: dict(conf) for mode, conf in runtime_cfg.reconcile_config.items()},
+        cache_profile_table={
+            scope: {name: dict(profile) for name, profile in table.items()}
+            for scope, table in runtime_cfg.cache_profile_table.items()
+        },
+    )
+    app.custom_actions = list(app.ctx.custom_actions)
+    app.custom_hotkeys = list(app.ctx.custom_hotkeys)
+    app.open_mode = dict(app.ctx.open_mode_config)
+    app.notes_config = dict(app.ctx.notes_config)
+    app.reconcile_config = {
+        "active": dict(app.ctx.reconcile_config.get("active", {})),
+        "archive": dict(app.ctx.reconcile_config.get("archive", {})),
+    }
+    app._reset_query_completion()
+    app._mark_state_dirty()
+    app._queue_query_apply()
+    app._refresh_settings_table()
+    app._refresh_side()
+    app._set_runtime_status("global config reloaded", "info", ttl_s=5.0)
+
+
+def global_config_status_text(app: Any, *, base_dir: Path) -> str:
+    config_path = base_dir / ".base-conf.yaml"
+    exists = config_path.is_file()
+    mtime_text = "-"
+    size_text = "-"
+    if exists:
+        try:
+            stat = config_path.stat()
+            mtime_text = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(stat.st_mtime))
+            size_text = str(max(0, int(stat.st_size)))
+        except OSError:
+            pass
+
+    lines = [
+        "[bold]Global Config[/]",
+        f"[cyan]path[/]: {app._esc(config_path)}",
+        f"[cyan]exists[/]: {'yes' if exists else 'no (created on first edit)'}",
+        f"[cyan]modified[/]: {app._esc(mtime_text)}",
+        f"[cyan]size bytes[/]: {app._esc(size_text)}",
+        "",
+        f"[cyan]archive timezone[/]: {app._esc(app.ctx.archive_tz_name)}",
+        f"[cyan]open profile[/]: {app._esc(str(app.open_mode.get('profile', '')))}",
+        f"[cyan]named filters[/]: {len(app.ctx.named_filters)}",
+        f"[cyan]saved filters[/]: {len(app.ctx.saved_filter_queries)}",
+        f"[cyan]suffixes[/]: {len(app.ctx.suffixes)}",
+        f"[cyan]custom actions[/]: {len(app.custom_actions)}",
+        f"[cyan]custom hotkeys[/]: {len(app.custom_hotkeys)}",
+        "",
+        "[dim]Use the button below to edit config and auto-reload when editor exits.[/]",
+    ]
+    return "\n".join(lines)

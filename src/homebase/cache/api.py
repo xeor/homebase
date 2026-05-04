@@ -33,6 +33,20 @@ def _cache_init(conn: sqlite3.Connection) -> None:
 def cache_load_rows(
     base_dir: Path, max_age_s: int = CACHE_MAX_AGE_S
 ) -> tuple[list[ProjectRow], list[ProjectRow], int]:
+    opened_map = cache_store.cache_load_opened_map(
+        base_dir,
+        cache_schema_version=CACHE_SCHEMA_VERSION,
+    )
+
+    def _opened_ts_for_path(path: Path) -> int:
+        ts = int(opened_map.get(path, 0))
+        if ts > 0:
+            return ts
+        try:
+            return max(0, int(opened_map.get(path.resolve(), 0)))
+        except (OSError, RuntimeError, ValueError):
+            return 0
+
     def _deserialize_cache_row(
         rec: sqlite3.Row,
         age: int,
@@ -44,7 +58,7 @@ def cache_load_rows(
             restore_target = Path(str(restore_raw)) if restore_raw else None
             cached_at = int(rec["cached_at"])
             reconciled_at = int(rec["reconciled_at"])
-            return ProjectRow(
+            row = ProjectRow(
                 path=p,
                 name=str(rec["name"]),
                 branch=str(rec["branch"]),
@@ -79,6 +93,8 @@ def cache_load_rows(
                 last_cached_ts=cached_at,
                 last_reconciled_ts=reconciled_at,
             )
+            row.opened_ts = _opened_ts_for_path(p)
+            return row
         except (KeyError, TypeError, ValueError, json.JSONDecodeError):
             return None
 
@@ -194,4 +210,37 @@ def cache_save_reconcile_usage(
         hits=hits,
         last_used=last_used,
         limit=RECONCILE_USAGE_CACHE_LIMIT,
+    )
+
+
+def cache_load_opened_map(base_dir: Path) -> dict[Path, int]:
+    return cache_store.cache_load_opened_map(
+        base_dir,
+        cache_schema_version=CACHE_SCHEMA_VERSION,
+    )
+
+
+def cache_set_opened_ts(base_dir: Path, path: Path, opened_ts: int) -> None:
+    cache_store.cache_set_opened_ts(
+        base_dir,
+        cache_schema_version=CACHE_SCHEMA_VERSION,
+        path=path,
+        opened_ts=opened_ts,
+    )
+
+
+def cache_move_opened_ts(base_dir: Path, src: Path, dst: Path) -> None:
+    cache_store.cache_move_opened_ts(
+        base_dir,
+        cache_schema_version=CACHE_SCHEMA_VERSION,
+        src=src,
+        dst=dst,
+    )
+
+
+def cache_delete_opened_ts(base_dir: Path, path: Path) -> None:
+    cache_store.cache_delete_opened_ts(
+        base_dir,
+        cache_schema_version=CACHE_SCHEMA_VERSION,
+        path=path,
     )

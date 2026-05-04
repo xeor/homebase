@@ -65,14 +65,44 @@ def load_custom_actions(data: object) -> list[dict[str, str]]:
         if scope not in {"item", "selection", "global"}:
             scope = "item"
         command = str(item.get("command", "")).strip()
-        if not command:
+        action = str(item.get("action", "")).strip()
+        if not command and not action:
+            continue
+        row = {
+            "id": cid,
+            "label": label,
+            "scope": scope,
+        }
+        if command:
+            row["command"] = command
+        if action:
+            row["action"] = action
+        out.append(row)
+    return out
+
+
+def load_custom_hotkeys(data: object) -> list[dict[str, str]]:
+    raw = data.get("custom_hotkeys", []) if isinstance(data, dict) else []
+    if not isinstance(raw, list):
+        return []
+    out: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for idx, item in enumerate(raw):
+        if not isinstance(item, dict):
+            continue
+        hid = str(item.get("id", "")).strip() or f"custom_hotkey_{idx + 1}"
+        if hid in seen:
+            continue
+        seen.add(hid)
+        hotkey = str(item.get("hotkey", "")).strip().lower()
+        target = str(item.get("target", "")).strip()
+        if not hotkey or not target:
             continue
         out.append(
             {
-                "id": cid,
-                "label": label,
-                "scope": scope,
-                "command": command,
+                "id": hid,
+                "hotkey": hotkey,
+                "target": target,
             }
         )
     return out

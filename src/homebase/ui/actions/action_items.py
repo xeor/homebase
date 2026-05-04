@@ -24,9 +24,31 @@ def custom_actions_for_scope(
         out.append(
             (
                 f"custom:{cid}",
-                f"[{color_accent_hex}]{app._esc(label)}[/] [dim](custom)[/]",
+                f"[{color_accent_hex}]{app._esc(label)}[/]",
             )
         )
+    return out
+
+
+def custom_hotkey_target_map(app: Any) -> dict[str, str]:
+    out: dict[str, str] = {}
+    for binding in app.custom_hotkeys:
+        hotkey = str(binding.get("hotkey", "")).strip().lower()
+        target = str(binding.get("target", "")).strip()
+        if not hotkey or not target or hotkey in out:
+            continue
+        out[hotkey] = target
+    return out
+
+
+def hotkey_target_label_map(app: Any) -> dict[str, str]:
+    out: dict[str, str] = {}
+    for binding in app.custom_hotkeys:
+        hotkey = str(binding.get("hotkey", "")).strip()
+        target = str(binding.get("target", "")).strip()
+        if not hotkey or not target or target in out:
+            continue
+        out[target] = hotkey
     return out
 
 
@@ -60,24 +82,44 @@ def valid_action_items(
         out.append(("rename_item", "[white]Rename item...[/]"))
         issue_codes = {code for _lvl, code, _msg in base_meta_issues(selected.path)}
         if issue_codes and not selected.packed:
-            out.append(("review_meta", "[white]Open .base.yml and review warnings[/]"))
+            out.append(("review_meta", "[white]Open .base.yaml and review warnings[/]"))
         if ("legacy_only" in issue_codes or "legacy_conflict" in issue_codes) and not selected.packed:
-            out.append(("rename_meta_ext", "[white]Rename .base.yaml -> .base.yml[/]"))
+            out.append(("rename_meta_ext", "[white]Rename .base.yml -> .base.yaml[/]"))
 
     out.extend(
         [
             ("refresh_cache", "[white]Refresh cache[/]"),
             ("full_reconcile", "[white]Full reconcile (force rescan)[/]"),
+            ("reload_global_config", "[white]Reload global config[/]"),
+            ("edit_global_config", "[white]Edit global config in $EDITOR[/]"),
         ]
     )
     if app.active_rows or app.archived_rows:
         out.append(("reconcile_all_cache", "[white]Reconcile all cached rows now[/]"))
 
     if targets:
-        out.extend(custom_actions_for_scope(app, "selection", color_accent_hex=color_accent_hex))
+        out.extend(
+            custom_actions_for_scope(
+                app,
+                "selection",
+                color_accent_hex=color_accent_hex,
+            )
+        )
     if selected is not None:
-        out.extend(custom_actions_for_scope(app, "item", color_accent_hex=color_accent_hex))
-    out.extend(custom_actions_for_scope(app, "global", color_accent_hex=color_accent_hex))
+        out.extend(
+            custom_actions_for_scope(
+                app,
+                "item",
+                color_accent_hex=color_accent_hex,
+            )
+        )
+    out.extend(
+        custom_actions_for_scope(
+            app,
+            "global",
+            color_accent_hex=color_accent_hex,
+        )
+    )
 
     uniq: list[tuple[str, str]] = []
     seen: set[str] = set()
@@ -163,6 +205,10 @@ def run_custom_action(app: Any, action_id: str, *, base_dir: Path, fmt_ymd: Call
         app._refresh_side()
         return
     scope = str(act.get("scope", "item"))
+    menu_action = str(act.get("action", "")).strip()
+    if menu_action:
+        app._on_pick_actions(menu_action)
+        return
     template_text = str(act.get("command", "")).strip()
     if not template_text:
         app._log(f"custom action has empty command: {action_id}", "error")

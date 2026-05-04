@@ -44,7 +44,7 @@ def test_collect_projects_discovers_top_level(tmp_path: Path) -> None:
         include_nested=False,
         size_cache=None,
         archive_dir_name="_archive",
-        base_marker_file=".base.yml",
+        base_marker_file=".base.yaml",
         resolve_include_nested_fn=lambda _b, inc: bool(inc),
         skip_active_walk_path=lambda _b, _a, _c: False,
         prune_walk_dirnames=lambda _d: None,

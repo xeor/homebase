@@ -104,6 +104,7 @@ def on_rename_item(
             archived=source_row.archived,
             restore_target=source_row.restore_target,
             archived_ts=source_row.archived_ts,
+            opened_ts_override=source_row.opened_ts,
         )
     except (
         OSError,
@@ -119,6 +120,7 @@ def on_rename_item(
         return
 
     app._remove_paths_local([current])
+    app._move_opened_ts_local(current, target)
     app._upsert_row_local(updated)
     app.multi_selected = {(target if app._same_path(p, current) else p) for p in app.multi_selected}
     app.selected_path = target

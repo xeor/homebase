@@ -5,6 +5,7 @@ from pathlib import Path
 from ..archive import io as archive_io
 from ..archive import ops as archive_ops
 from ..archive import service as archive_service
+from ..cache.api import cache_delete_opened_ts, cache_move_opened_ts
 from ..core import prompting
 from ..core import utils as core_utils
 from ..core.constants import (
@@ -153,7 +154,7 @@ def _archive_sync_tags_if_needed(base_dir: Path, sync_tags: bool) -> None:
 
 
 def archive_move_internal(base_dir: Path, src: Path, sync_tags: bool = True) -> Path:
-    return archive_service.archive_move_internal(
+    dst = archive_service.archive_move_internal(
         base_dir,
         src,
         policy_reason_outside_base=_policy_reason_outside_base,
@@ -162,10 +163,12 @@ def archive_move_internal(base_dir: Path, src: Path, sync_tags: bool = True) -> 
         sync_tags_if_needed=_archive_sync_tags_if_needed,
         sync_tags=sync_tags,
     )
+    cache_move_opened_ts(base_dir, src, dst)
+    return dst
 
 
 def archive_pack_internal(base_dir: Path, src: Path) -> Path:
-    return archive_service.archive_pack_internal(
+    dst = archive_service.archive_pack_internal(
         base_dir,
         src,
         archive_require_dir=_archive_require_dir,
@@ -174,10 +177,12 @@ def archive_pack_internal(base_dir: Path, src: Path) -> Path:
         ensure_safe_cwd=_ensure_safe_cwd,
         invalidate_packed_cache_path=_packed_cache_invalidate_path,
     )
+    cache_move_opened_ts(base_dir, src, dst)
+    return dst
 
 
 def archive_unpack_internal(base_dir: Path, src: Path) -> Path:
-    return archive_service.archive_unpack_internal(
+    dst = archive_service.archive_unpack_internal(
         base_dir,
         src,
         archive_require_packed=_archive_require_packed,
@@ -188,6 +193,8 @@ def archive_unpack_internal(base_dir: Path, src: Path) -> Path:
         archive_extract_single_root=_archive_extract_single_root,
         invalidate_packed_cache_path=_packed_cache_invalidate_path,
     )
+    cache_move_opened_ts(base_dir, src, dst)
+    return dst
 
 
 def archive_restore_internal(
@@ -197,7 +204,7 @@ def archive_restore_internal(
     sync_tags: bool = True,
     allow_outside_base: bool = False,
 ) -> Path:
-    return archive_service.archive_restore_internal(
+    dst = archive_service.archive_restore_internal(
         base_dir,
         src,
         archive_require_entry=_archive_require_entry,
@@ -220,6 +227,8 @@ def archive_restore_internal(
         sync_tags=sync_tags,
         allow_outside_base=allow_outside_base,
     )
+    cache_move_opened_ts(base_dir, src, dst)
+    return dst
 
 
 def delete_internal(base_dir: Path, target: Path, sync_tags: bool = True) -> None:
@@ -231,6 +240,7 @@ def delete_internal(base_dir: Path, target: Path, sync_tags: bool = True) -> Non
         sync_tags_if_needed=_archive_sync_tags_if_needed,
         sync_tags=sync_tags,
     )
+    cache_delete_opened_ts(base_dir, target)
 
 
 def cmd_archive_mv(base_dir: Path, path: str = ".") -> int:
