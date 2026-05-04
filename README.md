@@ -127,6 +127,12 @@ Query types currently supported:
 
 `b c <key>` reads `create_templates` from `.base-conf.yaml`.
 
+CLI shape:
+
+```sh
+b c <key> [--name <folder-name>] [--debug]
+```
+
 ```yaml
 create_templates:
   - key: tmp
@@ -139,7 +145,21 @@ create_templates:
     template: python
     options: [changedir, prompt-name]
     tags: [python]
+
+  - key: area51
+    name: Area51 copier starter
+    template: area51
+    options: [prompt-name, changedir]
+    tags: [experimental]
 ```
+
+Fields:
+
+- `key`: command key used by `b c <key>`
+- `name`: optional human label (for config readability)
+- `template`: optional copier/template id under `.copier/<template>`
+- `options`: behavior toggles (see below)
+- `tags`: optional list of initial tags written to `.base.yaml`
 
 Supported `options`:
 
@@ -152,11 +172,32 @@ Supported `options`:
 
 Notes:
 
-- `--name` overrides `prompt-name` / `generate-ts-name` / `generate-next-alpha-name`
+- name resolution priority:
+  1) `--name`
+  2) `prompt-name`
+  3) `generate-ts-name`
+  4) `generate-next-alpha-name`
+  5) fallback to template `key`
 - `--debug` prints resolution steps and exits without creating files
 - `template` uses `.copier/<template>/` under base dir
 - if template dir contains `copier.yml`/`copier.yaml`, `copier copy --trust` is used
 - otherwise files are copied directly from the template directory
+
+Examples:
+
+```sh
+# quick scratch project with generated timestamp name
+b c tmp
+
+# explicit name (overrides prompt/generate options)
+b c py --name cli-tools
+
+# copier template (interactive prompts are shown by copier)
+b c area51
+
+# preview without creating files
+b c area51 --name area51-demo --debug
+```
 
 ## Custom Action Hotkeys
 
