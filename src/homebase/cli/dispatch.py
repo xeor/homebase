@@ -17,6 +17,7 @@ def dispatch_command(
     no_arg_flow: Callable[[Path, Path, str], int],
     cmd_status: Callable[[Path], int],
     cmd_new: Callable[[Path], int],
+    cmd_create_quick: Callable[[Path, str, str | None, bool], int],
     cmd_recent: Callable[[Path], int],
     cmd_setup: Callable[[Path, bool | None], int],
     cmd_cache_warm: Callable[[], int],
@@ -45,6 +46,9 @@ def dispatch_command(
         return cmd_status(base_dir)
     if ns.command == "new":
         return cmd_new(base_dir)
+    if ns.command == "c":
+        raw_name = str(getattr(ns, "name", "") or "").strip()
+        return cmd_create_quick(base_dir, str(ns.key), raw_name or None, bool(ns.debug))
     if ns.command == "recent":
         return cmd_recent(base_dir)
     if ns.command == "setup":

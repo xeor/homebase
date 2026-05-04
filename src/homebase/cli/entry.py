@@ -103,7 +103,7 @@ def main(argv: list[str]) -> int:
     from ..config.property_defs import load_property_defs
     from ..tmux.flow import cmd_tmux_load, cmd_tmux_save
     from ..workspace.benchmark import cmd_benchmark, cmd_test
-    from ..workspace.projects import cmd_new
+    from ..workspace.projects import cmd_create_quick, cmd_new
     from ..workspace.regression import cmd_test_regression
 
     parser = build_cli_parser()
@@ -186,6 +186,12 @@ def main(argv: list[str]) -> int:
             ),
             cmd_status=cmd_status,
             cmd_new=cmd_new,
+            cmd_create_quick=lambda bd, key, name, debug: cmd_create_quick(
+                bd,
+                key,
+                name,
+                debug=debug,
+            ),
             cmd_recent=cmd_recent,
             cmd_setup=lambda bd, apply: cmd_setup(bd, apply_tmux_binding=apply),
             cmd_cache_warm=cmd_cache_warm,
@@ -253,6 +259,7 @@ def main(argv: list[str]) -> int:
         "help",
         "status",
         "new",
+        "c",
         "recent",
         "setup",
         "utils",

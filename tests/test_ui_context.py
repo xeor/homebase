@@ -190,7 +190,7 @@ def test_bapp_dispatch_hotkey_target_supports_action_and_tab_ids(tmp_path) -> No
     assert seen["tab"] == "selected/overview"
 
 
-def test_command_palette_hides_selected_scope_without_multi_select(tmp_path) -> None:
+def test_command_palette_selected_scope_follows_available_selected_actions(tmp_path) -> None:
     ctx = UIContext(
         base_dir=tmp_path,
         archive_tz=ZoneInfo("UTC"),
@@ -223,10 +223,11 @@ def test_command_palette_hides_selected_scope_without_multi_select(tmp_path) -> 
     app.active_rows = [row]
     app.selected_path = row.path
     app.multi_selected.clear()
-
-    titles = [cmd.title for cmd in app.get_system_commands(None)]
-    assert not any("Action > Selected" in str(t) for t in titles)
-
-    app.multi_selected = {row.path}
     titles = [cmd.title for cmd in app.get_system_commands(None)]
     assert any("Action > Selected" in str(t) for t in titles)
+
+    app.active_rows = []
+    app.selected_path = None
+    app.multi_selected.clear()
+    titles = [cmd.title for cmd in app.get_system_commands(None)]
+    assert not any("Action > Selected" in str(t) for t in titles)

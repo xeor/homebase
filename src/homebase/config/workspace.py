@@ -108,6 +108,39 @@ def load_custom_hotkeys(data: object) -> list[dict[str, str]]:
     return out
 
 
+def load_create_templates(data: object) -> list[dict[str, object]]:
+    raw = data.get("create_templates", []) if isinstance(data, dict) else []
+    if not isinstance(raw, list):
+        return []
+    out: list[dict[str, object]] = []
+    seen: set[str] = set()
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        key = str(item.get("key", "")).strip()
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        options_raw = item.get("options", [])
+        options: list[str] = []
+        if isinstance(options_raw, list):
+            options = [str(v).strip() for v in options_raw if str(v).strip()]
+        template = str(item.get("template", "")).strip() or None
+        tags_raw = item.get("tags", [])
+        tags = [str(v).strip() for v in tags_raw if str(v).strip()] if isinstance(tags_raw, list) else []
+        name = str(item.get("name", key)).strip() or key
+        out.append(
+            {
+                "key": key,
+                "name": name,
+                "options": options,
+                "template": template,
+                "tags": tags,
+            }
+        )
+    return out
+
+
 def load_notes_config(data: object, *, defaults: dict[str, str]) -> dict[str, str]:
     out = dict(defaults)
     raw = data.get("notes", {}) if isinstance(data, dict) else {}

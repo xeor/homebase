@@ -13,6 +13,8 @@ uv run b help          # full subcommand list
 uv run b new           # new-project wizard
 uv run b archive mv .  # archive current dir
 uv run b benchmark run # synthetic perf bench
+uv run b c tmp         # quick-create from template key
+uv run b c tmp --debug # preview actions, no changes
 ```
 
 Base folder defaults to `~/base`. Override with `--base-folder` or
@@ -120,6 +122,41 @@ Query types currently supported:
 - `tmux_open_panes`
 - `tmux_editor_commands`
 - `sqlite_recent_paths`
+
+## Quick Create Templates
+
+`b c <key>` reads `create_templates` from `.base-conf.yaml`.
+
+```yaml
+create_templates:
+  - key: tmp
+    name: Quick tmp project
+    options: [prefix-datetime, suffix-tmp, changedir, generate-ts-name]
+    tags: [scratch, quick]
+
+  - key: py
+    name: Python starter
+    template: python
+    options: [changedir, prompt-name]
+    tags: [python]
+```
+
+Supported `options`:
+
+- `prefix-datetime` -> prepend date prefix to folder name
+- `suffix-tmp` -> append `.tmp` suffix
+- `changedir` -> open shell in created directory (interactive only)
+- `prompt-name` -> ask for folder name when `--name` is omitted
+- `generate-ts-name` -> generate folder name from timestamp when `--name` is omitted
+- `generate-next-alpha-name` -> pick next free alpha name (`a`, `b`, ... `z`, `aa`, ...)
+
+Notes:
+
+- `--name` overrides `prompt-name` / `generate-ts-name` / `generate-next-alpha-name`
+- `--debug` prints resolution steps and exits without creating files
+- `template` uses `.copier/<template>/` under base dir
+- if template dir contains `copier.yml`/`copier.yaml`, `copier copy --trust` is used
+- otherwise files are copied directly from the template directory
 
 ## Custom Action Hotkeys
 

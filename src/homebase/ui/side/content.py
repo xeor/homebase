@@ -6,6 +6,17 @@ import subprocess
 from pathlib import Path
 from typing import Any, Callable
 
+from ...core.constants import (
+    COLOR_ACCENT_HEX,
+    COLOR_ARCHIVE_HEX,
+    COLOR_DYNAMIC_ENV_HEX,
+    COLOR_DYNAMIC_FILE_HEX,
+    COLOR_DYNAMIC_STATE_HEX,
+    COLOR_ERROR_HEX,
+    COLOR_INFO_HEX,
+    COLOR_SUCCESS_HEX,
+    COLOR_WARN_HEX,
+)
 from ...core.models import ProjectRow
 
 
@@ -116,6 +127,35 @@ def cheat_columns(
     left.append("  created=2025-01   created in Jan 2025")
     left.append("  created=2025-01-05 created on exact date")
     left.append("  created<=2025     created in/before year 2025")
+    left.append("")
+    left.append("- color legend (meaning-bearing colors):")
+    left.append(
+        f"  [{COLOR_INFO_HEX}]info blue[/] ({COLOR_INFO_HEX}): informational status and neutral highlights"
+    )
+    left.append(
+        f"  [{COLOR_WARN_HEX}]warning yellow[/] ({COLOR_WARN_HEX}): caution, degraded state, retry-needed signals"
+    )
+    left.append(
+        f"  [{COLOR_ERROR_HEX}]error red[/] ({COLOR_ERROR_HEX}): failures, blocking errors, invalid state"
+    )
+    left.append(
+        f"  [{COLOR_SUCCESS_HEX}]success green[/] ({COLOR_SUCCESS_HEX}): successful operations and healthy outcomes"
+    )
+    left.append(
+        f"  [{COLOR_ACCENT_HEX}]accent cyan[/] ({COLOR_ACCENT_HEX}): interactive emphasis (links, selectable custom actions)"
+    )
+    left.append(
+        f"  [{COLOR_ARCHIVE_HEX}]archive purple[/] ({COLOR_ARCHIVE_HEX}): archive-mode context, archive-specific state"
+    )
+    left.append(
+        f"  [{COLOR_DYNAMIC_ENV_HEX}]dynamic env orange[/] ({COLOR_DYNAMIC_ENV_HEX}): env/tmux-driven dynamic properties"
+    )
+    left.append(
+        f"  [{COLOR_DYNAMIC_FILE_HEX}]dynamic file blue[/] ({COLOR_DYNAMIC_FILE_HEX}): file-probe dynamic properties"
+    )
+    left.append(
+        f"  [{COLOR_DYNAMIC_STATE_HEX}]dynamic state violet[/] ({COLOR_DYNAMIC_STATE_HEX}): state/health dynamic properties"
+    )
 
     right: list[str] = []
     right.append(f"- active total:   {active_total}")

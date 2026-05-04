@@ -110,12 +110,21 @@ done
   opens the file in `$EDITOR`, then `b` reloads when the editor
   exits.
 
-- [ ] **Document every meaning-bearing color** in the cheat-sheet.
+- [x] **Document every meaning-bearing color** in the cheat-sheet.
   The purple in archive-mode is currently undocumented.
 
-- [ ] **`b c <key>` quick-create command.** Reads a config table like
+- [x] **`b c <key>` quick-create command.** Reads a config table like
   `create_templates: [{key: "tmp", options: ["prefix-datetime",
   "property-tmp", "changedir"]}]`. Picks options from a small set
   (date prefix, `.tmp` suffix, copier template id, `cd` after create,
   skip-TUI, …). Replace the example with whatever shape ends up most
   natural after a real implementation pass.
+
+- [ ] **Handling files inside project**
+  There needs to be an action type that acts on the output of a command given the project as a context.
+  The command can create a list with the context and the list should be displayed and be fuzzy searchable.
+  Based on pressing an item. Another command will take the result and execute.
+  Example, if I have the list-generator command of "find {{ path-to-project }} -name '*.drawio'", it will
+  give a list of drawio files. Based on my then selection, I can open the selection using the executor "drawio {{ selection }}".
+  This action type should act as the other action-types, but be sorted last. Both in the action-meny (ctrl-a), but also in the ctrl-p menu.
+  It should have it's own colors and be integrated just like the other action types, including the option to have hotkeys and so on.

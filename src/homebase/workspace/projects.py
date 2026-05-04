@@ -128,14 +128,10 @@ def create_project(
                 subprocess.run(
                     ["copier", "copy", "--trust", str(template_dir), str(target)],
                     check=True,
-                    text=True,
-                    encoding="utf-8",
-                    errors="replace",
-                    capture_output=True,
                 )
             except subprocess.CalledProcessError as exc:
                 shutil.rmtree(target, ignore_errors=True)
-                details = exc.stderr.strip() or exc.stdout.strip() or str(exc)
+                details = f"copier exited with code {exc.returncode}"
                 raise ValueError(f"copier failed: {details}") from exc
         else:
             try:
@@ -185,6 +181,128 @@ def cmd_new(base_dir: Path) -> int:
         print(f"created: {path}")
         return 0
     return 1
+
+
+def _alpha_name_at(index: int) -> str:
+    n = index
+    out = ""
+    while True:
+        n, rem = divmod(n, 26)
+        out = chr(ord("a") + rem) + out
+        if n == 0:
+            return out
+        n -= 1
+
+
+def _next_available_alpha_name(
+    base_dir: Path,
+    *,
+    add_date_prefix: bool,
+    add_tmp_suffix: bool,
+) -> str:
+    for i in range(8192):
+        candidate = _alpha_name_at(i)
+        final_name = resolve_new_project_name(candidate, add_date_prefix, add_tmp_suffix)
+        if not (base_dir / final_name).exists():
+            return candidate
+    raise ValueError("unable to find free alpha project name")
+
+
+def cmd_create_quick(
+    base_dir: Path,
+    template_key: str,
+    name: str | None = None,
+    *,
+    debug: bool = False,
+) -> int:
+    from ..cache.api import cache_upsert_project_fast
+    from ..config.prefs import load_create_templates
+    from ..tmux.flow import open_shell_in_dir
+
+    entries = load_create_templates(base_dir)
+    entry = next((e for e in entries if str(e.get("key", "")) == template_key), None)
+    if entry is None:
+        print(f"create template not found: {template_key}", file=sys.stderr)
+        return 1
+
+    options = {str(v).strip() for v in entry.get("options", []) if str(v).strip()}
+    add_date_prefix = "prefix-datetime" in options
+    add_tmp_suffix = "suffix-tmp" in options
+    change_dir = "changedir" in options
+    prompt_name = "prompt-name" in options
+    generate_ts_name = "generate-ts-name" in options
+    generate_next_alpha_name = "generate-next-alpha-name" in options
+
+    folder_name = str(name or "").strip()
+    if not folder_name and prompt_name:
+        if not sys.stdin.isatty():
+            print("quick create failed: prompt-name requires an interactive terminal", file=sys.stderr)
+            return 1
+        try:
+            folder_name = input("folder name: ").strip()
+        except EOFError:
+            folder_name = ""
+    if not folder_name and generate_ts_name:
+        folder_name = datetime.now().strftime("%Y%m%d-%H%M%S")
+    if not folder_name and generate_next_alpha_name:
+        try:
+            folder_name = _next_available_alpha_name(
+                base_dir,
+                add_date_prefix=add_date_prefix,
+                add_tmp_suffix=add_tmp_suffix,
+            )
+        except ValueError as exc:
+            print(f"quick create failed: {exc}", file=sys.stderr)
+            return 1
+    if not folder_name:
+        folder_name = template_key
+
+    template_raw = entry.get("template", None)
+    copier_template = (
+        str(template_raw).strip()
+        if template_raw is not None and str(template_raw).strip()
+        else None
+    )
+    initial_tags = [str(v).strip() for v in entry.get("tags", []) if str(v).strip()]
+
+    final_name = resolve_new_project_name(folder_name, add_date_prefix, add_tmp_suffix)
+    target = base_dir / final_name
+
+    if debug:
+        print("quick-create debug")
+        print(f"- key: {template_key}")
+        print(f"- input name: {name or '-'}")
+        print(f"- resolved base name: {folder_name}")
+        print(f"- final name: {final_name}")
+        print(f"- target: {target}")
+        print(f"- options: {sorted(options)}")
+        print(f"- template: {copier_template or '-'}")
+        print(f"- tags: {initial_tags}")
+        print(f"- changedir: {'yes' if change_dir else 'no'}")
+        print("- dry-run: no files created")
+        return 0
+
+    try:
+        created = create_project(
+            base_dir,
+            folder_name,
+            add_date_prefix,
+            add_tmp_suffix,
+            copier_template=copier_template,
+            initial_tags=initial_tags,
+        )
+    except ValueError as exc:
+        print(f"quick create failed: {exc}", file=sys.stderr)
+        return 1
+    except OSError as exc:
+        print(f"quick create failed: {exc}", file=sys.stderr)
+        return 1
+
+    cache_upsert_project_fast(base_dir, created)
+    print(f"created: {created}")
+    if change_dir and sys.stdin.isatty() and sys.stdout.isatty():
+        return open_shell_in_dir(created)
+    return 0
 
 
 def git_info(path: Path, include_dirty: bool = True) -> tuple[str, str, int]:

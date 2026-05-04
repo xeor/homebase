@@ -68,6 +68,32 @@ def test_load_custom_hotkeys_filters_invalid_rows() -> None:
     assert out == [{"id": "one", "hotkey": "f5", "target": "custom:open_item"}]
 
 
+def test_load_create_templates_filters_and_normalizes() -> None:
+    out = workspace_settings.load_create_templates(
+        {
+            "create_templates": [
+                {
+                    "key": "tmp",
+                    "options": ["prefix-datetime", "changedir", ""],
+                    "template": "py",
+                    "tags": ["scratch", ""],
+                },
+                {"key": "tmp"},
+                {"options": ["x"]},
+            ]
+        }
+    )
+    assert out == [
+        {
+            "key": "tmp",
+            "name": "tmp",
+            "options": ["prefix-datetime", "changedir"],
+            "template": "py",
+            "tags": ["scratch"],
+        }
+    ]
+
+
 def test_load_reconcile_config_applies_bounds() -> None:
     out = workspace_settings.load_reconcile_config(
         {

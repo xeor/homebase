@@ -995,7 +995,7 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
         for action_id, label in self._valid_action_items():
             grouped[_scope_for_action(action_id)].append((action_id, label))
 
-        show_selected_scope = bool(self.multi_selected)
+        show_selected_scope = bool(grouped["selected"])
 
         for scope in ("item", "selected", "global"):
             if scope == "selected" and not show_selected_scope:
@@ -2247,6 +2247,8 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
             ("refresh_cache", "[white]Refresh cache[/]"),
             ("full_reconcile", "[white]Full reconcile (force rescan)[/]"),
             ("reconcile_all_cache", "[white]Reconcile all cached rows now[/]"),
+            ("reload_global_config", "[white]Reload global config[/]"),
+            ("edit_global_config", "[white]Edit global config in $EDITOR[/]"),
         ]
 
         selection_actions.extend(self._custom_actions_for_scope("selection"))
