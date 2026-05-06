@@ -32,6 +32,7 @@ from ..core.constants import (
 from ..ui import run_textual_ui as _run_textual_ui
 from ..ui.context import UIContext
 from ..workspace.projects import run_post_commands
+from .completion import completion_candidates, completion_script
 from .dispatch import dispatch_command
 from .parser import build_cli_parser
 
@@ -186,6 +187,13 @@ def main(argv: list[str]) -> int:
             ),
             cmd_status=cmd_status,
             cmd_new=cmd_new,
+            cmd_completion=lambda shell: _cmd_completion(shell),
+            cmd_internal_complete=lambda shell, cword, words: _cmd_internal_complete(
+                shell,
+                cword,
+                words,
+                base_dir=base_dir,
+            ),
             cmd_create_quick=lambda bd, key, name, debug: cmd_create_quick(
                 bd,
                 key,
@@ -270,3 +278,15 @@ def main(argv: list[str]) -> int:
     }:
         print("unknown command", file=sys.stderr)
     return rc
+
+
+def _cmd_completion(shell: str) -> int:
+    print(completion_script(shell), end="")
+    return 0
+
+
+def _cmd_internal_complete(shell: str, cword: int, words: list[str], *, base_dir: Path) -> int:
+    _ = shell
+    for value in completion_candidates(words, cword, base_dir=base_dir):
+        print(value)
+    return 0

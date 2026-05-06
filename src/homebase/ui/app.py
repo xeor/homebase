@@ -167,7 +167,7 @@ from .screens.basic import (
     InputScreen,
     RuntimeErrorScreen,
 )
-from .screens.choices import SingleChoiceScreen
+from .screens.choices import FuzzyChoiceScreen, SingleChoiceScreen
 from .screens.filter_manage import (
     FilterManageScreen,
     set_filter_manage_base_dir,
@@ -325,6 +325,8 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
         self.ctx = ctx if ctx is not None else build_ui_context(base_dir)
         self._confirm_screen_cls = ConfirmScreen
         self._input_screen_cls = InputScreen
+        self._action_picker_screen_cls = ActionPickerScreen
+        self._fuzzy_choice_screen_cls = FuzzyChoiceScreen
         self.start_new_mode = start_new_mode
         persisted = load_ui_state(self.base_dir)
         self._init_rows_state(initial_filter, persisted)
@@ -931,25 +933,26 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
                 )
 
         custom_scope_by_id: dict[str, str] = {}
+        custom_list_action_ids: set[str] = set()
         for act in self.custom_actions:
             cid = str(act.get("id", "")).strip()
-            scope = str(act.get("scope", "item")).strip().lower()
+            scope = str(act.get("scope", "target")).strip().lower()
             if cid:
                 custom_scope_by_id[f"custom:{cid}"] = scope
+                if str(act.get("list_command", "")).strip() and str(act.get("run_command", "")).strip():
+                    custom_list_action_ids.add(f"custom:{cid}")
 
-        item_actions = {
+        target_actions = {
             "readme_create",
             "readme_edit",
             "notes_create",
             "notes_open",
-            "rename_item",
-            "review_meta",
-            "rename_meta_ext",
-        }
-        selected_actions = {
             "tags_set",
             "reconcile_selection_cache",
             "suffix_set",
+            "rename_item",
+            "review_meta",
+            "rename_meta_ext",
             "archive",
             "restore",
             "pack",
@@ -969,17 +972,13 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
         def _scope_for_action(action_id: str) -> str:
             if action_id in custom_scope_by_id:
                 scope = custom_scope_by_id[action_id]
-                if scope == "selection":
-                    return "selected"
-                if scope in {"item", "global"}:
+                if scope in {"target", "global"}:
                     return scope
-            if action_id in item_actions:
-                return "item"
-            if action_id in selected_actions:
-                return "selected"
+            if action_id in target_actions:
+                return "target"
             if action_id in global_actions:
                 return "global"
-            return "selected"
+            return "target"
 
         def _natural_key(text: str) -> tuple[object, ...]:
             parts = re.split(r"(\d+)", text.lower())
@@ -991,26 +990,26 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
                     out.append(part)
             return tuple(out)
 
-        grouped: dict[str, list[tuple[str, str]]] = {"item": [], "selected": [], "global": []}
+        grouped: dict[str, list[tuple[str, str]]] = {"target": [], "global": []}
         for action_id, label in self._valid_action_items():
             grouped[_scope_for_action(action_id)].append((action_id, label))
-
-        show_selected_scope = bool(grouped["selected"])
-
-        for scope in ("item", "selected", "global"):
-            if scope == "selected" and not show_selected_scope:
-                continue
+        for scope in ("target", "global"):
             for action_id, label in sorted(
                 grouped[scope],
-                key=lambda pair: _natural_key(self._label_plain(pair[1])),
+                key=lambda pair: (
+                    1 if pair[0] in custom_list_action_ids else 0,
+                    _natural_key(self._label_plain(pair[1])),
+                ),
             ):
                 plain = self._label_plain(label)
-                if scope == "item":
-                    scope_prefix = "[#7DFF9B]Action > Item[/]"
-                elif scope == "selected":
-                    scope_prefix = "[#8ECFFF]Action > Selected[/]"
+                if action_id in custom_list_action_ids and plain.endswith(" (filepicker)"):
+                    plain = plain[: -len(" (filepicker)")]
+                if scope == "target":
+                    scope_prefix = "[#7DFF9B]Action > Target[/]"
                 else:
                     scope_prefix = "[#ffb347]Action > Global[/]"
+                if action_id in custom_list_action_ids:
+                    scope_prefix = scope_prefix.replace("[/]", " (filepicker)[/]")
                 yield SystemCommand(
                     f"{scope_prefix}: {plain}",
                     f"{self._action_help_text(action_id, label)} (id=action:{action_id})",
@@ -2186,7 +2185,6 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
 
     def action_pick_actions(self) -> None:
         targets = self._target_rows()
-        selected = self._selected_row()
         hotkey_map = self._hotkey_target_label_map()
 
         def with_hotkeys(items: list[tuple[str, str]]) -> list[tuple[str, str]]:
@@ -2203,12 +2201,12 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
             self._readme_button_actions() + self._notes_button_actions()
         )
 
-        selection_actions: list[tuple[str, str]] = [
+        target_actions: list[tuple[str, str]] = [
             ("tags_set", "[white]Tags...[/]"),
-            ("reconcile_selection_cache", "[white]Reconcile selected cache now[/]"),
+            ("reconcile_selection_cache", "[white]Reconcile target cache now[/]"),
         ]
         if self.view_mode == "active":
-            selection_actions.append(("suffix_set", "[white]Suffix...[/]"))
+            target_actions.append(("suffix_set", "[white]Suffix...[/]"))
         for k, v in self.view_config[self.view_mode]["actions"]:
             label = f"[white]{v}[/]"
             if targets and k in {
@@ -2224,22 +2222,27 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
                 )
                 if skipped:
                     label += f" [dim]({len(runnable)}/{len(targets)} ready)[/]"
-            selection_actions.append((k, label))
+            target_actions.append((k, label))
 
-        item_actions: list[tuple[str, str]] = []
-        if selected is not None:
-            item_actions.append(("rename_item", "[white]Rename item...[/]"))
-            issue_codes = {
-                code for _lvl, code, _msg in base_meta_issues(selected.path)
-            }
-            if issue_codes and not selected.packed:
-                item_actions.append(
+        if targets:
+            target_actions.append(("rename_item", "[white]Rename item...[/]"))
+            has_review_meta = False
+            has_legacy_meta = False
+            for row in targets:
+                issue_codes = {code for _lvl, code, _msg in base_meta_issues(row.path)}
+                if issue_codes and not row.packed:
+                    has_review_meta = True
+                if (
+                    ("legacy_only" in issue_codes or "legacy_conflict" in issue_codes)
+                    and not row.packed
+                ):
+                    has_legacy_meta = True
+            if has_review_meta:
+                target_actions.append(
                     ("review_meta", "[white]Open .base.yaml and review warnings[/]")
                 )
-            if (
-                "legacy_only" in issue_codes or "legacy_conflict" in issue_codes
-            ) and not selected.packed:
-                item_actions.append(
+            if has_legacy_meta:
+                target_actions.append(
                     ("rename_meta_ext", "[white]Rename .base.yml -> .base.yaml[/]")
                 )
 
@@ -2251,19 +2254,16 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
             ("edit_global_config", "[white]Edit global config in $EDITOR[/]"),
         ]
 
-        selection_actions.extend(self._custom_actions_for_scope("selection"))
-        item_actions.extend(self._custom_actions_for_scope("item"))
+        target_actions.extend(self._custom_actions_for_scope("target"))
         global_actions.extend(self._custom_actions_for_scope("global"))
 
-        # If nothing is selected, keep selection tab available but mostly empty.
         if not targets:
-            selection_actions = [("noop", "[dim]No selection actions available[/]")]
+            target_actions = [("noop", "[dim]No target actions available[/]")]
 
         self.push_screen(
             ActionPickerScreen(
                 button_actions,
-                with_hotkeys(selection_actions),
-                with_hotkeys(item_actions),
+                with_hotkeys(target_actions),
                 with_hotkeys(global_actions),
             ),
             self._on_pick_actions,

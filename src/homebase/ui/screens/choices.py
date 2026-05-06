@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import difflib
+import re
+
 from textual.app import ComposeResult
 from textual.containers import Vertical
+from textual.events import Key, Resize
 from textual.screen import ModalScreen
 from textual.widgets import Static
 
@@ -111,3 +115,176 @@ class SingleChoiceScreen(ModalScreen[str | None]):
     def action_cancel(self) -> None:
         self.dismiss(None)
 
+
+class FuzzyChoiceScreen(ModalScreen[str | None]):
+    CSS = """
+    Screen {
+        align: center middle;
+    }
+    #choice_picker_box {
+        width: 90%;
+        min-width: 80;
+        height: 95%;
+        border: round $accent;
+        background: $surface;
+        padding: 1 2;
+    }
+    #choice_picker_body { height: 1fr; }
+    """
+    BINDINGS = [
+        ("up", "move_up", "Up"),
+        ("down", "move_down", "Down"),
+        ("ctrl+c", "clear_filter", "Clear filter"),
+        ("enter", ACTION_ACCEPT, "Accept"),
+        ("space", ACTION_ACCEPT, "Accept"),
+        ("backspace", "backspace", "Backspace"),
+        ("escape", ACTION_CANCEL, "Cancel"),
+    ]
+
+    def __init__(self, title: str, options: list[tuple[str, str]]) -> None:
+        super().__init__()
+        self.title = title
+        self.options = options
+        self.filter_text = ""
+        self.index = 0
+        self.list_scroll_offset = 0
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="choice_picker_box"):
+            yield Static(f"[bold]{self.title}[/]")
+            yield Static("", id="choice_picker_filter", markup=False)
+            yield Static("", id="choice_picker_body")
+            yield Static(
+                "type fuzzy filter, ctrl+c clear filter, up/down select, enter select, esc cancel"
+            )
+
+    def on_mount(self) -> None:
+        self._refresh_body()
+
+    def on_resize(self, _event: Resize) -> None:
+        self._refresh_body()
+
+    def on_key(self, event: Key) -> None:
+        if event.key == "backspace":
+            self.action_backspace()
+            event.stop()
+            return
+        if event.character is not None and event.character.isprintable():
+            self.filter_text += event.character
+            self.index = 0
+            self.list_scroll_offset = 0
+            self._refresh_body()
+            event.stop()
+
+    def _search_text(self, item: tuple[str, str]) -> str:
+        key, label = item
+        label = re.sub(r"\[[^\]]*\]", "", label)
+        return f"{key} {label}".lower()
+
+    def _visible_options(self) -> list[tuple[str, str]]:
+        q = self.filter_text.strip().lower()
+        if not q:
+            return self.options
+        ranked: list[tuple[float, tuple[str, str]]] = []
+        for item in self.options:
+            text = self._search_text(item)
+            score = 0.0
+            if q in text:
+                score = max(score, 0.80 + min(0.15, len(q) / max(1, len(text))))
+            score = max(score, difflib.SequenceMatcher(None, q, text).ratio())
+            qi = 0
+            for ch in text:
+                if qi < len(q) and ch == q[qi]:
+                    qi += 1
+            if qi == len(q):
+                score = max(score, 0.72 + min(0.20, len(q) / max(1, len(text))))
+            if score >= 0.45:
+                ranked.append((score, item))
+        ranked.sort(key=lambda pair: (-pair[0], pair[1][1]))
+        return [item for _score, item in ranked]
+
+    def _refresh_body(self) -> None:
+        self.query_one("#choice_picker_filter", Static).update(
+            f"filter: {self.filter_text or '(all)'}"
+        )
+        visible = self._visible_options()
+        lines: list[str] = []
+        if not visible:
+            self.index = 0
+            self.list_scroll_offset = 0
+            lines.append("(no files match current filter)")
+            self.query_one("#choice_picker_body", Static).update("\n".join(lines))
+            return
+
+        if self.index >= len(visible):
+            self.index = len(visible) - 1
+        if self.index < 0:
+            self.index = 0
+
+        max_rows = self._max_rows()
+        max_offset = max(0, len(visible) - max_rows)
+        if self.list_scroll_offset > max_offset:
+            self.list_scroll_offset = max_offset
+        if self.index < self.list_scroll_offset:
+            self.list_scroll_offset = self.index
+        elif self.index >= self.list_scroll_offset + max_rows:
+            self.list_scroll_offset = self.index - max_rows + 1
+
+        window = visible[self.list_scroll_offset : self.list_scroll_offset + max_rows]
+        for i, (_key, label) in enumerate(window):
+            absolute_i = self.list_scroll_offset + i
+            cursor = ">" if absolute_i == self.index else " "
+            lines.append(f"{cursor} {label}")
+        if len(visible) > max_rows:
+            start = self.list_scroll_offset + 1
+            end = self.list_scroll_offset + len(window)
+            lines.append(f"[dim]showing {start}-{end} of {len(visible)}[/]")
+        self.query_one("#choice_picker_body", Static).update("\n".join(lines))
+
+    def _max_rows(self) -> int:
+        body = self.query_one("#choice_picker_body", Static)
+        try:
+            h = int(body.size.height)
+        except (TypeError, ValueError):
+            h = 0
+        if h <= 2:
+            return 14
+        return max(6, h - 1)
+
+    def action_move_up(self) -> None:
+        visible = self._visible_options()
+        if not visible:
+            return
+        self.index = (self.index - 1) % len(visible)
+        self._refresh_body()
+
+    def action_move_down(self) -> None:
+        visible = self._visible_options()
+        if not visible:
+            return
+        self.index = (self.index + 1) % len(visible)
+        self._refresh_body()
+
+    def action_backspace(self) -> None:
+        if not self.filter_text:
+            return
+        self.filter_text = self.filter_text[:-1]
+        self.index = 0
+        self.list_scroll_offset = 0
+        self._refresh_body()
+
+    def action_clear_filter(self) -> None:
+        if not self.filter_text:
+            return
+        self.filter_text = ""
+        self._refresh_body()
+
+    def action_accept(self) -> None:
+        visible = self._visible_options()
+        if not visible:
+            self.dismiss(None)
+            return
+        self.dismiss(visible[self.index][0])
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)

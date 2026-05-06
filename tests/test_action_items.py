@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
 from homebase.ui.actions import action_items
 
@@ -10,7 +11,7 @@ class _AppStub:
         self.custom_actions = [
             {
                 "id": "hotkey_open_item",
-                "scope": "item",
+                "scope": "target",
                 "action": "custom:open_item",
             }
         ]
@@ -20,7 +21,72 @@ class _AppStub:
         self.picked = value
 
 
+class _RunAppStub:
+    def __init__(self, actions: list[dict[str, str]], targets: list[Path]) -> None:
+        self.custom_actions = actions
+        self.view_mode = "active"
+        self._targets = [SimpleNamespace(path=p, name=p.name, tags=[], properties=[], created="", last="", opened_ts=0, branch="") for p in targets]
+        self.logged: list[tuple[str, str]] = []
+
+    def _target_rows(self):
+        return self._targets
+
+    def _log(self, msg: str, level: str) -> None:
+        self.logged.append((level, msg))
+
+    def _refresh_side(self) -> None:
+        return
+
+    def _show_runtime_error(self, _ctx: str, _exc: Exception) -> None:
+        return
+
+
 def test_run_custom_action_dispatches_action_target() -> None:
     app = _AppStub()
     action_items.run_custom_action(app, "hotkey_open_item", base_dir=Path("/tmp"), fmt_ymd=lambda _x: "")
     assert app.picked == "custom:open_item"
+
+
+def test_run_custom_action_joins_full_path_when_not_looping(monkeypatch) -> None:
+    calls: list[str] = []
+
+    class _P:
+        def __init__(self, cmd, cwd=None):
+            calls.append(str(cmd[2]))
+
+    monkeypatch.setattr(action_items.subprocess, "Popen", _P)
+    app = _RunAppStub(
+        [
+            {
+                "id": "x",
+                "scope": "target",
+                "command": "cmd {{ full_path }}",
+            }
+        ],
+        [Path("/tmp/a b"), Path("/tmp/c")],
+    )
+    action_items.run_custom_action(app, "x", base_dir=Path("/tmp"), fmt_ymd=lambda _x: "")
+    assert calls == ['cmd "/tmp/a b" "/tmp/c"']
+
+
+def test_run_custom_action_loops_when_enabled(monkeypatch) -> None:
+    calls: list[str] = []
+
+    class _P:
+        def __init__(self, cmd, cwd=None):
+            calls.append(str(cmd[2]))
+
+    monkeypatch.setattr(action_items.subprocess, "Popen", _P)
+    app = _RunAppStub(
+        [
+            {
+                "id": "x",
+                "scope": "target",
+                "command": "cmd {{ full_path }}",
+                "loop_on_multi": "true",
+            }
+        ],
+        [Path("/tmp/a"), Path("/tmp/b")],
+    )
+    action_items.run_custom_action(app, "x", base_dir=Path("/tmp"), fmt_ymd=lambda _x: "")
+    assert calls == ["cmd /tmp/a", "cmd /tmp/b"]

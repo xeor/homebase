@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any, Callable
 
 
@@ -74,7 +75,7 @@ def on_pick_actions(app: Any, value: str | None) -> None:
 
     def _handle_reconcile_selection_cache() -> bool:
         if not targets:
-            app._log("reconcile skipped: no selection", "warn")
+            app._log("reconcile skipped: no target", "warn")
             app._refresh_side()
             return True
         paths = [r.path for r in targets]
@@ -83,26 +84,73 @@ def on_pick_actions(app: Any, value: str | None) -> None:
             if all(r.archived for r in targets)
             else ("active" if all(not r.archived for r in targets) else "mixed")
         )
-        app._start_reconcile_rows(mode, "manual-selection", paths)
-        app._log(f"reconcile requested for selection ({len(paths)})", "info")
+        app._start_reconcile_rows(mode, "manual-target", paths)
+        app._log(f"reconcile requested for target ({len(paths)})", "info")
         app._refresh_side()
         return True
 
     def _handle_rename_item() -> bool:
-        row = app._selected_row()
-        if row is None:
+        paths = [r.path for r in targets]
+        if not paths:
             return True
-        app.pending_rename_target = row.path
-        app.push_screen(app._input_screen_cls("Rename item", "new folder name", row.path.name), app._on_rename_item)
+
+        def _prompt_next_rename(queue: list[Path], done: int, total: int) -> None:
+            if not queue:
+                app._refresh_side()
+                return
+            current = queue[0]
+            current_name = current.name
+            find_row = getattr(app, "_find_row", None)
+            if callable(find_row):
+                hit = find_row(current)
+                if hit is not None:
+                    rows, idx = hit
+                    current_name = rows[idx].name
+            title = f"Rename target ({done + 1}/{total})"
+            app.pending_rename_target = current
+            app.push_screen(
+                app._input_screen_cls(title, "new folder name", current_name),
+                lambda value: _on_rename_submit(value, queue, done, total),
+            )
+
+        def _on_rename_submit(
+            value: str | None,
+            queue: list[Path],
+            done: int,
+            total: int,
+        ) -> None:
+            current = queue.pop(0)
+            app.pending_rename_target = current
+            app._on_rename_item(value)
+            _prompt_next_rename(queue, done + 1, total)
+
+        _prompt_next_rename(list(paths), 0, len(paths))
         return True
 
     def _handle_meta_actions() -> bool:
-        row = app._selected_row()
-        if row is None:
+        paths = [r.path for r in targets]
+        if not paths:
             return True
-        paths = [row.path]
-        title, details = app._build_bulk_confirm_payload(value, paths)
-        app.push_screen(app._confirm_screen_cls(title, details), lambda ok: app._on_confirm_bulk(ok, value, paths))
+
+        def _prompt_next_meta(queue: list[Path]) -> None:
+            if not queue:
+                app._refresh_side()
+                return
+            current = queue[0]
+            title, details = app._build_bulk_confirm_payload(value, [current])
+            app.push_screen(
+                app._confirm_screen_cls(title, details),
+                lambda ok: _on_meta_confirm(ok, queue),
+            )
+
+        def _on_meta_confirm(ok: bool, queue: list[Path]) -> None:
+            current = queue.pop(0)
+            app._on_confirm_bulk(ok, value, [current])
+            if not ok:
+                return
+            _prompt_next_meta(queue)
+
+        _prompt_next_meta(list(paths))
         return True
 
     def _handle_set_desc() -> bool:

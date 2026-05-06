@@ -120,7 +120,7 @@ done
   skip-TUI, …). Replace the example with whatever shape ends up most
   natural after a real implementation pass.
 
-- [ ] **Handling files inside project**
+- [x] **Handling files inside project**
   There needs to be an action type that acts on the output of a command given the project as a context.
   The command can create a list with the context and the list should be displayed and be fuzzy searchable.
   Based on pressing an item. Another command will take the result and execute.
@@ -128,3 +128,25 @@ done
   give a list of drawio files. Based on my then selection, I can open the selection using the executor "drawio {{ selection }}".
   This action type should act as the other action-types, but be sorted last. Both in the action-meny (ctrl-a), but also in the ctrl-p menu.
   It should have it's own colors and be integrated just like the other action types, including the option to have hotkeys and so on.
+
+- [x] **Completion**
+  Make a "b completion <shell>" command that currently only needs to support fish, zsh and bash. It must work so I can get
+  completion on all b commands, and dynamic commands where possible, example "b c ..."
+
+- [x] **Single and selected** merge concept
+  Thinking about it, the selection and actions for an item and multiple items doesnt need to be any different. It specially doesnt need
+  to be named something different.
+  
+  Plan (no backward compatibility):
+  - [x] Replace action scope model with only `target` and `global`.
+  - [x] Remove `item` and `selection` scope handling from parser/runtime/UI.
+  - [x] Rename action group labels/tabs to only `Target` and `Global`.
+  - [x] Move all former single-only actions to target-based execution.
+  - [x] Implement per-target sequential dialogs for former single-only actions:
+    - [x] rename
+    - [x] review/open meta warnings
+    - [x] rename `.base.yml` -> `.base.yaml`
+  - [x] Update custom actions to use `scope: target|global` only.
+  - [x] Update command palette grouping to `Action > Target` / `Action > Global`.
+  - [x] Update tests for new scope model and per-target loop behavior.
+  - [x] Update README examples/docs to new scope names only.

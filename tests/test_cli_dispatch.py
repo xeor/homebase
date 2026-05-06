@@ -27,6 +27,8 @@ def test_dispatch_command_status_path() -> None:
         no_arg_flow=lambda _a, _b, _c: 0,
         cmd_status=lambda _a: 7,
         cmd_new=lambda _a: 0,
+        cmd_completion=lambda _a: 0,
+        cmd_internal_complete=lambda _a, _b, _c: 0,
         cmd_create_quick=lambda _a, _b, _c, _d: 0,
         cmd_recent=lambda _a: 0,
         cmd_setup=lambda _a, _b: 0,

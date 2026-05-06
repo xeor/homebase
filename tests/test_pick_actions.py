@@ -32,7 +32,7 @@ class _AppStub:
         pass
 
     def _target_rows(self):
-        return []
+        return [self._selected]
 
     def _selected_row(self):
         return self._selected

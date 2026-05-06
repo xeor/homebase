@@ -44,8 +44,7 @@ class ActionPickerScreen(ModalScreen[str | None]):
     def __init__(
         self,
         button_actions: list[tuple[str, str]],
-        selection_actions: list[tuple[str, str]],
-        item_actions: list[tuple[str, str]],
+        target_actions: list[tuple[str, str]],
         global_actions: list[tuple[str, str]],
     ) -> None:
         super().__init__()
@@ -54,18 +53,16 @@ class ActionPickerScreen(ModalScreen[str | None]):
             self.tabs.append(("buttons", "Buttons"))
         self.tabs.extend(
             [
-                ("selection", "Selection"),
-                ("item", "Item"),
+                ("target", "Target"),
                 ("global", "Global"),
             ]
         )
         self.actions_by_tab: dict[str, list[tuple[str, str]]] = {
             "buttons": button_actions,
-            "selection": selection_actions,
-            "item": item_actions,
+            "target": target_actions,
             "global": global_actions,
         }
-        self.active_tab = "buttons" if button_actions else "selection"
+        self.active_tab = "buttons" if button_actions else "target"
         self.filter_text = ""
         self.index = 0
         self.list_scroll_offset = 0
@@ -254,4 +251,3 @@ class ActionPickerScreen(ModalScreen[str | None]):
 
     def action_cancel(self) -> None:
         self.dismiss(None)
-

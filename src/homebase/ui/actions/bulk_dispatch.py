@@ -57,7 +57,7 @@ def on_confirm_bulk(
     failed = 0
     removed_paths: list[Path] = []
     upsert_rows: list[ProjectRow] = []
-    app._busy_start(f"running {action} on selection")
+    app._busy_start(f"running {action} on target")
     try:
         for path in runnable_paths:
             app._busy_tick()

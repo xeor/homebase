@@ -61,12 +61,26 @@ def load_custom_actions(data: object) -> list[dict[str, str]]:
             continue
         seen.add(cid)
         label = str(item.get("label", cid)).strip() or cid
-        scope = str(item.get("scope", "item")).strip().lower()
-        if scope not in {"item", "selection", "global"}:
-            scope = "item"
+        scope = str(item.get("scope", "target")).strip().lower()
+        if scope not in {"target", "global"}:
+            continue
         command = str(item.get("command", "")).strip()
         action = str(item.get("action", "")).strip()
-        if not command and not action:
+        list_command = str(item.get("list_command", "")).strip()
+        run_command = str(item.get("run_command", "")).strip()
+        loop_on_multi_raw = item.get("loop_on_multi", False)
+        if isinstance(loop_on_multi_raw, bool):
+            loop_on_multi = loop_on_multi_raw
+        elif isinstance(loop_on_multi_raw, (int, float)):
+            loop_on_multi = bool(loop_on_multi_raw)
+        else:
+            loop_on_multi = str(loop_on_multi_raw).strip().lower() in {
+                "1",
+                "true",
+                "yes",
+                "on",
+            }
+        if not command and not action and not (list_command and run_command):
             continue
         row = {
             "id": cid,
@@ -77,6 +91,11 @@ def load_custom_actions(data: object) -> list[dict[str, str]]:
             row["command"] = command
         if action:
             row["action"] = action
+        if list_command and run_command:
+            row["list_command"] = list_command
+            row["run_command"] = run_command
+        if loop_on_multi:
+            row["loop_on_multi"] = "true"
         out.append(row)
     return out
 

@@ -15,6 +15,9 @@ uv run b archive mv .  # archive current dir
 uv run b benchmark run # synthetic perf bench
 uv run b c tmp         # quick-create from template key
 uv run b c tmp --debug # preview actions, no changes
+uv run b completion bash > ~/.local/share/bash-completion/completions/b
+uv run b completion zsh > ~/.zfunc/_b
+uv run b completion fish > ~/.config/fish/completions/b.fish
 ```
 
 Base folder defaults to `~/base`. Override with `--base-folder` or
@@ -22,6 +25,12 @@ Base folder defaults to `~/base`. Override with `--base-folder` or
 
 `homebase` and `b` are interchangeable; both resolve to
 `homebase.cli:entrypoint`.
+
+Shell completion:
+
+- `b completion bash|zsh|fish` prints a completion script for that shell.
+- Dynamic completion includes quick-create keys from `create_templates`
+  for `b c <key>`.
 
 ## Test
 
@@ -210,28 +219,46 @@ Minimal shape:
 custom_actions:
   - id: vscode
     label: Open in VS Code
-    scope: item
-    command: code "{{ full_path }}"
+    scope: target
+    command: code {{ full_path }}
 
   - id: cursor
     label: Open in Cursor
-    scope: item
-    command: cursor "{{ full_path }}"
+    scope: target
+    command: cursor {{ full_path }}
 
   - id: zed
     label: Open in Zed
-    scope: item
-    command: zed "{{ full_path }}"
+    scope: target
+    command: zed {{ full_path }}
 
   - id: reveal_finder
     label: Reveal in Finder
-    scope: item
-    command: open -R "{{ full_path }}"
+    scope: target
+    command: open -R {{ full_path }}
+
+  - id: open_in_daisydisk
+    label: Open in DaisyDisk
+    scope: target
+    command: open -a DaisyDisk {{ full_path }}
+    loop_on_multi: false
 
   - id: open_iterm
     label: Open iTerm here
-    scope: item
-    command: open -a iTerm "{{ full_path }}"
+    scope: target
+    command: open -a iTerm {{ full_path }}
+
+  - id: drawio_pick
+    label: Pick drawio file
+    scope: target
+    list_command: find "{{ full_path }}" -name "*.drawio"
+    run_command: drawio {{ selection_q }}
+
+  - id: pick_markdown
+    label: Pick markdown file
+    scope: target
+    list_command: find "{{ full_path }}" -type f -name "*.md"
+    run_command: codium {{ selection_q }}
 
 custom_hotkeys:
   - id: hk_vscode
@@ -253,9 +280,16 @@ custom_hotkeys:
 
 - `id`: unique action id
 - `label`: shown in action picker
-- `scope`: `item` | `selection` | `global`
+- `scope`: `target` | `global`
 - `command`: shell command template; context vars from custom actions
   still apply (`{{ full_path }}`, `{{ rel_path }}`, ...)
+- `loop_on_multi`: optional (`true`/`false`, default `false`).
+  - `false`: one command invocation; `{{ full_path }}` is auto-expanded to
+    one or many double-quoted paths (`"/p1"` or `"/p1" "/p2" ...`).
+  - `true`: run once per target row (loop behavior).
+- `list_command` + `run_command`: optional pair for list-actions.
+  `list_command` emits candidates (one per line), user picks one in a fuzzy list,
+  then `run_command` executes with `{{ selection }}` / `{{ selection_q }}`.
 - `custom_hotkeys[].hotkey`: key name from Textual key syntax (for
   example `f1`..`f12`, `ctrl+f5`, `alt+v`, `ç`, `†` on macOS option keys)
 - `custom_hotkeys[].target`: command-palette id to trigger. Supported:
@@ -271,6 +305,26 @@ Notes:
   hotkey.
 - Hotkeys trigger when the main projects table has focus and no modal
   is open.
+- list-actions run per target row when multiple targets are selected
+  (results are merged); with one focused row they run once.
+- For non-loop target commands, `b` handles quoting for `{{ full_path }}`;
+  do not add extra quotes around `{{ full_path }}` in command templates.
+
+List-action setup and usage:
+
+1. Add a custom action with `list_command` and `run_command` in `.base-conf.yaml`.
+2. Reload config (`Settings > Global config > Reload global config`) or restart `b`.
+3. Open actions with `ctrl+a` or command palette with `ctrl+p`.
+4. Pick your list-action (marked with `(list)`).
+5. Type to fuzzy-filter candidates, press `enter` to execute selected item.
+
+Example behavior:
+
+- Focus a project `my-app`
+- Run `Pick markdown file`
+- App runs `find "<project-path>" -type f -name "*.md"`
+- You choose a file from the list
+- App executes `codium <selected-file>`
 
 ## Package
 

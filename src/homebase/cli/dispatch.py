@@ -17,6 +17,8 @@ def dispatch_command(
     no_arg_flow: Callable[[Path, Path, str], int],
     cmd_status: Callable[[Path], int],
     cmd_new: Callable[[Path], int],
+    cmd_completion: Callable[[str], int],
+    cmd_internal_complete: Callable[[str, int, list[str]], int],
     cmd_create_quick: Callable[[Path, str, str | None, bool], int],
     cmd_recent: Callable[[Path], int],
     cmd_setup: Callable[[Path, bool | None], int],
@@ -46,6 +48,14 @@ def dispatch_command(
         return cmd_status(base_dir)
     if ns.command == "new":
         return cmd_new(base_dir)
+    if ns.command == "completion":
+        return cmd_completion(str(ns.shell))
+    if ns.command == "__complete":
+        return cmd_internal_complete(
+            str(ns.shell),
+            int(ns.cword),
+            [str(x) for x in ns.words],
+        )
     if ns.command == "c":
         raw_name = str(getattr(ns, "name", "") or "").strip()
         return cmd_create_quick(base_dir, str(ns.key), raw_name or None, bool(ns.debug))

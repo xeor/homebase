@@ -76,7 +76,7 @@ def build_bulk_confirm_payload(
         lines.append("[cyan]kept[/]: metadata content and project files are unchanged")
 
     lines.append("")
-    lines.append("[cyan]selection preview[/]:")
+    lines.append("[cyan]target preview[/]:")
     max_preview = 8
     for path in paths[:max_preview]:
         hit = app._find_row(path)

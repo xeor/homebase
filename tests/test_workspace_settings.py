@@ -27,14 +27,7 @@ def test_load_custom_actions_filters_invalid_rows() -> None:
             ]
         }
     )
-    assert out == [
-        {
-            "id": "custom_1",
-            "label": "custom_1",
-            "scope": "item",
-            "command": "echo ok",
-        }
-    ]
+    assert out == []
 
 
 def test_load_custom_actions_accepts_action_without_command() -> None:
@@ -45,12 +38,71 @@ def test_load_custom_actions_accepts_action_without_command() -> None:
             ]
         }
     )
+    assert out == []
+
+
+def test_load_custom_actions_accepts_target_scope() -> None:
+    out = workspace_settings.load_custom_actions(
+        {
+            "custom_actions": [
+                {"id": "x", "scope": "target", "action": "custom:open_item"},
+            ]
+        }
+    )
     assert out == [
         {
             "id": "x",
             "label": "x",
-            "scope": "item",
+            "scope": "target",
             "action": "custom:open_item",
+        }
+    ]
+
+
+def test_load_custom_actions_parses_loop_on_multi() -> None:
+    out = workspace_settings.load_custom_actions(
+        {
+            "custom_actions": [
+                {
+                    "id": "x",
+                    "scope": "target",
+                    "command": "open -a DaisyDisk {{ full_path }}",
+                    "loop_on_multi": True,
+                },
+            ]
+        }
+    )
+    assert out == [
+        {
+            "id": "x",
+            "label": "x",
+            "scope": "target",
+            "command": "open -a DaisyDisk {{ full_path }}",
+            "loop_on_multi": "true",
+        }
+    ]
+
+
+def test_load_custom_actions_accepts_list_action_form() -> None:
+    out = workspace_settings.load_custom_actions(
+        {
+            "custom_actions": [
+                {
+                    "id": "drawio",
+                    "scope": "target",
+                    "list_command": "find {{ full_path }} -name '*.drawio'",
+                    "run_command": "drawio {{ selection_q }}",
+                }
+            ]
+        }
+    )
+    assert out == [
+        {
+            "id": "drawio",
+            "label": "drawio",
+            "scope": "target",
+            "list_command": "find {{ full_path }} -name '*.drawio'",
+            "run_command": "drawio {{ selection_q }}",
         }
     ]
 

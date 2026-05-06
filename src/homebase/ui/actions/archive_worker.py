@@ -34,7 +34,7 @@ def start_archive_action_worker(
     app.action_worker_stage = "queued"
     app.action_worker_command = ""
     app.action_worker_started_ts = int(time.time())
-    app._busy_start(f"running {action} on selection")
+    app._busy_start(f"running {action} on target")
     app._worker_debug(f"archive worker start: action={action} items={len(paths)}")
     app._refresh_side()
 
