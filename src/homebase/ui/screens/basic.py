@@ -125,3 +125,29 @@ class InputScreen(ModalScreen[str | None]):
     def action_cancel(self) -> None:
         self.dismiss(None)
 
+
+class ProcessWaitScreen(ModalScreen[None]):
+    CSS = """
+    Screen {
+        align: center middle;
+    }
+    #wait_box {
+        width: 112;
+        height: 18;
+        border: round $accent;
+        background: $surface;
+        padding: 1 2;
+    }
+    #wait_details { height: 1fr; }
+    """
+
+    def __init__(self, title: str, details: str) -> None:
+        super().__init__()
+        self.title = title
+        self.details = details
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="wait_box"):
+            yield Static(f"[bold]{self.title}[/]")
+            yield Static(self.details, id="wait_details")
+            yield Static("[dim]waiting for process to finish...[/]")

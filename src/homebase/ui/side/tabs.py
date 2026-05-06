@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import shlex
-import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -77,6 +76,8 @@ def refresh_side(app: Any, *, base_dir: Path, color_accent_hex: str, level_warn:
             lines.append(cheat)
         elif app.side_info_tab == "cache":
             lines.extend(app._cache_info_lines())
+        elif app.side_info_tab == "processes":
+            lines.extend(app._managed_process_info_lines())
         else:
             if app.messages:
                 for level, ts, msg in app.messages:
@@ -242,7 +243,13 @@ def run_notes_command(
     context["NOTE_PATH_Q"] = shlex.quote(str(note_path))
     context["note_path_q"] = context["NOTE_PATH_Q"]
     command = render_notes_template(template, context)
-    subprocess.run(["sh", "-lc", command], cwd=str(base_dir), check=False)
+    app._start_managed_shell_command(
+        command,
+        cwd=base_dir,
+        label=f"notes {op}: {row.name}",
+        wait=False,
+        terminate_on_quit=True,
+    )
 
 
 def run_notes_button_action(app: Any, action_id: str, *, level_warn: str) -> None:
@@ -262,8 +269,10 @@ def run_notes_button_action(app: Any, action_id: str, *, level_warn: str) -> Non
             if not note_path.is_file():
                 app._set_runtime_status("Notes file not found for open", level_warn, ttl_s=6.0)
                 return
+            app._mark_row_active(selected.path)
             app._run_notes_command(str(app.notes_config.get("open_command", "")), note_path, selected, "open")
         else:
+            app._mark_row_active(selected.path)
             app._run_notes_command(str(app.notes_config.get("create_command", "")), note_path, selected, "create")
     except (OSError, ValueError, RuntimeError) as exc:
         app._show_runtime_error("run notes command", exc)
@@ -296,6 +305,7 @@ def run_readme_button_action(app: Any, action_id: str, *, level_warn: str) -> No
         elif not readme_path.is_file():
             app._set_runtime_status("README.md not found for edit", level_warn, ttl_s=6.0)
             return
+        app._mark_row_active(selected.path)
         app._open_editor_for_path(readme_path)
     except (OSError, ValueError) as exc:
         op = "create/edit README.md in editor" if action_id == "readme_create" else "edit README.md in editor"

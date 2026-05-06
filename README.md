@@ -305,10 +305,16 @@ Notes:
   hotkey.
 - Hotkeys trigger when the main projects table has focus and no modal
   is open.
-- list-actions run per target row when multiple targets are selected
+- list-actions run per target row when multiple targets are active
   (results are merged); with one focused row they run once.
 - For non-loop target commands, `b` handles quoting for `{{ full_path }}`;
   do not add extra quotes around `{{ full_path }}` in command templates.
+- Target/global custom action commands are launched as background managed
+  processes (non-blocking UI).
+- Global config edit remains blocking until editor exits, then config is reloaded.
+- Running managed processes are listed under `Info > Processes`.
+- Quitting `b` while managed processes are running prompts for confirmation,
+  and confirming quit terminates those managed processes.
 
 List-action setup and usage:
 
@@ -316,7 +322,7 @@ List-action setup and usage:
 2. Reload config (`Settings > Global config > Reload global config`) or restart `b`.
 3. Open actions with `ctrl+a` or command palette with `ctrl+p`.
 4. Pick your list-action (marked with `(list)`).
-5. Type to fuzzy-filter candidates, press `enter` to execute selected item.
+5. Type to fuzzy-filter candidates, press `enter` to execute the chosen path.
 
 Example behavior:
 
@@ -324,7 +330,7 @@ Example behavior:
 - Run `Pick markdown file`
 - App runs `find "<project-path>" -type f -name "*.md"`
 - You choose a file from the list
-- App executes `codium <selected-file>`
+- App executes `codium <chosen-file>`
 
 ## Package
 

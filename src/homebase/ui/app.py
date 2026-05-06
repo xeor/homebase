@@ -6,6 +6,7 @@ import random
 import re
 import sqlite3
 import subprocess
+import threading
 import time
 from pathlib import Path
 from typing import Callable, Iterable
@@ -106,6 +107,7 @@ from ..core.constants import (
 from ..core.models import (
     ArchiveActionOutcome,
     CacheRefreshOutcome,
+    ManagedProcess,
     PaneRef,
     ProjectRow,
     RestoreTargetExistsError,
@@ -165,6 +167,7 @@ from .screens.actions import ActionPickerScreen
 from .screens.basic import (
     ConfirmScreen,
     InputScreen,
+    ProcessWaitScreen,
     RuntimeErrorScreen,
 )
 from .screens.choices import FuzzyChoiceScreen, SingleChoiceScreen
@@ -215,19 +218,19 @@ _ROW_BUILD_ERRORS = (
 _VIEW_CONFIG_DEFAULT: dict[str, dict[str, list[tuple[str, str]]]] = {
     "active": {
         "actions": [
-            ("archive", "archive selected"),
-            ("set_desc", "set description on selected"),
-            ("delete", "delete selected"),
+            ("archive", "archive target"),
+            ("set_desc", "set description on target"),
+            ("delete", "delete target"),
         ],
     },
     "archive": {
         "actions": [
-            ("toggle_pack", "toggle pack/unpack selected"),
-            ("pack", "pack selected (.base-pkg.tgz)"),
-            ("unpack", "unpack selected"),
-            ("restore", "restore selected"),
-            ("set_desc", "set description on selected"),
-            ("delete", "delete selected"),
+            ("toggle_pack", "toggle pack/unpack target"),
+            ("pack", "pack target (.base-pkg.tgz)"),
+            ("unpack", "unpack target"),
+            ("restore", "restore target"),
+            ("set_desc", "set description on target"),
+            ("delete", "delete target"),
         ],
     },
 }
@@ -324,6 +327,7 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
         self.base_dir = base_dir
         self.ctx = ctx if ctx is not None else build_ui_context(base_dir)
         self._confirm_screen_cls = ConfirmScreen
+        self._process_wait_screen_cls = ProcessWaitScreen
         self._input_screen_cls = InputScreen
         self._action_picker_screen_cls = ActionPickerScreen
         self._fuzzy_choice_screen_cls = FuzzyChoiceScreen
@@ -435,6 +439,9 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
         self.custom_actions = list(self.ctx.custom_actions)
         self.custom_hotkeys = list(self.ctx.custom_hotkeys)
         self.pending_tag_updates: set[Path] = set()
+        self.managed_processes: list[ManagedProcess] = []
+        self._managed_processes_lock = threading.Lock()
+        self._wait_process_modal_pid: int | None = None
         self.messages: list[tuple[str, str, str]] = []
         self._health_issue_seen: dict[Path, str] = {}
         self.pending_restore_queue: list[Path] = []
@@ -1326,6 +1333,21 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
         except (OSError, sqlite3.Error, TypeError, ValueError):
             return
 
+    def _mark_row_active(self, path: Path) -> None:
+        opened_ts = int(time.time())
+        self._set_opened_ts_local(path, opened_ts)
+        try:
+            hit = self._find_row(path)
+            if hit is None:
+                return
+            rows, idx = hit
+            rows[idx].opened_ts = opened_ts
+            rows[idx].stale = False
+            rows[idx].cache_age_s = 0
+            self._touch_rows_cache([rows[idx]])
+        except (IndexError, AttributeError, TypeError, ValueError):
+            return
+
     def _move_opened_ts_local(self, src: Path, dst: Path) -> None:
         try:
             cache_move_opened_ts(self.base_dir, src, dst)
@@ -1787,8 +1809,138 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
     def _update_readme_tab_state(self) -> None:
         textual_ui_side_tabs.update_readme_tab_state(self)
 
-    def _open_editor_for_path(self, path: Path) -> None:
-        textual_ui_side_effects.open_editor_for_path(path)
+    def _open_editor_for_path(
+        self,
+        path: Path,
+        *,
+        wait: bool = False,
+        on_done: Callable[[], None] | None = None,
+    ) -> None:
+        textual_ui_side_effects.open_editor_for_path(
+            self,
+            path,
+            wait=wait,
+            on_done=on_done,
+        )
+
+    def _start_managed_process(
+        self,
+        argv: list[str],
+        *,
+        cwd: Path,
+        label: str,
+        command_display: str,
+        wait: bool,
+        terminate_on_quit: bool,
+        on_done: Callable[[], None] | None = None,
+    ) -> None:
+        proc = subprocess.Popen(argv, cwd=str(cwd))
+        info = ManagedProcess(
+            pid=int(proc.pid),
+            label=label,
+            command=command_display,
+            cwd=cwd,
+            started_ts=time.time(),
+            wait_mode=wait,
+            terminate_on_quit=terminate_on_quit,
+        )
+        with self._managed_processes_lock:
+            self.managed_processes.append(info)
+        self._refresh_side()
+
+        def _waiter() -> None:
+            rc = proc.wait()
+
+            def _done() -> None:
+                ended_ts = time.time()
+                with self._managed_processes_lock:
+                    for row in self.managed_processes:
+                        if row.pid == info.pid and row.ended_ts <= 0:
+                            row.returncode = int(rc)
+                            row.ended_ts = ended_ts
+                            break
+                if self._wait_process_modal_pid == info.pid:
+                    self._wait_process_modal_pid = None
+                    try:
+                        self.pop_screen()
+                    except WIDGET_API_ERRORS:
+                        pass
+                if on_done is not None:
+                    on_done()
+                self._refresh_side()
+
+            self.call_from_thread(_done)
+
+        threading.Thread(target=_waiter, daemon=True).start()
+
+        if wait:
+            def _show_wait() -> None:
+                if self._process_running(info.pid):
+                    self._wait_process_modal_pid = info.pid
+                    details = (
+                        f"[cyan]label[/]: {self._esc(label)}\n"
+                        f"[cyan]pid[/]: {info.pid}\n"
+                        f"[cyan]cwd[/]: {self._esc(cwd)}\n"
+                        f"[cyan]command[/]: [dim]{self._esc(command_display)}[/]"
+                    )
+                    self.push_screen(self._process_wait_screen_cls("Waiting for process", details))
+
+            self.set_timer(0.25, _show_wait)
+
+    def _start_managed_shell_command(
+        self,
+        command: str,
+        *,
+        cwd: Path,
+        label: str,
+        wait: bool,
+        terminate_on_quit: bool,
+        on_done: Callable[[], None] | None = None,
+    ) -> None:
+        self._start_managed_process(
+            ["sh", "-lc", command],
+            cwd=cwd,
+            label=label,
+            command_display=command,
+            wait=wait,
+            terminate_on_quit=terminate_on_quit,
+            on_done=on_done,
+        )
+
+    def _process_running(self, pid: int) -> bool:
+        with self._managed_processes_lock:
+            return any(p.pid == pid and p.ended_ts <= 0 for p in self.managed_processes)
+
+    def _running_terminating_processes(self) -> list[ManagedProcess]:
+        with self._managed_processes_lock:
+            return [p for p in self.managed_processes if p.ended_ts <= 0 and p.terminate_on_quit]
+
+    def _terminate_running_managed_processes(self) -> None:
+        running = self._running_terminating_processes()
+        for proc in running:
+            try:
+                os.kill(proc.pid, 15)
+            except OSError:
+                continue
+
+    def _managed_process_info_lines(self) -> list[str]:
+        with self._managed_processes_lock:
+            rows = list(self.managed_processes)
+        if not rows:
+            return ["[dim]no managed processes[/]"]
+        out: list[str] = []
+        running = [p for p in rows if p.ended_ts <= 0]
+        done = [p for p in rows if p.ended_ts > 0]
+        out.append(f"running: {len(running)}  done: {len(done)}")
+        out.append("[dim]on quit, running managed processes are terminated[/]")
+        for proc in sorted(rows, key=lambda p: p.started_ts, reverse=True)[:20]:
+            status = "running" if proc.ended_ts <= 0 else f"done rc={proc.returncode}"
+            out.append(
+                f"[{self._esc(str(proc.pid))}] {self._esc(proc.label)} - {status}"
+            )
+            out.append(f"  cwd: {self._esc(proc.cwd)}")
+            out.append(f"  cmd: [dim]{self._esc(proc.command)}[/]")
+        return out
 
     def _readme_button_actions(self) -> list[tuple[str, str]]:
         return textual_ui_side_effects.readme_button_actions(self._selected_row())
@@ -2433,7 +2585,7 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
         self.pending_restore_failed += 1
         self.multi_selected.discard(path)
         self.pending_restore_queue.pop(0)
-        self._busy_start("restoring selected items")
+        self._busy_start("restoring target items")
         self._process_next_restore()
 
     def _on_restore_other_target(
@@ -2449,12 +2601,12 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
             self.pending_restore_failed += 1
             self.multi_selected.discard(archived_path)
             self.pending_restore_queue.pop(0)
-            self._busy_start("restoring selected items")
+            self._busy_start("restoring target items")
             self._process_next_restore()
             return
 
         try:
-            self._busy_start("restoring selected items")
+            self._busy_start("restoring target items")
             restored = archive_restore_internal(
                 self.base_dir,
                 archived_path,
@@ -2484,7 +2636,7 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
 
         self.multi_selected.discard(archived_path)
         self.pending_restore_queue.pop(0)
-        self._busy_start("restoring selected items")
+        self._busy_start("restoring target items")
         self._process_next_restore()
 
     def _jump_to_tmux_pane(self, pane: PaneRef) -> bool:
@@ -2642,18 +2794,7 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
         # Enter should always open the currently selected directory as-is.
         # In archive view this means opening the archived folder itself,
         # not the restore target.
-        opened_ts = int(time.time())
-        self._set_opened_ts_local(row.path, opened_ts)
-        try:
-            hit = self._find_row(row.path)
-            if hit is not None:
-                rows, idx = hit
-                rows[idx].opened_ts = opened_ts
-                rows[idx].stale = False
-                rows[idx].cache_age_s = 0
-                self._touch_rows_cache([rows[idx]])
-        except (IndexError, AttributeError, TypeError, ValueError):
-            pass
+        self._mark_row_active(row.path)
 
         if self._open_selected_in_tmux_mode(row):
             return
@@ -2667,6 +2808,27 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
         self.exit(("open", row.path, []))
 
     def action_quit_app(self) -> None:
+        running_managed = self._running_terminating_processes()
+        if running_managed:
+            sample = running_managed[:3]
+            details = [
+                f"[cyan]running managed processes[/]: {len(running_managed)}",
+                "[bold yellow]warning[/]: quitting will terminate them",
+            ]
+            for proc in sample:
+                details.append(f"- [cyan]pid[/]={proc.pid} [cyan]label[/]={self._esc(proc.label)}")
+                details.append(
+                    f"  [cyan]running[/]: {max(0.0, time.time() - float(proc.started_ts)):.1f}s"
+                )
+                details.append(f"  [cyan]cwd[/]: {self._esc(proc.cwd)}")
+                details.append(f"  [cyan]command[/]: [dim]{self._esc(proc.command)}[/]")
+            if len(running_managed) > len(sample):
+                details.append(f"- ... and {len(running_managed) - len(sample)} more")
+            self.push_screen(
+                ConfirmScreen("Quit and terminate running processes?", "\n".join(details)),
+                self._on_quit_while_busy,
+            )
+            return
         if self._critical_job_active():
             details = (
                 f"[cyan]critical job[/]: {self._esc(self._critical_job_label())}\n"
@@ -2682,6 +2844,7 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
             self.reconcile_usage_due_at = 0.0
             self._flush_reconcile_usage_if_due()
         self._persist_state_now()
+        self._terminate_running_managed_processes()
         self.fast_exit_requested = True
         self.exit(("quit", None, []))
 
@@ -2695,6 +2858,7 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
             self.reconcile_usage_due_at = 0.0
             self._flush_reconcile_usage_if_due()
         self._persist_state_now()
+        self._terminate_running_managed_processes()
         self.fast_exit_requested = True
         self.exit(("quit", None, []))
 

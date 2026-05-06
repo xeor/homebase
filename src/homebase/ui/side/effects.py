@@ -2,20 +2,34 @@ from __future__ import annotations
 
 import os
 import shlex
-import subprocess
 import webbrowser
 from pathlib import Path
 from typing import Any, Callable
 
 
-def open_editor_for_path(path: Path) -> None:
+def open_editor_for_path(
+    app: Any,
+    path: Path,
+    *,
+    wait: bool = False,
+    on_done: Callable[[], None] | None = None,
+) -> None:
     editor_raw = str(os.environ.get("EDITOR", "")).strip()
     if not editor_raw:
         raise ValueError("$EDITOR is not set")
     editor_cmd = shlex.split(editor_raw)
     if not editor_cmd:
         raise ValueError("$EDITOR is empty")
-    subprocess.run([*editor_cmd, str(path)], cwd=path.parent, check=False)
+    command_display = " ".join(shlex.quote(part) for part in [*editor_cmd, str(path)])
+    app._start_managed_process(
+        [*editor_cmd, str(path)],
+        cwd=path.parent,
+        label=f"editor: {path.name}",
+        command_display=command_display,
+        wait=wait,
+        terminate_on_quit=True,
+        on_done=on_done,
+    )
 
 
 def readme_button_actions(selected: Any) -> list[tuple[str, str]]:

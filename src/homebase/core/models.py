@@ -146,3 +146,16 @@ class RegressionCaseResult:
     ok: bool
     detail: str
     elapsed_s: float
+
+
+@dataclass
+class ManagedProcess:
+    pid: int
+    label: str
+    command: str
+    cwd: Path
+    started_ts: float
+    wait_mode: bool
+    terminate_on_quit: bool
+    returncode: int | None = None
+    ended_ts: float = 0.0

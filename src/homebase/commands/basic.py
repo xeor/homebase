@@ -25,8 +25,8 @@ def cmd_tags_sync(
 
 
 def cmd_status(base_dir: Path, *, collect_projects: Callable[[Path], list[Any]]) -> int:
-    print(f"{'PROJECT':<25} {'BRANCH':<15} {'DIRTY':<5} {'LAST':<10} TAGS")
-    print(f"{'-------':<25} {'------':<15} {'-----':<5} {'----':<10} ----")
+    print(f"{'PROJECT':<25} {'BRANCH':<15} {'DIRTY':<5} {'MODIFIED':<10} TAGS")
+    print(f"{'-------':<25} {'------':<15} {'-----':<5} {'--------':<10} ----")
     for row in collect_projects(base_dir):
         tag_s = ",".join(row.tags)
         print(f"{row.name:<25} {row.branch[:15]:<15} {row.dirty[:1]:<5} {row.last:<10} {tag_s}")

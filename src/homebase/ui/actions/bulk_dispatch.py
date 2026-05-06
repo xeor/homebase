@@ -45,7 +45,7 @@ def on_confirm_bulk(
         app.pending_restore_queue = list(runnable_paths)
         app.pending_restore_ok = 0
         app.pending_restore_failed = 0
-        app._busy_start("restoring selected items")
+        app._busy_start("restoring target items")
         app._process_next_restore()
         return
 

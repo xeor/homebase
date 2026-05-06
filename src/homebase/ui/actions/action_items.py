@@ -239,7 +239,13 @@ def run_custom_action(app: Any, action_id: str, *, base_dir: Path, fmt_ymd: Call
         ctx = custom_action_context(app, None, base_dir=base_dir, fmt_ymd=fmt_ymd, index=1, total=1)
         cmd = render_custom_command(template_text, ctx)
         try:
-            subprocess.Popen(["sh", "-lc", cmd], cwd=str(base_dir))
+            app._start_managed_shell_command(
+                cmd,
+                cwd=base_dir,
+                label=f"custom global: {action_id}",
+                wait=False,
+                terminate_on_quit=True,
+            )
             app._log(f"custom global action started: {action_id}", "info")
         except (subprocess.SubprocessError, OSError, ValueError) as exc:
             app._show_runtime_error(f"run custom action ({action_id})", exc)
@@ -259,6 +265,8 @@ def run_custom_action(app: Any, action_id: str, *, base_dir: Path, fmt_ymd: Call
     }
     if not loop_on_multi:
         first = targets[0]
+        for row in targets:
+            app._mark_row_active(row.path)
         ctx = custom_action_context(
             app,
             first,
@@ -270,7 +278,13 @@ def run_custom_action(app: Any, action_id: str, *, base_dir: Path, fmt_ymd: Call
         ctx["full_path"] = " ".join(_double_quoted(str(row.path)) for row in targets)
         cmd = render_custom_command(template_text, ctx)
         try:
-            subprocess.Popen(["sh", "-lc", cmd], cwd=str(base_dir))
+            app._start_managed_shell_command(
+                cmd,
+                cwd=base_dir,
+                label=f"custom target: {action_id}",
+                wait=False,
+                terminate_on_quit=True,
+            )
             app._log(
                 f"custom target action started: {action_id} (1/{len(targets)})",
                 "info",
@@ -283,6 +297,7 @@ def run_custom_action(app: Any, action_id: str, *, base_dir: Path, fmt_ymd: Call
     total = len(targets)
     shown_error = False
     for i, row in enumerate(targets, start=1):
+        app._mark_row_active(row.path)
         ctx = custom_action_context(
             app,
             row,
@@ -293,7 +308,13 @@ def run_custom_action(app: Any, action_id: str, *, base_dir: Path, fmt_ymd: Call
         )
         cmd = render_custom_command(template_text, ctx)
         try:
-            subprocess.Popen(["sh", "-lc", cmd], cwd=str(base_dir))
+            app._start_managed_shell_command(
+                cmd,
+                cwd=base_dir,
+                label=f"custom target: {action_id} ({i}/{total})",
+                wait=False,
+                terminate_on_quit=True,
+            )
             started += 1
         except (subprocess.SubprocessError, OSError, ValueError) as exc:
             app._log(f"custom action failed for {row.name}: {exc}", "error")
@@ -414,12 +435,19 @@ def _on_pick_custom_list_selection(
         app._refresh_side()
         return
     selection_value, row = selected
+    app._mark_row_active(row.path)
     ctx = custom_action_context(app, row, base_dir=base_dir, fmt_ymd=fmt_ymd, index=1, total=1)
     ctx["selection"] = selection_value
     ctx["selection_q"] = shlex.quote(selection_value)
     cmd = render_custom_command(run_command, ctx)
     try:
-        subprocess.Popen(["sh", "-lc", cmd], cwd=str(base_dir))
+        app._start_managed_shell_command(
+            cmd,
+            cwd=base_dir,
+            label=f"custom list: {action_id}",
+            wait=False,
+            terminate_on_quit=True,
+        )
         app._log(f"custom list action started: {action_id}", "info")
     except (subprocess.SubprocessError, OSError, ValueError) as exc:
         app._show_runtime_error(f"run custom list action ({action_id})", exc)

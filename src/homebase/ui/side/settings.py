@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import subprocess
 import time
 from pathlib import Path
 from typing import Any
@@ -390,12 +391,14 @@ def edit_global_config_and_reload(app: Any, *, base_dir: Path) -> None:
         return
 
     try:
-        app._open_editor_for_path(config_path)
-    except (OSError, ValueError) as exc:
+        app._open_editor_for_path(
+            config_path,
+            wait=True,
+            on_done=lambda: reload_global_config(app, base_dir=base_dir),
+        )
+    except (OSError, ValueError, subprocess.SubprocessError) as exc:
         app._show_runtime_error("open global config in editor", exc)
         return
-
-    reload_global_config(app, base_dir=base_dir)
 
 
 def reload_global_config(app: Any, *, base_dir: Path) -> None:
