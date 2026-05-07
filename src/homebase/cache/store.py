@@ -6,6 +6,8 @@ import time
 from collections.abc import Callable
 from pathlib import Path
 
+from ..core.constants import CACHE_DB_FILE_NAME, HOMEBASE_DIR_NAME
+
 PROJECT_CACHE_INSERT_SQL = (
     "INSERT OR REPLACE INTO project_cache("
     "path, archived, packed, pack_format, name, branch, dirty, last, src, created, tags_json, properties_json, "
@@ -26,11 +28,12 @@ def _path_candidates(path: Path) -> tuple[str, ...]:
 
 
 def cache_db_path(base_dir: Path) -> Path:
-    return base_dir / ".base-cache.sqlite3"
+    return base_dir / HOMEBASE_DIR_NAME / CACHE_DB_FILE_NAME
 
 
 def cache_connect(base_dir: Path) -> sqlite3.Connection:
     db = cache_db_path(base_dir)
+    db.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(db))
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")

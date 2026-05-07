@@ -5,8 +5,13 @@ import shlex
 import shutil
 import sys
 import textwrap
+from datetime import datetime
 from pathlib import Path
 from typing import Callable
+
+import yaml
+
+from .constants import GLOBAL_CONFIG_FILE_NAME, HOMEBASE_DIR_NAME
 
 
 def find_executable(name: str, extra_candidates: tuple[str, ...] = ()) -> str | None:
@@ -61,6 +66,19 @@ def has_any_tmux_save_binding(tmux_conf_text: str) -> bool:
     return False
 
 
+def tmux_save_binding_lines(tmux_conf_text: str) -> list[str]:
+    out: list[str] = []
+    for raw in tmux_conf_text.splitlines():
+        line = str(raw).strip()
+        if not line or line.startswith("#"):
+            continue
+        if "b tmux save" not in line:
+            continue
+        if "bind-key" in line or line.startswith("bind "):
+            out.append(line)
+    return out
+
+
 def write_tmux_binding(tmux_conf_path: Path, expected_line: str) -> None:
     current = ""
     if tmux_conf_path.exists():
@@ -105,55 +123,151 @@ def cmd_cache_warm() -> int:
         return 1
 
 
+def _runtime_imports_ok() -> tuple[bool, str]:
+    try:
+        import textual  # noqa: F401
+        import yaml  # noqa: F401
+    except ImportError as exc:
+        return False, f"missing runtime python deps ({exc})"
+    return True, "python runtime deps available"
+
+
+def _print_check(status: str, name: str, detail: str) -> None:
+    print(f"- [{status}] {name}: {detail}")
+
+
+def _state_text(status: str) -> str:
+    if status == "PASS":
+        return "already configured"
+    if status == "FAIL":
+        return "missing"
+    return "needs change"
+
+
+def _write_homebase_gitignore(path: Path) -> None:
+    entry = "cache.sqlite3"
+    if not path.exists():
+        path.write_text(f"{entry}\n")
+        return
+    lines = [ln.rstrip("\n") for ln in path.read_text().splitlines()]
+    if entry in lines:
+        return
+    if lines and lines[-1].strip() != "":
+        lines.append("")
+    lines.append(entry)
+    path.write_text("\n".join(lines).rstrip("\n") + "\n")
+
+
 def cmd_setup(
+    base_dir: Path,
     bin_dir: Path,
     *,
     tmux_bin_candidates: tuple[str, ...],
-    apply_tmux_binding: bool | None,
-    cache_warm: Callable[[], int],
     prompt_yes_no: Callable[[str, bool], bool],
+    dry_run: bool = False,
 ) -> int:
+    print("setup: homebase")
+    if dry_run:
+        print("mode: dry-run (no files will be modified)")
+    print(f"base dir: {base_dir}")
+    print("change base dir: --base-folder <path> or BASE_FOLDER=<path>")
+    print("")
+
+    homebase_dir = base_dir / HOMEBASE_DIR_NAME
+    config_path = homebase_dir / GLOBAL_CONFIG_FILE_NAME
+    homebase_gitignore = homebase_dir / ".gitignore"
     target = (bin_dir / "b").resolve()
     dest_dir = Path.home() / ".local/bin"
     dest = dest_dir / "b"
-    dest_dir.mkdir(parents=True, exist_ok=True)
 
-    if dest.is_symlink():
-        if dest.resolve() == target:
-            print(f"already installed: {dest} -> {target}")
-        else:
-            dest.unlink()
-            dest.symlink_to(target)
-            print(f"installed: {dest} -> {target}")
-    elif dest.exists():
-        print(f"exists and is not symlink: {dest}", file=sys.stderr)
-        return 1
-    else:
-        dest.symlink_to(target)
-        print(f"installed: {dest} -> {target}")
-
-    warm_rc = cache_warm()
-    print("setup checks:")
     uv_bin = find_executable("uv", ("/opt/homebrew/bin/uv", "/usr/local/bin/uv"))
     git_bin = find_executable("git")
     tmux_bin = find_executable("tmux", tmux_bin_candidates)
     tmuxp_bin = find_executable("tmuxp")
+    runtime_ok, runtime_detail = _runtime_imports_ok()
 
-    print(f"- uv: ok ({uv_bin})" if uv_bin else "- uv: missing")
-    print(f"- git: ok ({git_bin})" if git_bin else "- git: missing")
-    print(f"- tmux: ok ({tmux_bin})" if tmux_bin else "- tmux: missing")
-    print(
-        f"- tmuxp: ok ({tmuxp_bin})"
-        if tmuxp_bin
-        else "- tmuxp: missing (optional for tmux load)"
+    print("validation:")
+    uv_status = "PASS" if uv_bin else "FAIL"
+    git_status = "PASS" if git_bin else "FAIL"
+    tmux_status = "PASS" if tmux_bin else "FAIL"
+    _print_check(uv_status, "uv", f"{_state_text(uv_status)}: {uv_bin or 'install uv and add to PATH'}")
+    _print_check(
+        git_status,
+        "git",
+        f"{_state_text(git_status)}: {git_bin or 'install git and add to PATH'}",
+    )
+    _print_check(
+        tmux_status,
+        "tmux",
+        f"{_state_text(tmux_status)}: {tmux_bin or 'install tmux and add to PATH'}",
+    )
+    _print_check(
+        "PASS" if tmuxp_bin else "WARN",
+        "tmuxp",
+        f"{_state_text('PASS' if tmuxp_bin else 'WARN')}: {tmuxp_bin or 'optional; install if using b tmux load'}",
+    )
+    _print_check(
+        "PASS" if runtime_ok else "FAIL",
+        "python runtime",
+        f"{_state_text('PASS' if runtime_ok else 'FAIL')}: {runtime_detail}" + (" (run: uv sync)" if not runtime_ok else ""),
     )
 
     path_entries = os.environ.get("PATH", "").split(":")
     in_path = any(Path(p).expanduser().resolve() == dest_dir.resolve() for p in path_entries if p)
-    if in_path:
-        print(f"- PATH: ok ({dest_dir})")
+    _print_check(
+        "PASS" if in_path else "WARN",
+        "PATH",
+        f"{_state_text('PASS' if in_path else 'WARN')}: {dest_dir if in_path else f'add {dest_dir} to shell profile'}",
+    )
+
+    if dest.is_symlink():
+        try:
+            status = "PASS" if dest.resolve() == target else "WARN"
+            detail = f"{dest} -> {dest.resolve()}"
+        except OSError:
+            status = "WARN"
+            detail = f"broken symlink: {dest}"
+    elif dest.exists():
+        status = "WARN"
+        detail = f"exists and is not symlink: {dest}"
     else:
-        print(f"- PATH: missing {dest_dir} (add it to shell profile)", file=sys.stderr)
+        status = "WARN"
+        detail = f"missing symlink: {dest} -> {target}"
+    _print_check(status, "b launcher", detail)
+
+    homebase_status = "PASS" if homebase_dir.is_dir() else "WARN"
+    _print_check(homebase_status, HOMEBASE_DIR_NAME, f"{_state_text(homebase_status)}: {homebase_dir}")
+    writable_status = "PASS" if homebase_dir.is_dir() and os.access(homebase_dir, os.W_OK) else "WARN"
+    _print_check(
+        writable_status,
+        ".homebase writable",
+        f"{_state_text(writable_status)}: {homebase_dir}",
+    )
+
+    if config_path.is_file():
+        try:
+            loaded = yaml.safe_load(config_path.read_text())
+            valid = loaded is None or isinstance(loaded, dict)
+        except (OSError, yaml.YAMLError):
+            valid = False
+        config_status = "PASS" if valid else "FAIL"
+        _print_check(config_status, "config", f"{_state_text(config_status)}: {config_path}")
+    else:
+        _print_check("WARN", "config", f"needs change: optional; create {config_path} if you need global config")
+
+    gitignore_ok = False
+    if homebase_gitignore.is_file():
+        try:
+            lines = [ln.strip() for ln in homebase_gitignore.read_text().splitlines()]
+            gitignore_ok = "cache.sqlite3" in lines
+        except OSError:
+            gitignore_ok = False
+    _print_check(
+        "PASS" if gitignore_ok else "WARN",
+        ".homebase/.gitignore",
+        f"{_state_text('PASS' if gitignore_ok else 'WARN')}: "
+        + ("contains cache.sqlite3" if gitignore_ok else "add cache.sqlite3 rule"),
+    )
 
     tmux_conf_path = Path.home() / ".tmux.conf"
     try:
@@ -166,34 +280,139 @@ def cmd_setup(
     active_uv_bin = uv_bin or "/opt/homebrew/bin/uv"
     expected_binding = recommended_tmux_save_binding(target, active_uv_bin, active_tmux_bin)
 
-    if has_recommended_tmux_binding(tmux_conf_text, expected_binding):
-        print("- tmux binding: ok (bind-key t -> b tmux save)")
-    else:
-        target_display = compact_path_for_display(str(tmux_conf_path))
-        if has_any_tmux_save_binding(tmux_conf_text):
-            print("- tmux binding: found, but not recommended (will replace existing b tmux save bind)")
-            question = "update tmux b tmux save binding in ~/.tmux.conf?"
+    tmux_binding_ok = has_recommended_tmux_binding(tmux_conf_text, expected_binding)
+    _print_check(
+        "PASS" if tmux_binding_ok else "WARN",
+        "tmux binding",
+        f"{_state_text('PASS' if tmux_binding_ok else 'WARN')}: "
+        + ("recommended binding present" if tmux_binding_ok else "recommended binding missing"),
+    )
+    existing_tmux_bindings = tmux_save_binding_lines(tmux_conf_text)
+    if not tmux_binding_ok and existing_tmux_bindings:
+        print("  tmux binding diff:")
+        print(f"    current: {existing_tmux_bindings[0]}")
+        print(f"    expect : {expected_binding}")
+
+    print("")
+    print("fix proposals:")
+
+    if not homebase_dir.is_dir() and prompt_yes_no(f"create {homebase_dir}?", True):
+        if dry_run:
+            print(f"- would fix: create {homebase_dir}")
         else:
-            print("- tmux binding: missing (will append recommended bind)")
-            question = "add tmux b tmux save binding to ~/.tmux.conf?"
-        print(f"  file: {target_display}")
-        print("  expected:")
+            homebase_dir.mkdir(parents=True, exist_ok=True)
+            print(f"- fixed: created {homebase_dir}")
+
+    if not dest_dir.is_dir() and prompt_yes_no(f"create {dest_dir}?", True):
+        if dry_run:
+            print(f"- would fix: create {dest_dir}")
+        else:
+            dest_dir.mkdir(parents=True, exist_ok=True)
+
+    if (not dest.is_symlink()) or (dest.is_symlink() and dest.resolve() != target):
+        if prompt_yes_no(f"ensure launcher symlink {dest} -> {target}?", True):
+            if dry_run:
+                print(f"- would fix: ensure {dest} -> {target}")
+            else:
+                if dest.exists() and not dest.is_symlink():
+                    ts = datetime.now().strftime("%Y%m%d%H%M%S")
+                    backup = dest.with_name(f"{dest.name}.bak-{ts}")
+                    dest.rename(backup)
+                    print(f"- moved existing file: {backup}")
+                elif dest.is_symlink():
+                    dest.unlink()
+                dest.symlink_to(target)
+                print(f"- fixed: {dest} -> {target}")
+
+    if not gitignore_ok and prompt_yes_no(f"ensure {homebase_gitignore} ignores cache.sqlite3?", True):
+        if dry_run:
+            print(f"- would fix: update {homebase_gitignore}")
+        else:
+            homebase_gitignore.parent.mkdir(parents=True, exist_ok=True)
+            _write_homebase_gitignore(homebase_gitignore)
+            print(f"- fixed: updated {homebase_gitignore}")
+
+    if not tmux_binding_ok:
+        target_display = compact_path_for_display(str(tmux_conf_path))
+        print(f"- tmux config file: {target_display}")
+        print("  expected binding:")
         for line in binding_display_lines(expected_binding):
             print(f"    {line}")
+        if prompt_yes_no("apply recommended tmux binding?", True):
+            if dry_run:
+                print(f"- would fix: write tmux binding ({target_display})")
+            else:
+                try:
+                    write_tmux_binding(tmux_conf_path, expected_binding)
+                    print(f"- fixed: tmux binding written ({target_display})")
+                    print("  run now: tmux source-file ~/.tmux.conf")
+                except (OSError, ValueError) as exc:
+                    print(f"- tmux binding write failed ({exc})", file=sys.stderr)
 
-        should_apply = apply_tmux_binding
-        if should_apply is None:
-            should_apply = prompt_yes_no(question, False)
+    print("")
+    print("final validation:")
+    uv_bin = find_executable("uv", ("/opt/homebrew/bin/uv", "/usr/local/bin/uv"))
+    git_bin = find_executable("git")
+    tmux_bin = find_executable("tmux", tmux_bin_candidates)
+    tmuxp_bin = find_executable("tmuxp")
+    runtime_ok, _runtime_detail = _runtime_imports_ok()
+    path_entries = os.environ.get("PATH", "").split(":")
+    in_path = any(Path(p).expanduser().resolve() == dest_dir.resolve() for p in path_entries if p)
+    homebase_exists = homebase_dir.is_dir()
+    homebase_writable = homebase_exists and os.access(homebase_dir, os.W_OK)
+    launcher_ok = dest.is_symlink() and dest.resolve() == target
+    config_valid = True
+    if config_path.is_file():
+        try:
+            loaded = yaml.safe_load(config_path.read_text())
+            config_valid = loaded is None or isinstance(loaded, dict)
+        except (OSError, yaml.YAMLError):
+            config_valid = False
+    gitignore_ok = False
+    if homebase_gitignore.is_file():
+        try:
+            lines = [ln.strip() for ln in homebase_gitignore.read_text().splitlines()]
+            gitignore_ok = "cache.sqlite3" in lines
+        except OSError:
+            gitignore_ok = False
+    try:
+        tmux_conf_text = tmux_conf_path.read_text() if tmux_conf_path.exists() else ""
+    except OSError:
+        tmux_conf_text = ""
+    tmux_binding_ok = has_recommended_tmux_binding(tmux_conf_text, expected_binding)
 
-        if should_apply:
-            try:
-                write_tmux_binding(tmux_conf_path, expected_binding)
-                print(f"- tmux binding: written ({target_display})")
-                print("  run now: tmux source-file ~/.tmux.conf")
-            except (OSError, ValueError) as exc:
-                print(f"- tmux binding: failed to write ({exc})", file=sys.stderr)
-        else:
-            print("- tmux binding: skipped")
-
-    required_ok = bool(uv_bin and git_bin and tmux_bin and warm_rc == 0)
-    return 0 if required_ok else 1
+    hard_fail = False
+    fail_checks = [
+        not bool(uv_bin),
+        not bool(git_bin),
+        not bool(tmux_bin),
+        not runtime_ok,
+        not homebase_exists,
+        not homebase_writable,
+        not launcher_ok,
+        not config_valid,
+    ]
+    if any(fail_checks):
+        hard_fail = True
+    warn_checks = [
+        not bool(tmuxp_bin),
+        not in_path,
+        not gitignore_ok,
+        not tmux_binding_ok,
+        not config_path.is_file(),
+    ]
+    pass_count = 13 - sum(1 for x in fail_checks if x) - sum(1 for x in warn_checks if x)
+    warn_count = sum(1 for x in warn_checks if x)
+    fail_count = sum(1 for x in fail_checks if x)
+    _print_check(
+        "PASS" if not hard_fail else "FAIL",
+        "setup",
+        "ready" if not hard_fail else "incomplete; resolve FAIL checks",
+    )
+    print(f"- summary: PASS={pass_count} WARN={warn_count} FAIL={fail_count}")
+    print("")
+    print("next steps:")
+    print(f"- optional config: create/edit {config_path}")
+    print("- docs: README.md (Technical State Files + Kitchen Sink Config)")
+    print("- run: b status")
+    return 0 if not hard_fail else 1

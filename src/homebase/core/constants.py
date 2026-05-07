@@ -33,6 +33,13 @@ PROFILE_PANE_PROBE_ARCHIVE = "pane-probe-archive"
 
 BASE_MARKER_FILE = ".base.yaml"
 LEGACY_BASE_MARKER_FILE = ".base.yml"
+HOMEBASE_DIR_NAME = ".homebase"
+GLOBAL_CONFIG_FILE_NAME = "config.yaml"
+CACHE_DB_FILE_NAME = "cache.sqlite3"
+BENCHMARK_REPORT_FILE_NAME = "benchmark.yaml"
+TEST_REPORT_FILE_NAME = "test.yaml"
+REGRESSION_TEST_REPORT_FILE_NAME = "regression-test.yaml"
+NESTED_DISCOVERY_REPORT_FILE_NAME = "nested-discovery.yaml"
 ARCHIVE_DIR_NAME = "_archive"
 PACKED_ARCHIVE_SUFFIX = ".base-pkg.tgz"
 TMUX_BIN_CANDIDATES = (

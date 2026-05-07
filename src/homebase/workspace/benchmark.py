@@ -26,12 +26,16 @@ from ..core import utils as core_utils
 from ..core.constants import (
     ARCHIVE_DIR_NAME,
     ARCHIVE_TZ,
+    BENCHMARK_REPORT_FILE_NAME,
     BENCHMARK_SCORE_MODEL,
     BENCHMARK_SCORE_REF_DAY_VALUE,
     BENCHMARK_SCORE_REF_SECONDS,
     BENCHMARK_SUITE_VERSION,
     CACHE_MAX_AGE_S,
+    GLOBAL_CONFIG_FILE_NAME,
+    HOMEBASE_DIR_NAME,
     PACKED_ARCHIVE_SUFFIX,
+    TEST_REPORT_FILE_NAME,
 )
 from ..metadata.api import save_base_data, save_base_tags, sync_tag_symlinks
 from . import benchmark_report
@@ -435,7 +439,8 @@ def _benchmark_run_suite(
             )
         )
 
-    named_conf = bench_root / ".base-conf.yaml"
+    named_conf = bench_root / HOMEBASE_DIR_NAME / GLOBAL_CONFIG_FILE_NAME
+    named_conf.parent.mkdir(parents=True, exist_ok=True)
     named_conf.write_text(
         yaml.safe_dump(
             {
@@ -860,7 +865,8 @@ def cmd_benchmark_run(
         "score_basis_elapsed_s_cold": suite_elapsed_s,
     }
 
-    report_path = run_cwd / ".base-benchmark.yml"
+    report_path = run_cwd / HOMEBASE_DIR_NAME / BENCHMARK_REPORT_FILE_NAME
+    report_path.parent.mkdir(parents=True, exist_ok=True)
     _benchmark_write_report(report_path, run_data)
     print("")
     print(f"benchmark report updated: {report_path}")
@@ -877,7 +883,7 @@ def cmd_benchmark_results(
     run_cwd: Path, ignore_featuresets: set[str] | None = None
 ) -> int:
     ignore_featuresets = set(ignore_featuresets or set())
-    report_path = run_cwd / ".base-benchmark.yml"
+    report_path = run_cwd / HOMEBASE_DIR_NAME / BENCHMARK_REPORT_FILE_NAME
     all_runs = _benchmark_load_runs(report_path)
     if not all_runs:
         print(f"no benchmark runs found: {report_path}")
@@ -1164,7 +1170,8 @@ def cmd_test(
     )
     print(f"test score: {_fmt_score(perf_score)}  engine={_fmt_score(engine_score)}")
 
-    report_path = run_cwd / ".base-test.yml"
+    report_path = run_cwd / HOMEBASE_DIR_NAME / TEST_REPORT_FILE_NAME
+    report_path.parent.mkdir(parents=True, exist_ok=True)
     run_data: dict[str, object] = {
         "suite_version": BENCHMARK_SUITE_VERSION,
         "timestamp": ts,
@@ -1208,4 +1215,3 @@ def cmd_test(
     if failures > 0 or notes:
         return 1
     return 0
-

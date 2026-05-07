@@ -29,7 +29,9 @@ from ..core.constants import (
     BASE_MARKER_FILE,
     CACHE_SCHEMA_VERSION,
     ENV_BASE_DIR,
+    HOMEBASE_DIR_NAME,
     PACKED_ARCHIVE_SUFFIX,
+    REGRESSION_TEST_REPORT_FILE_NAME,
 )
 from ..core.models import RegressionCaseResult
 from .rows import (
@@ -388,7 +390,8 @@ def cmd_test_regression(
         f"regression summary: total={len(results)} pass={len(results) - len(failures)} fail={len(failures)} elapsed={elapsed_total:.2f}s"
     )
 
-    report_path = run_cwd / ".base-regression-test.yml"
+    report_path = run_cwd / HOMEBASE_DIR_NAME / REGRESSION_TEST_REPORT_FILE_NAME
+    report_path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
         "timestamp": datetime.now().astimezone().isoformat(timespec="seconds"),
         "total": len(results),
@@ -408,5 +411,3 @@ def cmd_test_regression(
     report_path.write_text(yaml.safe_dump(payload, sort_keys=False))
     print(f"regression report updated: {report_path}")
     return 1 if failures else 0
-
-

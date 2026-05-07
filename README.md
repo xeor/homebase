@@ -54,6 +54,23 @@ uv sync                       # install with dev extras
 uv run python -m homebase status
 ```
 
+## Technical State Files
+
+Homebase runtime state/config files live in `<base>/.homebase/`.
+
+- `config.yaml`: global runtime config (`properties`, `create_templates`, filters, hotkeys, open-mode, etc.)
+- `cache.sqlite3`: primary sqlite cache for rows/opened timestamps/reconcile state
+- `benchmark.yaml`: benchmark run history written by `b benchmark run`
+- `test.yaml`: synthetic test-suite history written by `b test`
+- `regression-test.yaml`: regression run reports written by `b test regression`
+- `nested-discovery.yaml`: optional nested-marker discovery report written by `b utils opt-in-nested-discovery`
+
+Setup creates the directory:
+
+```sh
+b setup
+```
+
 Source layout (one subpackage per domain):
 
 ```
@@ -87,7 +104,7 @@ See `AGENTS.md` for the full architecture rules and conventions.
 
 ## Property Config
 
-`properties` is a token-keyed map in `.base-conf.yaml`.
+`properties` is a token-keyed map in `.homebase/config.yaml`.
 
 Each property entry must define exactly one detector:
 
@@ -132,9 +149,165 @@ Query types currently supported:
 - `tmux_editor_commands`
 - `sqlite_recent_paths`
 
+## Kitchen Sink Config
+
+`<base>/.homebase/config.yaml` example with all supported top-level areas:
+
+```yaml
+# Archive behavior
+archive:
+  timezone: Europe/Oslo
+
+# Saved/named filters used by query bar
+filters:
+  saved:
+    - "#wip"
+    - "tags=0"
+  named:
+    hot: "#cli OR #api"
+    fresh: "last=@-7d"
+
+# Dynamic property detectors
+properties:
+  GIT:
+    label: Git repo
+    key: git
+    color: "#87afff"
+    dir-exists: [.git]
+
+  ACT:
+    label: active pane
+    key: act
+    color: "#ffb86c"
+    cache_ttl_s: 3
+    queries:
+      - type: tmux_open_panes
+
+  EDT:
+    label: editor active
+    key: edt
+    color: "#7fd1ae"
+    queries:
+      - type: tmux_editor_commands
+        commands: [code, codium, cursor, zed, nvim, vim]
+
+  RECENT:
+    label: recent in sqlite
+    key: recent
+    color: "#c7a8ff"
+    queries:
+      - type: sqlite_recent_paths
+        db_path: "~/Library/Application Support/VSCodium/User/globalStorage/state.vscdb"
+        table: ItemTable
+        value_column: value
+        where_like: "%file://%"
+
+# Per-view cache profile presets + property binding
+cache_profile:
+  all:
+    pri-2:
+      update_interval_s: 10
+      update_batch_size: 16
+      update_priority: 40
+      cache_mode: ttl
+      cache_ttl_s: 30
+  archive:
+    pri-2:
+      cache_ttl_s: 120
+
+# Quick-create templates used by `b c <key>`
+create_templates:
+  - key: tmp
+    name: Quick tmp project
+    options: [prefix-datetime, suffix-tmp, generate-ts-name]
+    tags: [scratch]
+  - key: py
+    name: Python starter
+    template: python
+    options: [prompt-name, changedir]
+    tags: [python]
+
+# Open behavior profile
+open_mode:
+  profile: shell_cd
+
+# Notes integration
+notes:
+  path_template: "{{ PROJECT_PATH }}/NOTES.md"
+  open_command: "${EDITOR:-vi} {{ NOTE_PATH_Q }}"
+  create_command: "mkdir -p \"$(dirname {{ NOTE_PATH_Q }})\" && touch {{ NOTE_PATH_Q }} && ${EDITOR:-vi} {{ NOTE_PATH_Q }}"
+
+# Reconcile tuning
+reconcile:
+  active:
+    update_batch_size: 12
+  archive:
+    update_batch_size: 8
+
+# UI table behavior/settings
+table_behavior:
+  pin_wip_top: false
+  side_width_pct: 33
+
+table_columns:
+  active:
+    - id: name
+      width: 28
+      enabled: true
+    - id: branch
+      width: 14
+      enabled: true
+  archive:
+    - id: name
+      width: 28
+      enabled: true
+    - id: archived
+      width: 14
+      enabled: true
+
+# WIP symbol map override
+wip_open_symbol_map:
+  "©": 1
+  "™": 2
+
+# Additional suffixes and file-view excludes
+suffixes: [tmp, fork]
+file_view_exclude_patterns:
+  - "*.min.js"
+  - "node_modules/**"
+
+# Custom actions + hotkeys
+custom_actions:
+  - id: vscode
+    label: Open in VS Code
+    scope: target
+    command: code {{ full_path }}
+
+custom_hotkeys:
+  - key: alt+v
+    action_id: vscode
+
+# New-project defaults used by wizard
+new_project:
+  name_options: []
+  template: null
+  post_commands: []
+  tags: []
+  after_create: open
+
+# UI state persistence (optional)
+state:
+  view: active
+  sort: last
+  side_main: selected
+  side_selected: overview
+  side_info: events
+  side_settings: table
+```
+
 ## Quick Create Templates
 
-`b c <key>` reads `create_templates` from `.base-conf.yaml`.
+`b c <key>` reads `create_templates` from `.homebase/config.yaml`.
 
 CLI shape:
 
@@ -210,7 +383,7 @@ b c area51 --name area51-demo --debug
 
 ## Custom Action Hotkeys
 
-Custom actions are configured in `~/<base>/.base-conf.yaml` (same file
+Custom actions are configured in `~/<base>/.homebase/config.yaml` (same file
 as other global settings).
 
 Minimal shape:
@@ -318,7 +491,7 @@ Notes:
 
 List-action setup and usage:
 
-1. Add a custom action with `list_command` and `run_command` in `.base-conf.yaml`.
+1. Add a custom action with `list_command` and `run_command` in `.homebase/config.yaml`.
 2. Reload config (`Settings > Global config > Reload global config`) or restart `b`.
 3. Open actions with `ctrl+a` or command palette with `ctrl+p`.
 4. Pick your list-action (marked with `(list)`).

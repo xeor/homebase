@@ -8,7 +8,8 @@ from homebase.config.property_defs import load_property_defs
 
 
 def test_load_property_defs_token_keyed_map(tmp_path: Path) -> None:
-    conf = tmp_path / ".base-conf.yaml"
+    conf = tmp_path / ".homebase" / "config.yaml"
+    conf.parent.mkdir()
     conf.write_text(
         """
 properties:
@@ -35,7 +36,8 @@ properties:
 
 
 def test_load_property_defs_supports_variables(tmp_path: Path) -> None:
-    conf = tmp_path / ".base-conf.yaml"
+    conf = tmp_path / ".homebase" / "config.yaml"
+    conf.parent.mkdir()
     conf.write_text(
         """
 variables:
@@ -62,7 +64,8 @@ properties:
 
 
 def test_load_property_defs_supports_cache_profile_and_overrides(tmp_path: Path) -> None:
-    conf = tmp_path / ".base-conf.yaml"
+    conf = tmp_path / ".homebase" / "config.yaml"
+    conf.parent.mkdir()
     conf.write_text(
         """
 cache_profile:
@@ -97,7 +100,8 @@ properties:
 
 
 def test_load_property_defs_rejects_invalid_cache_profile_reference(tmp_path: Path) -> None:
-    conf = tmp_path / ".base-conf.yaml"
+    conf = tmp_path / ".homebase" / "config.yaml"
+    conf.parent.mkdir()
     conf.write_text(
         """
 properties:

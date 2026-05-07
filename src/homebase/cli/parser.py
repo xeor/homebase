@@ -24,8 +24,7 @@ def build_cli_parser() -> argparse.ArgumentParser:
     p_c.add_argument("--debug", action="store_true")
     sub.add_parser("recent")
     p_setup = sub.add_parser("setup")
-    p_setup.add_argument("--yes", action="store_true")
-    p_setup.add_argument("--no-tmux-binding", action="store_true")
+    p_setup.add_argument("--dry-run", action="store_true")
 
     p_cache = sub.add_parser("cache")
     cache_sub = p_cache.add_subparsers(dest="cache_subcommand", required=True)

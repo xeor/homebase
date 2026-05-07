@@ -34,10 +34,7 @@ def print_help() -> None:
             "b test [--comment TEXT] [--keep-basefolder] | b test regression",
             "run performance or regression test suite",
         ),
-        (
-            "b setup [--yes|--no-tmux-binding]",
-            "install symlink + verify runtime/tools/tmux binding",
-        ),
+        ("b setup [--dry-run]", "validate environment + propose one-by-one fixes"),
         ("b cache warm", "pre-warm uv cache for textual/yaml"),
         ("b tags sync-_tags [--debug]", "rebuild _tags symlink index (verbose)"),
         (
@@ -71,6 +68,7 @@ def _prompt_readline(
         prompt,
         default=default,
         non_interactive_default=non_interactive_default,
+        abort_on_interrupt=True,
     )
 
 
@@ -78,13 +76,13 @@ def _prompt_yes_no(question: str, default: bool) -> bool:
     return prompting.prompt_yes_no(question, default=default, read=_prompt_readline)
 
 
-def cmd_setup(bin_dir: Path, apply_tmux_binding: bool | None = None) -> int:
+def cmd_setup(base_dir: Path, bin_dir: Path, *, dry_run: bool = False) -> int:
     return setup_tools.cmd_setup(
+        base_dir,
         bin_dir,
         tmux_bin_candidates=TMUX_BIN_CANDIDATES,
-        apply_tmux_binding=apply_tmux_binding,
-        cache_warm=cmd_cache_warm,
         prompt_yes_no=_prompt_yes_no,
+        dry_run=dry_run,
     )
 
 

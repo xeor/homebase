@@ -8,6 +8,8 @@ from typing import Callable
 
 import yaml
 
+from .constants import HOMEBASE_DIR_NAME, NESTED_DISCOVERY_REPORT_FILE_NAME
+
 
 def scan_nested_project_paths(
     base_dir: Path,
@@ -213,7 +215,7 @@ def cmd_utils_opt_in_nested_discovery(
             for name in collisions:
                 print(f"- {name}")
 
-        if prompt_yes_no("Write full nested marker report to .base-nested-discovery.yml?", True):
+        if prompt_yes_no("Write full nested marker report to .homebase/nested-discovery.yaml?", True):
             report = {
                 "timestamp": datetime.now().astimezone().isoformat(timespec="seconds"),
                 "base_dir": str(base_dir),
@@ -222,7 +224,8 @@ def cmd_utils_opt_in_nested_discovery(
                 "collisions": collisions,
                 "entries": entries,
             }
-            out_path = Path.cwd() / ".base-nested-discovery.yml"
+            out_path = Path.cwd() / HOMEBASE_DIR_NAME / NESTED_DISCOVERY_REPORT_FILE_NAME
+            out_path.parent.mkdir(parents=True, exist_ok=True)
             out_path.write_text(yaml.safe_dump(report, sort_keys=False, default_flow_style=False))
             print(f"wrote: {out_path}")
 

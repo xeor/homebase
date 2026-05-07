@@ -201,7 +201,11 @@ def main(argv: list[str]) -> int:
                 debug=debug,
             ),
             cmd_recent=cmd_recent,
-            cmd_setup=lambda bd, apply: cmd_setup(bd, apply_tmux_binding=apply),
+            cmd_setup=lambda base_path, bin_path, dry_run: cmd_setup(
+                base_path,
+                bin_path,
+                dry_run=dry_run,
+            ),
             cmd_cache_warm=cmd_cache_warm,
             cmd_tags_sync=lambda bd, verbose, debug: cmd_tags_sync(
                 bd,

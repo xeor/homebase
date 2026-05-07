@@ -11,12 +11,15 @@ def prompt_readline(
     *,
     default: str | None = None,
     non_interactive_default: str | None = None,
+    abort_on_interrupt: bool = False,
 ) -> str | None:
     interactive = sys.stdin.isatty() and sys.stdout.isatty()
     if interactive:
         try:
             raw = input(prompt)
         except KeyboardInterrupt:
+            if abort_on_interrupt:
+                raise
             print("\nCancelled.")
             return None
         except EOFError:

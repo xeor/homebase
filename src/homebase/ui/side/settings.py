@@ -30,6 +30,8 @@ from ...config.store import clear_global_config_cache
 from ...core import runtime_init
 from ...core.constants import (
     DEFAULT_ARCHIVE_TZ_NAME,
+    GLOBAL_CONFIG_FILE_NAME,
+    HOMEBASE_DIR_NAME,
     OPEN_MODE_CONFIG,
     OPEN_MODE_PROFILES,
     TABLE_SIDE_WIDTH_PRESETS,
@@ -112,7 +114,7 @@ def refresh_settings_table(app: Any) -> None:
         except WIDGET_API_ERRORS:
             pass
         notes_widget.update(
-            "enter/space opens .base-conf.yaml in $EDITOR\n"
+            "enter/space opens .homebase/config.yaml in $EDITOR\n"
             "when editor exits, runtime config is reloaded"
         )
         return
@@ -392,8 +394,9 @@ def handle_settings_table_key(app: Any, event: Key, *, base_dir: Path) -> bool:
 
 
 def edit_global_config_and_reload(app: Any, *, base_dir: Path) -> None:
-    config_path = base_dir / ".base-conf.yaml"
+    config_path = base_dir / HOMEBASE_DIR_NAME / GLOBAL_CONFIG_FILE_NAME
     try:
+        config_path.parent.mkdir(parents=True, exist_ok=True)
         config_path.touch(exist_ok=True)
     except OSError as exc:
         app._show_runtime_error("prepare global config", exc)
@@ -470,7 +473,7 @@ def reload_global_config(app: Any, *, base_dir: Path) -> None:
 
 
 def global_config_status_text(app: Any, *, base_dir: Path) -> str:
-    config_path = base_dir / ".base-conf.yaml"
+    config_path = base_dir / HOMEBASE_DIR_NAME / GLOBAL_CONFIG_FILE_NAME
     exists = config_path.is_file()
     mtime_text = "-"
     size_text = "-"

@@ -12,8 +12,10 @@ class _AppStub:
         self.opened: Path | None = None
         self.status = ""
 
-    def _open_editor_for_path(self, path: Path) -> None:
+    def _open_editor_for_path(self, path: Path, wait: bool = False, on_done=None) -> None:
         self.opened = path
+        if on_done is not None:
+            on_done()
 
     def _reset_query_completion(self) -> None:
         return None
@@ -45,5 +47,5 @@ def test_handle_settings_table_key_global_opens_editor_and_reloads(tmp_path: Pat
 
     handled = settings_panel.handle_settings_table_key(app, _Event(), base_dir=tmp_path)
     assert handled is True
-    assert app.opened == tmp_path / ".base-conf.yaml"
+    assert app.opened == tmp_path / ".homebase" / "config.yaml"
     assert app.status.startswith("global config reloaded")

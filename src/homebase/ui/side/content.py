@@ -108,7 +108,7 @@ def cheat_columns(
     left.append("- restore conflicts offer skip or restore-to-other-location")
     left.append("- bulk actions continue on failures and log per-item result")
     left.append("- properties are auto-detected from project context")
-    left.append("- dynamic properties are defined in .base-conf.yaml")
+    left.append("- dynamic properties are defined in .homebase/config.yaml")
     left.append("- metadata issues are explained in Selected -> Overview")
     left.append("")
     left.append("- filter syntax examples (combine with AND/OR and parentheses):")

@@ -17,6 +17,8 @@ from ..core.constants import (
     COLOR_AGE_UNIT_HEX,
     DYNAMIC_PROPERTY_DEFS,
     ENV_BASE_DIR,
+    GLOBAL_CONFIG_FILE_NAME,
+    HOMEBASE_DIR_NAME,
     LEGACY_BASE_MARKER_FILE,
     LEVEL_ERROR,
     PACKED_ARCHIVE_SUFFIX,
@@ -228,7 +230,7 @@ def _runtime_property_defs() -> list[PropertyDef]:
         return list(PROPERTY_DEFS)
     base_path = Path(base)
     base_res = base_path.resolve()
-    conf = base_path / ".base-conf.yaml"
+    conf = base_path / HOMEBASE_DIR_NAME / GLOBAL_CONFIG_FILE_NAME
     try:
         mtime_ns = int(conf.stat().st_mtime_ns) if conf.is_file() else -1
     except OSError:

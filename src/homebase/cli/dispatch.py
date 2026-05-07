@@ -21,7 +21,7 @@ def dispatch_command(
     cmd_internal_complete: Callable[[str, int, list[str]], int],
     cmd_create_quick: Callable[[Path, str, str | None, bool], int],
     cmd_recent: Callable[[Path], int],
-    cmd_setup: Callable[[Path, bool | None], int],
+    cmd_setup: Callable[[Path, Path, bool], int],
     cmd_cache_warm: Callable[[], int],
     cmd_tags_sync: Callable[[Path, bool, bool], int],
     cmd_utils: Callable[[Path, str], int],
@@ -62,12 +62,7 @@ def dispatch_command(
     if ns.command == "recent":
         return cmd_recent(base_dir)
     if ns.command == "setup":
-        apply_tmux_binding: bool | None = None
-        if bool(ns.yes):
-            apply_tmux_binding = True
-        if bool(ns.no_tmux_binding):
-            apply_tmux_binding = False
-        return cmd_setup(bin_dir, apply_tmux_binding)
+        return cmd_setup(base_dir, bin_dir, bool(getattr(ns, "dry_run", False)))
     if ns.command == "cache":
         return cmd_cache_warm() if ns.cache_subcommand == "warm" else 1
     if ns.command == "tags":

@@ -5,6 +5,8 @@ from re import Pattern
 
 import yaml
 
+from ..core.constants import GLOBAL_CONFIG_FILE_NAME, HOMEBASE_DIR_NAME
+
 _GLOBAL_CONFIG_BASE: Path | None = None
 _GLOBAL_CONFIG_DATA: dict[str, object] | None = None
 
@@ -32,11 +34,7 @@ def load_global_config_dict(base_dir: Path) -> dict[str, object]:
         if _GLOBAL_CONFIG_BASE == base_res:
             return _GLOBAL_CONFIG_DATA
 
-    config = base_dir / ".base-conf.yaml"
-    if not config.is_file():
-        legacy = base_dir / ".base-conf.yml"
-        if legacy.is_file():
-            config = legacy
+    config = base_dir / HOMEBASE_DIR_NAME / GLOBAL_CONFIG_FILE_NAME
     if not config.is_file():
         _GLOBAL_CONFIG_BASE = base_res
         _GLOBAL_CONFIG_DATA = {}
@@ -58,7 +56,8 @@ def load_global_config_dict(base_dir: Path) -> dict[str, object]:
 def save_global_config_dict(base_dir: Path, data: dict[str, object]) -> None:
     global _GLOBAL_CONFIG_BASE, _GLOBAL_CONFIG_DATA
 
-    config = base_dir / ".base-conf.yaml"
+    config = base_dir / HOMEBASE_DIR_NAME / GLOBAL_CONFIG_FILE_NAME
+    config.parent.mkdir(parents=True, exist_ok=True)
     config.write_text(yaml.safe_dump(data, sort_keys=False, default_flow_style=False))
     _GLOBAL_CONFIG_BASE = base_dir.resolve()
     _GLOBAL_CONFIG_DATA = data
