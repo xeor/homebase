@@ -1,63 +1,77 @@
 # TODO
 
-## b setup hardening
+## Feature: `custom_actions` command for adding log entries to notes
 
-- [x] Make `b setup` re-runnable and safe at any time.
-  - [x] Keep success path when `~/.local/bin/b` already points to current target.
-  - [x] If `~/.local/bin/b` points elsewhere, propose fix and report old/new target.
-  - [x] If `~/.local/bin/b` is a regular file, propose safe fallback (rename with timestamp) before writing symlink.
-  - [x] Make setup flow: validate first, then propose fixes one-by-one.
-  - [x] Handle `Ctrl-C` as immediate setup abort.
-  - [x] Enforce `y/n` confirmation loop for prompts.
-  - [x] Add final summary with explicit PASS/WARN/FAIL counts.
+### Proposed action definition
 
-- [x] Ensure `.homebase/` handling matches runtime behavior.
-  - [x] Create `<base>/.homebase/` on setup run when missing.
-  - [x] Do not pre-create runtime artifacts that are naturally created by commands (cache/report files).
-  - [x] Do not auto-generate `config.yaml`; show next-step guidance instead.
+```yaml
+- id: add_log_to_note
+  label: Add log to note
+  scope: target
+  note_command: add_log
+```
 
-- [x] Replace setup config generator with docs-first flow.
-  - [x] Print post-setup next steps and point to README.
-  - [x] Add README kitchen-sink config example with comments.
+`note_command` must be a fixed enum value. Invalid values must fail startup/config load.
 
-- [x] Enforce gitignore coverage for runtime state files.
-  - [x] Ensure `<base>/.homebase/.gitignore` exists.
-  - [x] Ensure `.homebase/.gitignore` contains only sqlite ignore entry `cache.sqlite3`.
-  - [x] Keep operation idempotent (no duplicate lines).
-  - [x] Do not add ignore rules for `config.yaml` or YAML report files.
+## Functional requirements
 
-- [x] Improve tmux setup checks and standardization.
-  - [x] Keep current `bind-key t -> b tmux save` validation/rewrite flow.
-  - [x] Detect conflicting tmux bindings and show concrete diff-like suggestion.
-  - [x] Validate that tmux/uv paths used in binding actually exist.
-  - [x] Provide explicit post-step command: `tmux source-file ~/.tmux.conf`.
+1. Use the note path from `notes.path_template`.
+2. Before opening the input dialog, validate all target note files that already exist.
+   - Validation must confirm the file can be safely modified by this command.
+   - Invalid files must be marked as skipped (with reason) and must not be modified.
+   - Valid files continue in the operation.
 
-- [x] Add full setup validation pass as phase 1 of setup.
-  - [x] Print start banner with resolved base dir and how to change it (`--base-folder`, `BASE_FOLDER`).
-  - [x] Always print setup status details, even when parts are already configured.
-  - [x] Show explicit "already configured" vs "missing" vs "needs change" wording for each check.
-  - [x] Validate symlink target correctness.
-  - [x] Validate PATH includes `~/.local/bin`.
-  - [x] Validate tool/dependency availability: `uv`, `git`, `tmux` (`tmuxp` optional).
-  - [x] For missing dependency checks, include concrete fix hint text.
-  - [x] Validate `.homebase` directory exists.
-  - [x] Validate `.homebase` writability explicitly.
-  - [x] Validate `config.yaml` YAML shape when present.
-  - [x] Decide whether missing `config.yaml` should remain warning or fail (warning).
-  - [x] Validate gitignore entry presence.
-  - [x] Validate tmux binding presence/recommendation status.
-  - [x] Present fix plan and apply fixes one-by-one with explicit prompt per fix.
-  - [x] Tighten return-code policy so warnings are non-fatal and only hard failures fail.
+3. If the note file does not exist, create it with:
+   - `# <project name>` as H1
+   - a `## Log` section
+4. If `## Log` does not exist, append it at the end of the document.
+5. Add a new log entry under `## Log` in this format:
+   - `### <ISO8601 timestamp with timezone>`
+   - blank line
+   - user-provided text
+6. Prompt the user with a multiline input box for log text.
+7. If multiple projects are selected (select mode), write the same log text to all selected projects.
+8. Timestamp format must be human-readable ISO 8601 with seconds, using local time including timezone offset.
 
-- [x] Add tests for setup behavior.
-  - [x] Unit tests for symlink scenarios (correct link, wrong link, plain file).
-  - [x] Unit tests for gitignore insertion/idempotency.
-  - [x] Unit tests for prompt interrupt behavior (`Ctrl-C` abort path).
-  - [x] Unit tests for validation report + return code rules.
-  - [x] Unit tests for tmux binding detection edge cases.
-  - [x] Unit tests for tmux binding rewrite path.
-  - [x] Integration-style test for validate-first + fix-order flow.
+## Validation and safety
 
-## Optional improvements to decide
+1. Validate Markdown structure for all existing target files before opening the input dialog.
+2. If validation fails for a file, do not modify that file.
+3. Show a notification with a clear error message for each skipped file.
+4. Validation must catch malformed or ambiguous structures (e.g. duplicate `## Log` sections).
+5. The action may continue for valid files even if other selected files are skipped.
 
-- [x] Add `--dry-run` for setup (show changes without writing).
+## Implementation constraints
+
+1. Implement in pure Python.
+2. Put Markdown edit logic in one dedicated module/file for now, ready to expand with future note-edit commands.
+
+## Testing requirements
+
+Add thorough tests for parsing, validation, and mutation. Include at least:
+
+- valid note with existing `## Log`
+- missing `## Log` (append at end)
+- missing file (create from scratch)
+- duplicate `## Log` (reject)
+- malformed heading structure (reject)
+- multi-project write behavior
+- preservation of existing content outside the inserted log entry
+
+Also include line-ending variants (`\n`, `\r\n`) and add broad negative/edge-case coverage.
+
+## Example markdown
+
+```md
+# Projectname
+
+## Log
+
+### 2026-05-04T22:18:32+02:00
+
+Text from log
+
+### 2026-05-07T21:48:35+02:00
+
+Some text here from inputbox
+```
