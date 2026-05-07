@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import colorsys
+import hashlib
 from pathlib import Path
 from typing import Any, Callable
 
@@ -55,13 +57,22 @@ def refresh_table(
     visible_cols = app._table_visible_columns_for_view(app.view_mode)
     if not visible_cols:
         visible_cols = [{"id": "name"}]
+    effective_widths = dict(getattr(app, "_visible_column_effective_width_by_id", {}) or {})
+    width_by_id: dict[str, int] = {}
+    for col in visible_cols:
+        cid = str(col.get("id", "")).strip()
+        try:
+            width = int(col.get("width", 12))
+        except (TypeError, ValueError):
+            width = 12
+        configured = max(4, min(80, width))
+        effective = int(effective_widths.get(cid, 0) or 0)
+        width_by_id[cid] = max(configured, effective)
 
     wip_index: dict[Path, int] = {
         row.path: i for i, row in enumerate(app._wip_rows_sorted()[:9], start=1)
     }
     table_width = max(80, table.size.width)
-    is_active_view = app.view_mode == "active"
-    tags_width = max(40, int(table_width * (0.36 if is_active_view else 0.30)))
     restore_width = max(14, int(table_width * 0.16))
     property_cell_cache: dict[tuple[str, ...], object] = {}
 
@@ -74,6 +85,55 @@ def refresh_table(
         if width <= 3:
             return text[:width]
         return text[: width - 3] + "..."
+
+    def _tag_color(tag: str) -> str:
+        digest = hashlib.sha1(tag.encode("utf-8", errors="ignore")).digest()
+        hue = int.from_bytes(digest[:2], "big") / 65535.0
+        sat = 0.32
+        val = 0.95
+        r, g, b = colorsys.hsv_to_rgb(hue, sat, val)
+        return f"#{int(r * 255):02X}{int(g * 255):02X}{int(b * 255):02X}"
+
+    def _tag_cell(tags: list[str], width: int) -> Text:
+        if not tags:
+            return Text("-", style="dim")
+        labels = [str(t).strip() for t in tags]
+        labels = [label for label in labels if label]
+        if not labels:
+            return Text("-", style="dim")
+        budget = max(6, int(width))
+        sep_len = 2
+        suffix = "  ++"
+        suffix_len = len(suffix)
+        parts: list[str] = []
+        cur_len = 0
+        i = 0
+        while i < len(labels):
+            label = labels[i]
+            sep = sep_len if parts else 0
+            remaining = len(labels) - i - 1
+            reserve = suffix_len if remaining > 0 else 0
+            if cur_len + sep + len(label) + reserve > budget:
+                if parts and reserve == 0 and cur_len + sep + len(label) <= budget:
+                    parts.append(label)
+                    cur_len += sep + len(label)
+                    i += 1
+                    continue
+                break
+            parts.append(label)
+            cur_len += sep + len(label)
+            i += 1
+        hidden = len(labels) - len(parts)
+        if not parts:
+            return Text(trunc_ellipsis(labels[0], budget), style=_tag_color(labels[0]))
+        out = Text()
+        for j, label in enumerate(parts):
+            if j > 0:
+                out.append("  ")
+            out.append(label, style=_tag_color(label))
+        if hidden > 0:
+            out.append(suffix, style="dim")
+        return out
 
     def row_status_mark(row: ProjectRow) -> Text:
         select_char = "*" if row.path in app.multi_selected else " "
@@ -155,7 +215,7 @@ def refresh_table(
             "created": row.created,
             "last_opened": fmt_ymd(row.opened_ts) if row.opened_ts > 0 else "-",
             "properties": prop_cell,
-            "tags": Text(trunc_ellipsis(",".join(row.tags), tags_width)),
+            "tags": _tag_cell(row.tags, width_by_id.get("tags", 24)),
             "description": Text(
                 trunc_ellipsis(str(row.description), max(12, int(table_width * 0.22)))
             ),

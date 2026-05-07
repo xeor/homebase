@@ -242,7 +242,7 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
     #toolbar { height: 5; border: round $accent; padding: 0 1; }
     #global_meta { content-align: left top; }
     #main { height: 1fr; }
-    #projects { width: 4fr; height: 1fr; border: round $surface; }
+    #projects { width: 4fr; height: 1fr; border: round $surface; scrollbar-gutter: stable; }
     #side { width: 2fr; height: 1fr; border: round $surface; padding: 0 1; }
     #side_main_tabs { height: 3; margin: 0 0 1 0; }
     #side_selected_tabs { height: 3; margin: 0 0 1 0; }
@@ -439,6 +439,7 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
         self.custom_actions = list(self.ctx.custom_actions)
         self.custom_hotkeys = list(self.ctx.custom_hotkeys)
         self.pending_tag_updates: set[Path] = set()
+        self._visible_column_effective_width_by_id: dict[str, int] = {}
         self.managed_processes: list[ManagedProcess] = []
         self._managed_processes_lock = threading.Lock()
         self._wait_process_modal_pid: int | None = None
@@ -839,6 +840,15 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
         self.call_after_refresh(self._startup_quick_active_dir_check)
         self.call_after_refresh(self._start_probe_open_panes)
         self.set_timer(0.12, self._retry_pending_restore)
+        self.set_timer(0.18, self._reflow_table_columns_after_layout)
+
+    def _reflow_table_columns_after_layout(self) -> None:
+        self._configure_table_columns()
+        self._refresh_table()
+
+    def on_resize(self, _event) -> None:
+        self._configure_table_columns()
+        self._refresh_table()
 
     def _modal_active(self) -> bool:
         return isinstance(self.screen, ModalScreen)

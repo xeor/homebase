@@ -17,6 +17,7 @@ from ..core.utils import fmt_age_short_from_iso, fmt_size_human, fmt_ymd
 from ..metadata.api import load_base_data, property_tokens_text
 from .side import tabs as textual_ui_side_tabs
 from .table import render as textual_ui_table_render
+from .table.layout import solve_visible_column_widths
 
 
 class AppDisplayMixin:
@@ -47,7 +48,6 @@ class AppDisplayMixin:
 
     def _configure_table_columns(self) -> None:
         table = self.query_one(WIDGET_PROJECTS, DataTable)
-        table.clear(columns=True)
 
         visible = self._table_visible_columns_for_view(self.view_mode)
         if not visible:
@@ -66,17 +66,43 @@ class AppDisplayMixin:
                         "views": ["active", "archive"],
                     }
                 ]
+        base_widths: list[int] = []
         for col in visible:
-            label = str(col.get("label", ""))
             try:
                 width = int(col.get("width", 12))
             except (TypeError, ValueError):
                 width = 12
-            width = max(4, min(80, width))
+            base_widths.append(max(4, min(80, width)))
+
+        if not base_widths:
+            table.clear(columns=True)
+            self._visible_column_effective_width_by_id = {}
+            return
+
+        table_size = getattr(table, "size", None)
+        table_width = int(getattr(table_size, "width", 0) or 0)
+        cell_padding = int(getattr(table, "cell_padding", 1) or 0)
+        if table_width > 0:
+            widths = solve_visible_column_widths(
+                viewport_width=table_width,
+                base_widths=base_widths,
+                cell_padding=cell_padding,
+            )
+        else:
+            widths = list(base_widths)
+
+        table.clear(columns=True)
+        for col, width in zip(visible, widths):
+            label = str(col.get("label", ""))
             try:
                 table.add_column(label, width=width)
             except (RuntimeError, ValueError, TypeError):
                 table.add_column(label)
+
+        self._visible_column_effective_width_by_id = {
+            str(col.get("id", "")).strip(): widths[i]
+            for i, col in enumerate(visible)
+        }
 
     def _refresh_table(self) -> None:
         textual_ui_table_render.refresh_table(

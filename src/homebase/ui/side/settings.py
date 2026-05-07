@@ -119,7 +119,7 @@ def refresh_settings_table(app: Any) -> None:
 
     table.add_column("", width=3)
     table.add_column("COLUMN", width=18)
-    table.add_column("WIDTH", width=5)
+    table.add_column("WIDTH", width=14)
     try:
         notes_widget.styles.height = 3
     except WIDGET_API_ERRORS:
@@ -137,6 +137,10 @@ def refresh_settings_table(app: Any) -> None:
     if app.table_settings_index >= len(current_columns):
         app.table_settings_index = len(current_columns) - 1
 
+    enabled_cols = [c for c in current_columns if bool(c.get("enabled", True))]
+    last_enabled_id = str(enabled_cols[-1].get("id", "")).strip() if enabled_cols else ""
+    effective_widths = dict(getattr(app, "_visible_column_effective_width_by_id", {}) or {})
+
     for i, col in enumerate(current_columns):
         cid = str(col.get("id", ""))
         enabled = bool(col.get("enabled", True))
@@ -145,7 +149,11 @@ def refresh_settings_table(app: Any) -> None:
         except (TypeError, ValueError):
             width = 12
         cid_short = cid if len(cid) <= 18 else (cid[:15] + "...")
-        table.add_row(Text("[x]" if enabled else "[ ]"), cid_short, str(width), key=str(i))
+        width_text = str(width)
+        effective = int(effective_widths.get(cid, 0) or 0)
+        if enabled and cid == last_enabled_id and effective > 0 and effective != width:
+            width_text = f"{width} ({effective})"
+        table.add_row(Text("[x]" if enabled else "[ ]"), cid_short, width_text, key=str(i))
     try:
         table.cursor_coordinate = (app.table_settings_index, 0)
     except WIDGET_API_ERRORS:
@@ -218,8 +226,9 @@ def table_config_toggle_selected(app: Any, *, base_dir: Path) -> None:
         return
     table_config_save(app, base_dir=base_dir)
     app._refresh_settings_table()
-    app._refresh_table()
     app._sync_side_tab_visibility()
+    app._configure_table_columns()
+    app._refresh_table()
     app._refresh_side()
 
 
