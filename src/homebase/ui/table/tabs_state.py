@@ -46,6 +46,8 @@ def sync_side_tab_visibility(app: Any, *, widget_projects: str) -> None:
     info_tabs = app.query_one("#side_info_tabs")
     settings_tabs = app.query_one("#side_settings_tabs")
     side_scroll = app.query_one("#side_scroll")
+    global_meta_left = app.query_one("#global_meta_left")
+    global_meta_right = app.query_one("#global_meta_right")
     side_body = app.query_one("#side_body")
     side_readme_panel = app.query_one("#side_readme_panel")
     side_notes_panel = app.query_one("#side_notes_panel")
@@ -76,6 +78,8 @@ def sync_side_tab_visibility(app: Any, *, widget_projects: str) -> None:
         projects_pct = max(10, 100 - side_pct)
         projects.styles.width = f"{projects_pct}%"
         side.styles.width = f"{side_pct}%"
+        global_meta_left.styles.width = f"{projects_pct}%"
+        global_meta_right.styles.width = f"{side_pct}%"
     except WIDGET_API_ERRORS:
         pass
 

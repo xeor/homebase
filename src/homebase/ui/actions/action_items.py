@@ -75,6 +75,31 @@ def hotkey_target_label_map(app: Any) -> dict[str, str]:
     return out
 
 
+def hotbar_targets(app: Any) -> list[str]:
+    out: list[str] = []
+    seen: set[str] = set()
+    for binding in app.custom_hotkeys:
+        if not bool(binding.get("hotbar", False)):
+            continue
+        target = str(binding.get("target", "")).strip()
+        if not target or target in seen:
+            continue
+        seen.add(target)
+        out.append(target)
+    return out
+
+
+def hotbar_target_custom_label_map(app: Any) -> dict[str, str]:
+    out: dict[str, str] = {}
+    for binding in app.custom_hotkeys:
+        target = str(binding.get("target", "")).strip()
+        label = str(binding.get("label", "")).strip()
+        if not target or not label or target in out:
+            continue
+        out[target] = label
+    return out
+
+
 def valid_action_items(
     app: Any,
     *,

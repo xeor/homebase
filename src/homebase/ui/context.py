@@ -22,7 +22,7 @@ class UIContext:
     suffixes: list[str] = field(default_factory=list)
     file_view_exclude_patterns: list[str] = field(default_factory=list)
     custom_actions: list[dict[str, Any]] = field(default_factory=list)
-    custom_hotkeys: list[dict[str, str]] = field(default_factory=list)
+    custom_hotkeys: list[dict[str, object]] = field(default_factory=list)
     open_mode_config: dict[str, str] = field(default_factory=dict)
     notes_config: dict[str, str] = field(default_factory=dict)
     reconcile_config: dict[str, dict[str, object]] = field(default_factory=dict)

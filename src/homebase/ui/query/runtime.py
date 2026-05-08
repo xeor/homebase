@@ -9,6 +9,8 @@ from textual.widgets import Static
 from ...core.constants import CURSOR_BG_HEX, CURSOR_FG_HEX
 
 _CURSOR_STYLE = f"{CURSOR_FG_HEX} on {CURSOR_BG_HEX}"
+_HOTBAR_ROW_STYLE_EVEN = "white on #2A2A2A"
+_HOTBAR_ROW_STYLE_ODD = "white on #353535"
 
 
 def named_filters_sig(named_filters: dict[str, str]) -> str:
@@ -77,7 +79,8 @@ def refresh_search_display(
     color_warn_hex: str,
     mode_active: str,
 ) -> None:
-    disp = app.query_one("#global_meta", Static)
+    disp_left = app.query_one("#global_meta_left", Static)
+    disp_right = app.query_one("#global_meta_right", Static)
 
     def esc(text: str) -> str:
         return text.replace("[", "\\[").replace("]", "\\]")
@@ -154,4 +157,23 @@ def refresh_search_display(
             f"[bold {color_nav_hex}]c[/]lear "
             f"[bold {color_nav_hex}]u[/]ntagged"
         )
-    disp.update(text)
+    disp_left.update(text)
+
+    targets = app._hotbar_targets()
+    if not targets:
+        disp_right.update("")
+        return
+    app._normalize_hotbar_index()
+    parts: list[str] = [f"[bold {color_nav_hex}]HOTBAR[/] [dim]^@[/]:"]
+    for i, target in enumerate(targets):
+        label = app._hotbar_target_label(target)
+        rendered_label = esc(label)
+        if app.select_mode and target in {"open_selected", "action:open_selected"}:
+            rendered_label = f"{rendered_label} [1]"
+        cell = f" {rendered_label} "
+        if i == app.hotbar_selected_index:
+            parts.append(f"[{_CURSOR_STYLE}]{cell}[/]")
+        else:
+            row_style = _HOTBAR_ROW_STYLE_EVEN if i % 2 == 0 else _HOTBAR_ROW_STYLE_ODD
+            parts.append(f"[{row_style}]{cell}[/]")
+    disp_right.update("  ".join(parts))

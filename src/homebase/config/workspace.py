@@ -126,11 +126,11 @@ def load_custom_actions(data: object) -> list[dict[str, str]]:
     return out
 
 
-def load_custom_hotkeys(data: object) -> list[dict[str, str]]:
+def load_custom_hotkeys(data: object) -> list[dict[str, object]]:
     raw = data.get("custom_hotkeys", []) if isinstance(data, dict) else []
     if not isinstance(raw, list):
         return []
-    out: list[dict[str, str]] = []
+    out: list[dict[str, object]] = []
     seen: set[str] = set()
     for idx, item in enumerate(raw):
         if not isinstance(item, dict):
@@ -141,15 +141,21 @@ def load_custom_hotkeys(data: object) -> list[dict[str, str]]:
         seen.add(hid)
         hotkey = str(item.get("hotkey", "")).strip().lower()
         target = str(item.get("target", "")).strip()
-        if not hotkey or not target:
+        hotbar = bool(item.get("hotbar", False))
+        label = str(item.get("label", "")).strip()
+        if not target or (not hotkey and not hotbar):
             continue
-        out.append(
-            {
-                "id": hid,
-                "hotkey": hotkey,
-                "target": target,
-            }
-        )
+        row: dict[str, object] = {
+            "id": hid,
+            "target": target,
+        }
+        if hotkey:
+            row["hotkey"] = hotkey
+        if hotbar:
+            row["hotbar"] = True
+        if label:
+            row["label"] = label
+        out.append(row)
     return out
 
 

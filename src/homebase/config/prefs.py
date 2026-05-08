@@ -145,8 +145,38 @@ def load_custom_actions(base_dir: Path) -> list[dict[str, str]]:
     return workspace_settings.load_custom_actions(load_global_config_dict(base_dir))
 
 
-def load_custom_hotkeys(base_dir: Path) -> list[dict[str, str]]:
+def load_custom_hotkeys(base_dir: Path) -> list[dict[str, object]]:
     return workspace_settings.load_custom_hotkeys(load_global_config_dict(base_dir))
+
+
+def save_custom_hotkeys(base_dir: Path, custom_hotkeys: list[dict[str, object]]) -> None:
+    data = load_global_config_dict(base_dir)
+    out: list[dict[str, object]] = []
+    seen: set[str] = set()
+    for idx, item in enumerate(custom_hotkeys):
+        hid = str(item.get("id", "")).strip() or f"custom_hotkey_{idx + 1}"
+        if hid in seen:
+            continue
+        seen.add(hid)
+        target = str(item.get("target", "")).strip()
+        hotkey = str(item.get("hotkey", "")).strip().lower()
+        hotbar = bool(item.get("hotbar", False))
+        label = str(item.get("label", "")).strip()
+        if not target or (not hotkey and not hotbar):
+            continue
+        row: dict[str, object] = {
+            "id": hid,
+            "target": target,
+        }
+        if hotkey:
+            row["hotkey"] = hotkey
+        if hotbar:
+            row["hotbar"] = True
+        if label:
+            row["label"] = label
+        out.append(row)
+    data["custom_hotkeys"] = out
+    save_global_config_dict(base_dir, data)
 
 
 def load_create_templates(base_dir: Path) -> list[dict[str, object]]:

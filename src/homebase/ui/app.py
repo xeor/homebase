@@ -13,6 +13,7 @@ from typing import Callable, Iterable
 
 from textual.app import App, ComposeResult, SystemCommand
 from textual.binding import Binding
+from textual.command import CommandPalette
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.events import Key
 from textual.screen import ModalScreen
@@ -53,6 +54,7 @@ from ..config.prefs import (
     load_table_columns_config,
     load_ui_state,
     resolve_filter_expression,
+    save_custom_hotkeys,
     save_ui_state,
 )
 from ..core import utils as core_utils
@@ -171,6 +173,7 @@ from .screens.basic import (
     RuntimeErrorScreen,
 )
 from .screens.choices import FuzzyChoiceScreen, SingleChoiceScreen
+from .screens.command_palette import BCommandPalette
 from .screens.filter_manage import (
     FilterManageScreen,
     set_filter_manage_base_dir,
@@ -197,6 +200,7 @@ from .sync import pane_probe as textual_ui_pane_probe
 from .sync import reconcile as textual_ui_reconcile
 from .sync import reconcile_worker as textual_ui_reconcile_worker
 from .sync import sync as textual_ui_sync
+from .system_commands_provider import get_homebase_system_commands_provider
 from .table import nav as textual_ui_table_nav
 from .table import row_helpers as textual_ui_row_helpers
 from .table import rows_view as textual_ui_rows_view
@@ -214,6 +218,8 @@ _ROW_BUILD_ERRORS = (
     subprocess.SubprocessError,
     sqlite3.Error,
 )
+
+_HOTBAR_PALETTE_TAG = f" \\[[{COLOR_ERROR_HEX}]@hotbar[/]]"
 
 _VIEW_CONFIG_DEFAULT: dict[str, dict[str, list[tuple[str, str]]]] = {
     "active": {
@@ -237,10 +243,12 @@ _VIEW_CONFIG_DEFAULT: dict[str, dict[str, list[tuple[str, str]]]] = {
 
 
 class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path | None, list[str]]]):
+    COMMANDS = {get_homebase_system_commands_provider}
     CSS = """
     Screen { layout: vertical; }
     #toolbar { height: 5; border: round $accent; padding: 0 1; }
-    #global_meta { content-align: left top; }
+    #global_meta_left { content-align: left top; width: 4fr; }
+    #global_meta_right { content-align: left top; width: 2fr; }
     #main { height: 1fr; }
     #projects { width: 4fr; height: 1fr; border: round $surface; scrollbar-gutter: stable; }
     #side { width: 2fr; height: 1fr; border: round $surface; padding: 0 1; }
@@ -311,6 +319,7 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
         ),
         ("ctrl+a", "pick_actions", "Actions"),
         ("ctrl+o", "toggle_select_mode", "Select mode"),
+        Binding("ctrl+@", "cycle_hotbar", "Next hotbar", show=False, priority=True),
         ("enter", "open_selected", "Open"),
         ("ctrl+g", "open_existing_pane", "Goto tmux-tab"),
         ("ctrl+q", "quit_app", "Quit"),
@@ -532,6 +541,8 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
         self.completion_counts_token = -1
         self.completion_tag_counts: list[tuple[str, int]] = []
         self.completion_prop_counts: list[tuple[str, int]] = []
+        self.hotbar_selected_index = 0
+        self._resize_refresh_token = 0
 
     def _init_busy_state(self) -> None:
         self._busy_depth = 0
@@ -683,7 +694,8 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
 
     def compose(self) -> ComposeResult:
         with Horizontal(id="toolbar"):
-            yield Static("", id="global_meta")
+            yield Static("", id="global_meta_left")
+            yield Static("", id="global_meta_right")
         with Horizontal(id="main"):
             yield DataTable(id="projects", cursor_type="row")
             with Vertical(id="side"):
@@ -809,7 +821,8 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
             self.query_one("#side_settings_table", DataTable),
             self.query_one("#side_settings_notes", Static),
             self.query_one("#wip_bar", Static),
-            self.query_one("#global_meta", Static),
+            self.query_one("#global_meta_left", Static),
+            self.query_one("#global_meta_right", Static),
         ):
             if hasattr(wid, "can_focus"):
                 try:
@@ -848,9 +861,19 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
         self._configure_table_columns()
         self._refresh_table()
 
-    def on_resize(self, _event) -> None:
+    def _refresh_after_resize(self, token: int) -> None:
+        if token != self._resize_refresh_token:
+            return
         self._configure_table_columns()
         self._refresh_table()
+
+    def on_resize(self, _event) -> None:
+        self._resize_refresh_token += 1
+        token = self._resize_refresh_token
+        self._configure_table_columns()
+        self._refresh_table()
+        self.set_timer(0.12, lambda: self._refresh_after_resize(token))
+        self.set_timer(0.32, lambda: self._refresh_after_resize(token))
 
     def _modal_active(self) -> bool:
         return isinstance(self.screen, ModalScreen)
@@ -931,8 +954,9 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
                 if not is_top_active
                 else f"Tab: {top_label} (active)"
             )
+            starred = self._target_is_hotbar(command_id)
             yield SystemCommand(
-                top_title,
+                top_title + (_HOTBAR_PALETTE_TAG if starred else ""),
                 f"Go to main tab: {top_label} (id={command_id})",
                 lambda top=top_key: self._jump_to_side_tab(top),
             )
@@ -948,13 +972,17 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
                     if not is_active
                     else f"Tab: {top_label} / {child_label} (active)"
                 )
+                starred = self._target_is_hotbar(command_id)
                 yield SystemCommand(
-                    title,
+                    title + (_HOTBAR_PALETTE_TAG if starred else ""),
                     f"Go to tab: {top_label} / {child_label} (id={command_id})",
                     lambda top=top_key, child=child_key: self._jump_to_side_tab(
                         top, child
                     ),
                 )
+
+        grouped: dict[str, list[tuple[str, str]]] = {"target": [], "global": []}
+        grouped["target"].append(("open_selected", "[white]Open selected (default)[/]"))
 
         custom_scope_by_id: dict[str, str] = {}
         custom_list_action_ids: set[str] = set()
@@ -1014,7 +1042,6 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
                     out.append(part)
             return tuple(out)
 
-        grouped: dict[str, list[tuple[str, str]]] = {"target": [], "global": []}
         for action_id, label in self._valid_action_items():
             grouped[_scope_for_action(action_id)].append((action_id, label))
         for scope in ("target", "global"):
@@ -1034,15 +1061,28 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
                     scope_prefix = "[#ffb347]Action > Global[/]"
                 if action_id in custom_list_action_ids:
                     scope_prefix = scope_prefix.replace("[/]", " (filepicker)[/]")
+                title = f"{scope_prefix}: {plain}"
+                starred = self._target_is_hotbar(f"action:{action_id}")
                 yield SystemCommand(
-                    f"{scope_prefix}: {plain}",
+                    title + (_HOTBAR_PALETTE_TAG if starred else ""),
                     f"{self._action_help_text(action_id, label)} (id=action:{action_id})",
-                    lambda aid=action_id: self._on_pick_actions(aid),
+                    (
+                        self.action_open_selected
+                        if action_id == "open_selected"
+                        else (lambda aid=action_id: self._on_pick_actions(aid))
+                    ),
                 )
+
+    def action_command_palette(self) -> None:
+        if not CommandPalette.is_open(self):
+            self.push_screen(BCommandPalette(id="--command-palette"))
 
     def _dispatch_hotkey_target(self, target: str) -> None:
         value = str(target or "").strip()
         if not value:
+            return
+        if value in {"open_selected", "action:open_selected"}:
+            self.action_open_selected()
             return
         if value.startswith("action:"):
             self._on_pick_actions(value.split(":", 1)[1])
@@ -1056,6 +1096,105 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
             self._jump_to_side_tab(payload)
             return
         self._on_pick_actions(value)
+
+    def _hotbar_targets(self) -> list[str]:
+        return textual_ui_action_items.hotbar_targets(self)
+
+    def _hotbar_visible(self) -> bool:
+        return bool(self._hotbar_targets())
+
+    def _normalize_hotbar_index(self) -> None:
+        targets = self._hotbar_targets()
+        if not targets:
+            self.hotbar_selected_index = 0
+            return
+        self.hotbar_selected_index = max(0, min(self.hotbar_selected_index, len(targets) - 1))
+
+    def _selected_hotbar_target(self) -> str:
+        targets = self._hotbar_targets()
+        if not targets:
+            return ""
+        self._normalize_hotbar_index()
+        return str(targets[self.hotbar_selected_index])
+
+    def _cycle_hotbar(self, delta: int) -> bool:
+        targets = self._hotbar_targets()
+        if not targets:
+            return False
+        self._normalize_hotbar_index()
+        self.hotbar_selected_index = (self.hotbar_selected_index + delta) % len(targets)
+        self._refresh_search_display()
+        return True
+
+    def _toggle_hotbar_target_from_palette(self, target: str) -> bool:
+        value = str(target or "").strip()
+        if not value:
+            return False
+        bindings: list[dict[str, object]] = [dict(row) for row in self.custom_hotkeys]
+        found_idx = -1
+        for i, row in enumerate(bindings):
+            if str(row.get("target", "")).strip() == value:
+                found_idx = i
+                break
+        if found_idx >= 0:
+            row = dict(bindings[found_idx])
+            hotbar = not bool(row.get("hotbar", False))
+            if hotbar:
+                row["hotbar"] = True
+            else:
+                row.pop("hotbar", None)
+                if not str(row.get("hotkey", "")).strip():
+                    bindings.pop(found_idx)
+                    try:
+                        save_custom_hotkeys(self.base_dir, bindings)
+                        self.custom_hotkeys = bindings
+                        self._normalize_hotbar_index()
+                        self._refresh_search_display()
+                        return True
+                    except (OSError, TypeError, ValueError) as exc:
+                        self._show_runtime_error("save custom hotkeys", exc)
+                        return False
+            bindings[found_idx] = row
+        else:
+            bindings.append(
+                {
+                    "id": f"hotbar_{len(bindings) + 1}",
+                    "target": value,
+                    "hotbar": True,
+                }
+            )
+        try:
+            save_custom_hotkeys(self.base_dir, bindings)
+            self.custom_hotkeys = bindings
+        except (OSError, TypeError, ValueError) as exc:
+            self._show_runtime_error("save custom hotkeys", exc)
+            return False
+        self._normalize_hotbar_index()
+        self._refresh_search_display()
+        return True
+
+    def _target_is_hotbar(self, target: str) -> bool:
+        value = str(target or "").strip()
+        if not value:
+            return False
+        return value in set(self._hotbar_targets())
+
+    def _hotbar_target_label(self, target: str) -> str:
+        value = str(target or "").strip()
+        if not value:
+            return ""
+        custom_label = self._hotbar_target_custom_label_map().get(value, "")
+        if custom_label:
+            return custom_label
+        if value.startswith("tab:"):
+            return value.split(":", 1)[1]
+        if value.startswith("action:"):
+            action_id = value.split(":", 1)[1]
+            for aid, label in self._valid_action_items():
+                if aid == action_id:
+                    return self._label_plain(label)
+            return action_id
+        return value
 
     def _apply_side_tab_state_to_widgets(self) -> None:
         textual_ui_tabs_state.apply_side_tab_state_to_widgets(self)
@@ -2263,6 +2402,9 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
     def _hotkey_target_label_map(self) -> dict[str, str]:
         return textual_ui_action_items.hotkey_target_label_map(self)
 
+    def _hotbar_target_custom_label_map(self) -> dict[str, str]:
+        return textual_ui_action_items.hotbar_target_custom_label_map(self)
+
     def _valid_action_items(self) -> list[tuple[str, str]]:
         return textual_ui_action_items.valid_action_items(
             self,
@@ -2793,6 +2935,11 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
         )
 
     def action_open_selected(self) -> None:
+        if self._table_is_active_focus() and self._hotbar_visible():
+            target = self._selected_hotbar_target()
+            if target and target not in {"open_selected", "action:open_selected"}:
+                self._dispatch_hotkey_target(target)
+                return
         if self._critical_job_active():
             self._log(
                 f"cannot open while critical job is running: {self._critical_job_label()}",
@@ -2823,6 +2970,12 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
         self._persist_state_now()
         self.fast_exit_requested = True
         self.exit(("open", row.path, []))
+
+    def action_cycle_hotbar(self) -> None:
+        if not self._table_is_active_focus():
+            return
+        if self._hotbar_visible():
+            self._cycle_hotbar(1)
 
     def action_quit_app(self) -> None:
         running_managed = self._running_terminating_processes()
