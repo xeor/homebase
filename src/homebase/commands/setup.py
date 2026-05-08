@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Callable
 
 from ..config.prefs import nested_discovery_enabled, set_nested_discovery_enabled
 from ..core import nested as nested_utils
@@ -76,12 +77,19 @@ def _prompt_yes_no(question: str, default: bool) -> bool:
     return prompting.prompt_yes_no(question, default=default, read=_prompt_readline)
 
 
-def cmd_setup(base_dir: Path, bin_dir: Path, *, dry_run: bool = False) -> int:
+def cmd_setup(
+    base_dir: Path,
+    bin_dir: Path,
+    *,
+    completion_script_fn: Callable[[str], str] | None = None,
+    dry_run: bool = False,
+) -> int:
     return setup_tools.cmd_setup(
         base_dir,
         bin_dir,
         tmux_bin_candidates=TMUX_BIN_CANDIDATES,
         prompt_yes_no=_prompt_yes_no,
+        completion_script_fn=completion_script_fn,
         dry_run=dry_run,
     )
 

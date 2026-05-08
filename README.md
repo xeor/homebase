@@ -1,10 +1,42 @@
 # homebase
 
+> AI usage note: This project is heavily AI-assisted with strict review discipline.
+> Changes are developed through detailed prompts, small iterative patches, strong
+> test coverage, and manual verification. The engineering bar is practical and
+> conservative: reproducible tests, lint-clean code, explicit error handling, and
+> non-destructive git workflows.
+
 Personal project workspace TUI + CLI. The `b` (or `homebase`) command
 opens a textual UI over a directory of projects, with archive,
 filtering, tagging, and tmux integration.
 
-## Run
+## Quickstart
+
+```sh
+uv tool install git+https://github.com/xeor/homebase.git
+b setup
+b
+```
+
+Update to latest from GitHub:
+
+```sh
+uv tool upgrade homebase
+# if needed, force reinstall from git source:
+uv tool install --reinstall git+https://github.com/xeor/homebase.git
+b setup
+```
+
+Base folder defaults to `~/base`. Override with `--base-folder` or
+`BASE_FOLDER=/path uv run b ...`.
+
+`b setup` validates environment wiring and can install/fix shell completion
+for the active shell (`bash`, `zsh`, `fish`).
+
+`homebase` and `b` are interchangeable; both resolve to
+`homebase.cli:entrypoint`.
+
+## Common Commands
 
 ```sh
 uv run b               # interactive TUI
@@ -20,19 +52,13 @@ uv run b completion zsh > ~/.zfunc/_b
 uv run b completion fish > ~/.config/fish/completions/b.fish
 ```
 
-Base folder defaults to `~/base`. Override with `--base-folder` or
-`BASE_FOLDER=/path uv run b ...`.
-
-`homebase` and `b` are interchangeable; both resolve to
-`homebase.cli:entrypoint`.
-
 Shell completion:
 
 - `b completion bash|zsh|fish` prints a completion script for that shell.
 - Dynamic completion includes quick-create keys from `create_templates`
   for `b c <key>`.
 
-## Test
+## Validation
 
 ```sh
 uv run pytest                # full suite
@@ -40,21 +66,21 @@ uv run pytest -x --tb=short  # stop at first failure
 uv run pytest tests/test_archive_io.py  # one file
 ```
 
-## Lint
+### Lint
 
 ```sh
 uv run ruff check src/homebase/ tests/
 uv run ruff check --fix src/homebase/ tests/  # auto-fix imports/order
 ```
 
-## Develop
+### Local Dev
 
 ```sh
 uv sync                       # install with dev extras
 uv run python -m homebase status
 ```
 
-## Technical State Files
+## Runtime Files
 
 Homebase runtime state/config files live in `<base>/.homebase/`.
 
@@ -70,6 +96,8 @@ Setup creates the directory:
 ```sh
 b setup
 ```
+
+## Architecture (Brief)
 
 Source layout (one subpackage per domain):
 
@@ -102,7 +130,28 @@ everything; `cli/` ⇽ everything.
 
 See `AGENTS.md` for the full architecture rules and conventions.
 
-## Property Config
+## Configuration
+
+Global config file: `<base>/.homebase/config.yaml`
+
+Most used top-level sections:
+
+- `archive`
+- `filters`
+- `properties`
+- `cache_profile`
+- `create_templates`
+- `open_mode`
+- `notes`
+- `reconcile`
+- `table_behavior`
+- `table_columns`
+- `custom_actions`
+- `custom_hotkeys`
+- `new_project`
+- `state`
+
+### Property Config
 
 `properties` is a token-keyed map in `.homebase/config.yaml`.
 
@@ -149,7 +198,7 @@ Query types currently supported:
 - `tmux_editor_commands`
 - `sqlite_recent_paths`
 
-## Kitchen Sink Config
+### Full Config Example
 
 `<base>/.homebase/config.yaml` example with all supported top-level areas:
 
@@ -316,7 +365,7 @@ state:
   side_settings: table
 ```
 
-## Quick Create Templates
+## Advanced: Quick Create Templates
 
 `b c <key>` reads `create_templates` from `.homebase/config.yaml`.
 
@@ -392,7 +441,7 @@ b c area51
 b c area51 --name area51-demo --debug
 ```
 
-## Custom Action Hotkeys
+## Advanced: Custom Action Hotkeys
 
 Custom actions are configured in `~/<base>/.homebase/config.yaml` (same file
 as other global settings).
@@ -543,7 +592,7 @@ Example behavior:
 - You choose a file from the list
 - App executes `codium <chosen-file>`
 
-## Package
+## Packaging
 
 Build sdist + wheel:
 
@@ -559,15 +608,15 @@ uv pip install dist/homebase-0.1.0-py3-none-any.whl
 b help
 ```
 
-Install from a git checkout:
+Install from GitHub:
 
 ```sh
-uv pip install git+https://github.com/<user>/homebase.git
+uv pip install git+https://github.com/xeor/homebase.git
 ```
 
 Bump `version` in `pyproject.toml` before each release.
 
-## Project files
+## Repository Layout
 
 ```
 pyproject.toml      # build config (hatchling), deps, scripts, ruff, pytest

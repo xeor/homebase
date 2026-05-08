@@ -158,12 +158,39 @@ def _write_homebase_gitignore(path: Path) -> None:
     path.write_text("\n".join(lines).rstrip("\n") + "\n")
 
 
+def _current_shell_name() -> str:
+    shell = str(os.environ.get("SHELL", "")).strip()
+    if not shell:
+        return ""
+    return Path(shell).name.strip().lower()
+
+
+def _completion_target_for_shell(shell: str) -> Path | None:
+    value = str(shell).strip().lower()
+    if value == "bash":
+        return Path.home() / ".local/share/bash-completion/completions/b"
+    if value == "zsh":
+        return Path.home() / ".zfunc/_b"
+    if value == "fish":
+        return Path.home() / ".config/fish/completions/b.fish"
+    return None
+
+
+def _completion_ok(path: Path, expected_script: str) -> bool:
+    try:
+        current = path.read_text()
+    except OSError:
+        return False
+    return current == expected_script
+
+
 def cmd_setup(
     base_dir: Path,
     bin_dir: Path,
     *,
     tmux_bin_candidates: tuple[str, ...],
     prompt_yes_no: Callable[[str, bool], bool],
+    completion_script_fn: Callable[[str], str] | None = None,
     dry_run: bool = False,
 ) -> int:
     print("setup: homebase")
@@ -293,6 +320,27 @@ def cmd_setup(
         print(f"    current: {existing_tmux_bindings[0]}")
         print(f"    expect : {expected_binding}")
 
+    active_shell = _current_shell_name()
+    completion_shell = active_shell if active_shell in {"bash", "zsh", "fish"} else ""
+    completion_target = _completion_target_for_shell(completion_shell) if completion_shell else None
+    completion_status = "WARN"
+    completion_detail = "unsupported shell for auto-check"
+    expected_completion = ""
+    completion_ok = False
+    if completion_shell and completion_script_fn is not None and completion_target is not None:
+        expected_completion = completion_script_fn(completion_shell)
+        completion_ok = _completion_ok(completion_target, expected_completion)
+        completion_status = "PASS" if completion_ok else "WARN"
+        completion_detail = (
+            f"{_state_text(completion_status)}: {completion_target}"
+            if completion_ok
+            else f"needs change: write completion to {completion_target}"
+        )
+    elif completion_shell and completion_target is not None:
+        completion_status = "WARN"
+        completion_detail = f"needs change: completion checker unavailable for {completion_shell}"
+    _print_check(completion_status, "shell completion", completion_detail)
+
     print("")
     print("fix proposals:")
 
@@ -349,6 +397,21 @@ def cmd_setup(
                 except (OSError, ValueError) as exc:
                     print(f"- tmux binding write failed ({exc})", file=sys.stderr)
 
+    if completion_shell and completion_target is not None and not completion_ok and expected_completion:
+        if prompt_yes_no(
+            f"install {completion_shell} completion at {completion_target}?",
+            True,
+        ):
+            if dry_run:
+                print(f"- would fix: write {completion_target}")
+            else:
+                try:
+                    completion_target.parent.mkdir(parents=True, exist_ok=True)
+                    completion_target.write_text(expected_completion)
+                    print(f"- fixed: wrote {completion_target}")
+                except OSError as exc:
+                    print(f"- completion write failed ({exc})", file=sys.stderr)
+
     print("")
     print("final validation:")
     uv_bin = find_executable("uv", ("/opt/homebrew/bin/uv", "/usr/local/bin/uv"))
@@ -380,6 +443,15 @@ def cmd_setup(
     except OSError:
         tmux_conf_text = ""
     tmux_binding_ok = has_recommended_tmux_binding(tmux_conf_text, expected_binding)
+    completion_ok_final = completion_ok
+    if completion_shell and completion_target is not None and completion_script_fn is not None:
+        try:
+            completion_ok_final = _completion_ok(
+                completion_target,
+                completion_script_fn(completion_shell),
+            )
+        except (ValueError, OSError):
+            completion_ok_final = False
 
     hard_fail = False
     fail_checks = [
@@ -400,8 +472,9 @@ def cmd_setup(
         not gitignore_ok,
         not tmux_binding_ok,
         not config_path.is_file(),
+        completion_shell in {"bash", "zsh", "fish"} and not completion_ok_final,
     ]
-    pass_count = 13 - sum(1 for x in fail_checks if x) - sum(1 for x in warn_checks if x)
+    pass_count = 14 - sum(1 for x in fail_checks if x) - sum(1 for x in warn_checks if x)
     warn_count = sum(1 for x in warn_checks if x)
     fail_count = sum(1 for x in fail_checks if x)
     _print_check(

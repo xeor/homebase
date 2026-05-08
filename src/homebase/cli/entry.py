@@ -224,6 +224,7 @@ def main(argv: list[str]) -> int:
             cmd_setup=lambda base_path, bin_path, dry_run: cmd_setup(
                 base_path,
                 bin_path,
+                completion_script_fn=completion_script,
                 dry_run=dry_run,
             ),
             cmd_cache_warm=cmd_cache_warm,
