@@ -224,7 +224,7 @@ def cmd_utils_opt_in_nested_discovery(
                 "collisions": collisions,
                 "entries": entries,
             }
-            out_path = Path.cwd() / HOMEBASE_DIR_NAME / NESTED_DISCOVERY_REPORT_FILE_NAME
+            out_path = base_dir / HOMEBASE_DIR_NAME / NESTED_DISCOVERY_REPORT_FILE_NAME
             out_path.parent.mkdir(parents=True, exist_ok=True)
             out_path.write_text(yaml.safe_dump(report, sort_keys=False, default_flow_style=False))
             print(f"wrote: {out_path}")

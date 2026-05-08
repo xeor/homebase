@@ -674,6 +674,10 @@ def _benchmark_load_runs(report_path: Path) -> list[dict[str, object]]:
     return benchmark_report.load_runs(report_path)
 
 
+def _benchmark_report_path(base_dir: Path, file_name: str) -> Path:
+    return base_dir / HOMEBASE_DIR_NAME / file_name
+
+
 def _benchmark_score_runs(
     runs: list[dict[str, object]], ignore_featuresets: set[str] | None = None
 ) -> list[dict[str, object]]:
@@ -865,7 +869,7 @@ def cmd_benchmark_run(
         "score_basis_elapsed_s_cold": suite_elapsed_s,
     }
 
-    report_path = run_cwd / HOMEBASE_DIR_NAME / BENCHMARK_REPORT_FILE_NAME
+    report_path = _benchmark_report_path(base_dir, BENCHMARK_REPORT_FILE_NAME)
     report_path.parent.mkdir(parents=True, exist_ok=True)
     _benchmark_write_report(report_path, run_data)
     print("")
@@ -879,11 +883,9 @@ def cmd_benchmark_run(
     return 0
 
 
-def cmd_benchmark_results(
-    run_cwd: Path, ignore_featuresets: set[str] | None = None
-) -> int:
+def cmd_benchmark_results(base_dir: Path, ignore_featuresets: set[str] | None = None) -> int:
     ignore_featuresets = set(ignore_featuresets or set())
-    report_path = run_cwd / HOMEBASE_DIR_NAME / BENCHMARK_REPORT_FILE_NAME
+    report_path = _benchmark_report_path(base_dir, BENCHMARK_REPORT_FILE_NAME)
     all_runs = _benchmark_load_runs(report_path)
     if not all_runs:
         print(f"no benchmark runs found: {report_path}")
@@ -1109,7 +1111,7 @@ def cmd_benchmark(
             keep_basefolder=keep_basefolder,
         )
     if subcommand == "results":
-        return cmd_benchmark_results(run_cwd, ignore_featuresets=ignore_featuresets)
+        return cmd_benchmark_results(base_dir, ignore_featuresets=ignore_featuresets)
     print("unknown benchmark subcommand", file=sys.stderr)
     return 1
 
@@ -1170,7 +1172,7 @@ def cmd_test(
     )
     print(f"test score: {_fmt_score(perf_score)}  engine={_fmt_score(engine_score)}")
 
-    report_path = run_cwd / HOMEBASE_DIR_NAME / TEST_REPORT_FILE_NAME
+    report_path = _benchmark_report_path(base_dir, TEST_REPORT_FILE_NAME)
     report_path.parent.mkdir(parents=True, exist_ok=True)
     run_data: dict[str, object] = {
         "suite_version": BENCHMARK_SUITE_VERSION,

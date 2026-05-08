@@ -390,7 +390,7 @@ def cmd_test_regression(
         f"regression summary: total={len(results)} pass={len(results) - len(failures)} fail={len(failures)} elapsed={elapsed_total:.2f}s"
     )
 
-    report_path = run_cwd / HOMEBASE_DIR_NAME / REGRESSION_TEST_REPORT_FILE_NAME
+    report_path = base_dir / HOMEBASE_DIR_NAME / REGRESSION_TEST_REPORT_FILE_NAME
     report_path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
         "timestamp": datetime.now().astimezone().isoformat(timespec="seconds"),
