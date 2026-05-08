@@ -283,6 +283,17 @@ custom_actions:
     scope: target
     command: code {{ full_path }}
 
+  # Built-in note operation. note_command must be one of the fixed enum
+  # values (currently only `add_log`). Each note_command value may be
+  # defined at most once across all custom_actions — duplicates fail
+  # at startup. Writing happens in pure Python (no shell), prompts a
+  # multiline dialog, and writes the same text to every selected
+  # project's note (resolved via notes.path_template).
+  - id: add_log_to_note
+    label: Add log to note
+    scope: target
+    note_command: add_log
+
 custom_hotkeys:
   - key: alt+v
     action_id: vscode
@@ -433,6 +444,11 @@ custom_actions:
     list_command: find "{{ full_path }}" -type f -name "*.md"
     run_command: codium {{ selection_q }}
 
+  - id: add_log_to_note
+    label: Add log to note
+    scope: target
+    note_command: add_log
+
 custom_hotkeys:
   - id: hk_vscode
     hotkey: f5
@@ -463,6 +479,25 @@ custom_hotkeys:
 - `list_command` + `run_command`: optional pair for list-actions.
   `list_command` emits candidates (one per line), user picks one in a fuzzy list,
   then `run_command` executes with `{{ selection }}` / `{{ selection_q }}`.
+- `note_command`: built-in note-edit operation. Pure-Python; no shell.
+  - Allowed values: `add_log`.
+  - Each `note_command` value may be defined at most once across all
+    `custom_actions` — duplicates (e.g. two entries with
+    `note_command: add_log`) fail at startup.
+  - `add_log`: prompts a multiline dialog, then appends an entry under
+    `## Log` in each selected project's note (resolved via
+    `notes.path_template`):
+    - missing file: created with `# <project name>` H1 and a `## Log`
+      section
+    - existing file without `## Log`: section appended at end of file
+    - existing file with `## Log`: entry inserted at end of section
+  - Each entry is `### <ISO-8601 local-tz timestamp>` followed by a
+    blank line and the user-provided text. The timestamp is captured
+    once per invocation and reused across all selected projects.
+  - Existing notes are validated before the dialog opens; files with
+    duplicate `## Log` sections (or other malformed structure) are
+    skipped with a notification while the rest of the selection
+    proceeds.
 - `custom_hotkeys[].hotkey`: key name from Textual key syntax (for
   example `f1`..`f12`, `ctrl+f5`, `alt+v`, `ç`, `†` on macOS option keys)
 - `custom_hotkeys[].target`: command-palette id to trigger. Supported:
@@ -476,6 +511,9 @@ Notes:
 - Startup fails if two `custom_hotkeys` entries use the same hotkey.
 - Startup fails if a custom hotkey collides with an existing app
   hotkey.
+- Startup fails if a `note_command` value (e.g. `add_log`) appears on
+  more than one `custom_actions` entry, or if it is not one of the
+  allowed values.
 - Hotkeys trigger when the main projects table has focus and no modal
   is open.
 - list-actions run per target row when multiple targets are active

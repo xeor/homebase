@@ -49,6 +49,7 @@ src/homebase/
 ├── metadata/    # store, utils, api (.base.yml), property
 ├── tmux/        # core, commands, flow
 ├── filter/      # engine, tag_index
+├── notes/       # markdown note-edit primitives (log_md)
 ├── workspace/   # discovery, projects, project_info, rows,
 │                # benchmark, benchmark_report, regression
 ├── commands/    # basic, workspace, interactive_flow, archive
@@ -79,6 +80,7 @@ metadata/    ← core/, config/
 archive/     ← core/, config/
 tmux/        ← core/, config/
 filter/      ← core/, config/
+notes/       ← core/
 workspace/   ← core/, config/, cache/, metadata/, archive/, filter/
 commands/    ← workspace/, archive/, cache/, metadata/, tmux/, core/, config/
 ui/          ← everything except cli/

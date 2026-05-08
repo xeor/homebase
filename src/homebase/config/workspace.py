@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from ..core.constants import VALID_NOTE_COMMANDS
 from . import cache_profile as cache_profile_config
 
 
@@ -53,6 +54,7 @@ def load_custom_actions(data: object) -> list[dict[str, str]]:
         return []
     out: list[dict[str, str]] = []
     seen: set[str] = set()
+    seen_note_commands: dict[str, str] = {}
     for idx, item in enumerate(raw):
         if not isinstance(item, dict):
             continue
@@ -68,6 +70,23 @@ def load_custom_actions(data: object) -> list[dict[str, str]]:
         action = str(item.get("action", "")).strip()
         list_command = str(item.get("list_command", "")).strip()
         run_command = str(item.get("run_command", "")).strip()
+        note_command_raw = item.get("note_command", "")
+        note_command = str(note_command_raw).strip() if note_command_raw is not None else ""
+        if note_command and note_command not in VALID_NOTE_COMMANDS:
+            valid = ", ".join(sorted(VALID_NOTE_COMMANDS))
+            raise ValueError(
+                f"custom action {cid!r} has invalid note_command "
+                f"{note_command!r}; valid values: {valid}"
+            )
+        if note_command:
+            previous = seen_note_commands.get(note_command)
+            if previous is not None:
+                raise ValueError(
+                    f"duplicate note_command {note_command!r}: "
+                    f"defined on both {previous!r} and {cid!r}; "
+                    f"each note_command value may be defined at most once"
+                )
+            seen_note_commands[note_command] = cid
         loop_on_multi_raw = item.get("loop_on_multi", False)
         if isinstance(loop_on_multi_raw, bool):
             loop_on_multi = loop_on_multi_raw
@@ -80,7 +99,12 @@ def load_custom_actions(data: object) -> list[dict[str, str]]:
                 "yes",
                 "on",
             }
-        if not command and not action and not (list_command and run_command):
+        if (
+            not command
+            and not action
+            and not (list_command and run_command)
+            and not note_command
+        ):
             continue
         row = {
             "id": cid,
@@ -94,6 +118,8 @@ def load_custom_actions(data: object) -> list[dict[str, str]]:
         if list_command and run_command:
             row["list_command"] = list_command
             row["run_command"] = run_command
+        if note_command:
+            row["note_command"] = note_command
         if loop_on_multi:
             row["loop_on_multi"] = "true"
         out.append(row)

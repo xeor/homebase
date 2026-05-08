@@ -3,11 +3,14 @@ from __future__ import annotations
 import re
 import shlex
 import subprocess
+from datetime import datetime
 from pathlib import Path
 from string import Template
 from typing import Any, Callable
 
 from ...core.models import ProjectRow
+from ...notes.log_md import NoteValidationError, insert_log_entry, validate_note
+from ..screens.multiline_input import MultilineInputScreen
 
 
 def custom_actions_for_scope(
@@ -18,6 +21,7 @@ def custom_actions_for_scope(
 ) -> list[tuple[str, str]]:
     normal: list[tuple[str, str]] = []
     list_actions: list[tuple[str, str]] = []
+    note_actions: list[tuple[str, str]] = []
     for act in app.custom_actions:
         if str(act.get("scope", "target")) != scope:
             continue
@@ -27,7 +31,11 @@ def custom_actions_for_scope(
             str(act.get("list_command", "")).strip()
             and str(act.get("run_command", "")).strip()
         )
-        if is_list_action:
+        is_note_action = bool(str(act.get("note_command", "")).strip())
+        if is_note_action:
+            plain_label = app._esc(label)
+            rendered_label = f"[#FFB347]{plain_label}[/] [dim](note)[/]"
+        elif is_list_action:
             plain_label = app._esc(label)
             rendered_label = f"[#40E0D0]{plain_label}[/] [dim](filepicker)[/]"
         else:
@@ -36,11 +44,13 @@ def custom_actions_for_scope(
             f"custom:{cid}",
             rendered_label,
         )
-        if is_list_action:
+        if is_note_action:
+            note_actions.append(target)
+        elif is_list_action:
             list_actions.append(target)
         else:
             normal.append(target)
-    return normal + list_actions
+    return normal + list_actions + note_actions
 
 
 def custom_hotkey_target_map(app: Any) -> dict[str, str]:
@@ -227,6 +237,14 @@ def run_custom_action(app: Any, action_id: str, *, base_dir: Path, fmt_ymd: Call
             run_command=run_command,
             base_dir=base_dir,
             fmt_ymd=fmt_ymd,
+        )
+        return
+    note_command = str(act.get("note_command", "")).strip()
+    if note_command:
+        _run_custom_note_action(
+            app,
+            action_id,
+            note_command=note_command,
         )
         return
     template_text = str(act.get("command", "")).strip()
@@ -471,3 +489,130 @@ def _render_filepicker_label(
         suffix = value[len(prefix) :]
         return f"[dim]{app._esc(prefix)}[/]{app._esc(suffix)}"
     return f"[white]{app._esc(fallback_label)}[/]"
+
+
+def _local_iso_timestamp() -> str:
+    return datetime.now().astimezone().isoformat(timespec="seconds")
+
+
+def _notify_skip(app: Any, row: ProjectRow, reason: str) -> None:
+    app._log(f"add_log skipped {row.name}: {reason}", "warn")
+    notifier = getattr(app, "notify", None)
+    if callable(notifier):
+        notifier(f"Skipped {row.name}: {reason}", severity="warning")
+
+
+def _run_custom_note_action(
+    app: Any,
+    action_id: str,
+    *,
+    note_command: str,
+) -> None:
+    if note_command != "add_log":
+        app._log(
+            f"custom note action has unknown note_command: {note_command}", "error"
+        )
+        app._refresh_side()
+        return
+    targets = app._target_rows()
+    if not targets:
+        app._log("custom note action skipped: no target", "warn")
+        app._refresh_side()
+        return
+
+    valid: list[tuple[ProjectRow, Path, str | None]] = []
+    for row in targets:
+        try:
+            note_path = app._resolve_notes_path_for_row(row)
+        except (OSError, ValueError, RuntimeError) as exc:
+            _notify_skip(app, row, f"resolve notes path failed: {exc}")
+            continue
+        existing: str | None = None
+        try:
+            exists = note_path.exists()
+        except OSError as exc:
+            _notify_skip(app, row, f"stat failed: {exc}")
+            continue
+        if exists:
+            try:
+                if not note_path.is_file():
+                    _notify_skip(app, row, "note path is not a regular file")
+                    continue
+            except OSError as exc:
+                _notify_skip(app, row, f"stat failed: {exc}")
+                continue
+            try:
+                existing = note_path.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError) as exc:
+                _notify_skip(app, row, f"read failed: {exc}")
+                continue
+            try:
+                validate_note(existing)
+            except NoteValidationError as exc:
+                _notify_skip(app, row, f"validation failed: {exc}")
+                continue
+        valid.append((row, note_path, existing))
+
+    if not valid:
+        app._log(f"custom note action {action_id}: no valid targets", "warn")
+        notifier = getattr(app, "notify", None)
+        if callable(notifier):
+            notifier("add_log: no valid targets", severity="warning")
+        app._refresh_side()
+        return
+
+    title = (
+        f"Add log to {valid[0][0].name}"
+        if len(valid) == 1
+        else f"Add log to {len(valid)} notes"
+    )
+    app.push_screen(
+        MultilineInputScreen(title, placeholder="log text"),
+        lambda text: _on_add_log_submit(app, text, valid, action_id),
+    )
+
+
+def _on_add_log_submit(
+    app: Any,
+    text: str | None,
+    valid: list[tuple[ProjectRow, Path, str | None]],
+    action_id: str,
+) -> None:
+    if text is None:
+        app._log(f"custom note action cancelled: {action_id}", "warn")
+        app._refresh_side()
+        return
+    body = str(text).rstrip("\r\n")
+    if not body.strip():
+        app._log(f"custom note action skipped: empty text ({action_id})", "warn")
+        app._refresh_side()
+        return
+    timestamp = _local_iso_timestamp()
+    written = 0
+    failed = 0
+    for row, note_path, existing in valid:
+        try:
+            new_content = insert_log_entry(
+                existing,
+                project_name=row.name,
+                timestamp=timestamp,
+                text=body,
+            )
+        except NoteValidationError as exc:
+            _notify_skip(app, row, f"validation failed: {exc}")
+            failed += 1
+            continue
+        try:
+            note_path.parent.mkdir(parents=True, exist_ok=True)
+            note_path.write_text(new_content, encoding="utf-8")
+            app._mark_row_active(row.path)
+            written += 1
+        except OSError as exc:
+            app._show_runtime_error(f"write note ({row.name})", exc)
+            failed += 1
+    summary = f"add_log {action_id}: {written} written, {failed} failed/skipped"
+    app._log(summary, "info" if failed == 0 else "warn")
+    notifier = getattr(app, "notify", None)
+    if callable(notifier) and written > 0:
+        notifier(f"add_log: wrote {written} note(s)")
+    app._refresh_side()

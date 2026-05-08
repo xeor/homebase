@@ -178,6 +178,7 @@ NOTES_CONFIG: dict[str, str] = {
     "open_command": "${EDITOR:-vi} {{ NOTE_PATH_Q }}",
     "create_command": "mkdir -p \"$(dirname {{ NOTE_PATH_Q }})\" && touch {{ NOTE_PATH_Q }} && ${EDITOR:-vi} {{ NOTE_PATH_Q }}",
 }
+VALID_NOTE_COMMANDS: frozenset[str] = frozenset({"add_log"})
 TABLE_BEHAVIOR_CONFIG: dict[str, object] = {
     "pin_wip_top": False,
     "side_width_pct": 33,

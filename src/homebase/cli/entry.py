@@ -119,22 +119,42 @@ def main(argv: list[str]) -> int:
     base_dir = resolve_base_dir(ns.base_folder)
     os.environ[ENV_BASE_DIR] = str(base_dir)
 
-    runtime_cfg = runtime_init.load_runtime_config(
-        base_dir,
-        default_archive_tz_name=DEFAULT_ARCHIVE_TZ_NAME,
-        load_property_defs=load_property_defs,
-        load_wip_symbol_map=load_wip_symbol_map,
-        load_saved_filter_queries=load_saved_filter_queries,
-        load_suffixes=load_suffixes,
-        load_file_view_exclude_patterns=load_file_view_exclude_patterns,
-        load_custom_actions=load_custom_actions,
-        load_custom_hotkeys=load_custom_hotkeys,
-        load_open_mode_config=load_open_mode_config,
-        load_notes_config=load_notes_config,
-        load_reconcile_config=load_reconcile_config,
-        load_cache_profile_table=load_cache_profile_table,
-        load_archive_timezone_name=load_archive_timezone_name,
-    )
+    # Fast paths that must work even when the global config is broken
+    # (otherwise shell completion keeps spamming "config error: ..." on
+    # every keystroke that triggers the completion function).
+    if ns.command == "completion":
+        return _cmd_completion(str(ns.shell))
+    if ns.command == "__complete":
+        return _cmd_internal_complete(
+            str(ns.shell),
+            int(ns.cword),
+            [str(x) for x in ns.words],
+            base_dir=base_dir,
+        )
+    if ns.command == "help":
+        parser.print_help()
+        return 0
+
+    try:
+        runtime_cfg = runtime_init.load_runtime_config(
+            base_dir,
+            default_archive_tz_name=DEFAULT_ARCHIVE_TZ_NAME,
+            load_property_defs=load_property_defs,
+            load_wip_symbol_map=load_wip_symbol_map,
+            load_saved_filter_queries=load_saved_filter_queries,
+            load_suffixes=load_suffixes,
+            load_file_view_exclude_patterns=load_file_view_exclude_patterns,
+            load_custom_actions=load_custom_actions,
+            load_custom_hotkeys=load_custom_hotkeys,
+            load_open_mode_config=load_open_mode_config,
+            load_notes_config=load_notes_config,
+            load_reconcile_config=load_reconcile_config,
+            load_cache_profile_table=load_cache_profile_table,
+            load_archive_timezone_name=load_archive_timezone_name,
+        )
+    except ValueError as exc:
+        print(f"config error: {exc}", file=sys.stderr)
+        return 1
     custom_action_hotkey_err = runtime_init.validate_custom_hotkeys(
         list(runtime_cfg.custom_hotkeys),
         reserved_hotkeys=CUSTOM_ACTION_RESERVED_HOTKEYS

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from homebase.config import workspace as workspace_settings
 
 
@@ -81,6 +83,64 @@ def test_load_custom_actions_parses_loop_on_multi() -> None:
             "loop_on_multi": "true",
         }
     ]
+
+
+def test_load_custom_actions_accepts_note_command() -> None:
+    out = workspace_settings.load_custom_actions(
+        {
+            "custom_actions": [
+                {
+                    "id": "add_log_to_note",
+                    "label": "Add log to note",
+                    "scope": "target",
+                    "note_command": "add_log",
+                }
+            ]
+        }
+    )
+    assert out == [
+        {
+            "id": "add_log_to_note",
+            "label": "Add log to note",
+            "scope": "target",
+            "note_command": "add_log",
+        }
+    ]
+
+
+def test_load_custom_actions_rejects_unknown_note_command() -> None:
+    with pytest.raises(ValueError, match="invalid note_command"):
+        workspace_settings.load_custom_actions(
+            {
+                "custom_actions": [
+                    {
+                        "id": "bad",
+                        "scope": "target",
+                        "note_command": "set_status",
+                    }
+                ]
+            }
+        )
+
+
+def test_load_custom_actions_rejects_duplicate_note_command() -> None:
+    with pytest.raises(ValueError, match="duplicate note_command"):
+        workspace_settings.load_custom_actions(
+            {
+                "custom_actions": [
+                    {
+                        "id": "log_a",
+                        "scope": "target",
+                        "note_command": "add_log",
+                    },
+                    {
+                        "id": "log_b",
+                        "scope": "target",
+                        "note_command": "add_log",
+                    },
+                ]
+            }
+        )
 
 
 def test_load_custom_actions_accepts_list_action_form() -> None:
