@@ -30,21 +30,90 @@ def refresh_table(
     property_tokens_text: Callable[[list[str]], str],
 ) -> None:
     table = app.query_one(widget_projects, DataTable)
+    rows = app._current_rows()
+    visible_cols = app._table_visible_columns_for_view(app.view_mode)
+    if not visible_cols:
+        visible_cols = [{"id": "name"}]
+
+    def _row_sig(row: ProjectRow) -> tuple[object, ...]:
+        return (
+            str(row.path),
+            row.name,
+            row.branch,
+            row.dirty,
+            row.last,
+            row.created,
+            row.opened_ts,
+            row.size_bytes,
+            row.archived,
+            row.archived_ts,
+            str(row.restore_target) if row.restore_target is not None else "",
+            row.wip,
+            row.stale,
+            row.packed,
+            row.description,
+            tuple(row.tags),
+            tuple(row.properties),
+        )
+
+    col_sig_parts: list[tuple[object, ...]] = []
+    for col in visible_cols:
+        try:
+            col_width = int(col.get("width", 12) or 12)
+        except (TypeError, ValueError):
+            col_width = 12
+        col_sig_parts.append(
+            (
+                str(col.get("id", "")).strip(),
+                str(col.get("label", "")),
+                bool(col.get("enabled", True)),
+                col_width,
+            )
+        )
+    col_sig = tuple(col_sig_parts)
+    row_sig = tuple(_row_sig(row) for row in rows)
+    render_sig = (
+        app.view_mode,
+        col_sig,
+        row_sig,
+        tuple(sorted(str(path) for path in app.multi_selected)),
+        tuple(sorted(str(path) for path in app.pending_tag_updates)),
+        tuple(sorted(str(path) for path in app.git_refresh_paths)),
+        tuple(
+            sorted(
+                (str(path), int(count))
+                for path, count in app.open_pane_count_by_project.items()
+                if count > 0
+            )
+        ),
+        tuple(sorted(str(path) for path in app.open_pane_overflow_projects)),
+        app._busy_frame_index,
+    )
+    prev_sig = app._table_render_signature_by_view.get(app.view_mode)
+    if (
+        prev_sig == render_sig
+        and not app._restore_pending.get(app.view_mode, False)
+        and not app._restore_apply_scroll.get(app.view_mode, False)
+    ):
+        return
+    app._table_render_signature_by_view[app.view_mode] = render_sig
+
     prev_scroll_x = 0
     prev_scroll_y = 0
     prev_row_count = 0
+    prev_cursor_row = 0
     try:
         prev_scroll_x = int(getattr(table, "scroll_x", 0) or 0)
         prev_scroll_y = int(getattr(table, "scroll_y", 0) or 0)
         prev_row_count = int(getattr(table, "row_count", 0) or 0)
+        prev_cursor_row = int(getattr(table, "cursor_row", 0) or 0)
     except (AttributeError, TypeError, ValueError):
         prev_scroll_x = 0
         prev_scroll_y = 0
         prev_row_count = 0
+        prev_cursor_row = 0
 
     app._suspend_project_row_highlight = True
-    table.clear(columns=False)
-    rows = app._current_rows()
 
     fixed_rows = 0
     if app.view_mode == mode_active and app._table_pin_wip_top_enabled():
@@ -54,9 +123,6 @@ def refresh_table(
     except WIDGET_API_ERRORS:
         pass
 
-    visible_cols = app._table_visible_columns_for_view(app.view_mode)
-    if not visible_cols:
-        visible_cols = [{"id": "name"}]
     effective_widths = dict(getattr(app, "_visible_column_effective_width_by_id", {}) or {})
     width_by_id: dict[str, int] = {}
     for col in visible_cols:
@@ -152,6 +218,7 @@ def refresh_table(
             out.stylize(color_error_hex, 2, 3)
         return out
 
+    table_rows: list[tuple[str, list[object]]] = []
     for row in rows:
         mark = row_status_mark(row)
         idx = wip_index.get(row.path)
@@ -248,7 +315,48 @@ def refresh_table(
             values.append(row_cells[cid])
         if not values:
             values = [name_cell]
-        table.add_row(*values, key=str(row.path))
+        table_rows.append((str(row.path), values))
+
+    can_patch_in_place = (
+        not app._restore_pending.get(app.view_mode, False)
+        and not app._restore_apply_scroll.get(app.view_mode, False)
+    )
+    if can_patch_in_place:
+        try:
+            current_row_count = int(getattr(table, "row_count", 0) or 0)
+        except (AttributeError, TypeError, ValueError):
+            current_row_count = -1
+        if current_row_count == len(table_rows):
+            same_keys = True
+            for idx, (row_key, _vals) in enumerate(table_rows):
+                try:
+                    existing_key, _ = table.coordinate_to_cell_key((idx, 0))
+                    existing_key_text = str(getattr(existing_key, "value", existing_key))
+                except WIDGET_API_ERRORS:
+                    same_keys = False
+                    break
+                if existing_key_text != row_key:
+                    same_keys = False
+                    break
+            if same_keys:
+                for idx, (_row_key, vals) in enumerate(table_rows):
+                    for col_idx, value in enumerate(vals):
+                        try:
+                            table.update_cell_at((idx, col_idx), value)
+                        except WIDGET_API_ERRORS:
+                            same_keys = False
+                            break
+                    if not same_keys:
+                        break
+                if same_keys:
+                    row_paths = {row.path for row in rows}
+                    app.multi_selected = {path for path in app.multi_selected if path in row_paths}
+                    app.call_after_refresh(app._clear_project_row_highlight_suspend)
+                    return
+
+    table.clear(columns=False)
+    for row_key, values in table_rows:
+        table.add_row(*values, key=row_key)
 
     if rows:
         first = rows[0].path
@@ -279,8 +387,8 @@ def refresh_table(
             elif app._restore_pending.get(app.view_mode, False):
                 idx = min(max(0, app._state_cursor_row), len(rows) - 1)
             else:
-                app.selected_path = first
-                idx = 0
+                idx = min(max(0, prev_cursor_row), len(rows) - 1)
+                app.selected_path = rows[idx].path if rows else first
 
         table.cursor_coordinate = (idx, 0)
         apply_saved_scroll = bool(

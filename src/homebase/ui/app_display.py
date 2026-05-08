@@ -91,6 +91,17 @@ class AppDisplayMixin:
         else:
             widths = list(base_widths)
 
+        column_signature = (
+            self.view_mode,
+            tuple(str(col.get("id", "")).strip() for col in visible),
+            tuple(str(col.get("label", "")) for col in visible),
+            tuple(int(width) for width in widths),
+        )
+        prev_signature = self._table_column_signature_by_view.get(self.view_mode)
+        if prev_signature == column_signature:
+            return
+        self._table_column_signature_by_view[self.view_mode] = column_signature
+
         table.clear(columns=True)
         for col, width in zip(visible, widths):
             label = str(col.get("label", ""))

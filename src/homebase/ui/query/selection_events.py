@@ -69,6 +69,10 @@ def on_data_table_row_highlighted(app: Any, event: Any) -> None:
         highlighted_path = Path(str(event.row_key.value))
     except (TypeError, ValueError):
         highlighted_path = None
+    if highlighted_path is None:
+        return
+    if not any(app._same_path(row.path, highlighted_path) for row in app._current_rows()):
+        return
 
     if app._restore_pending.get(app.view_mode, False) or app._restore_apply_scroll.get(
         app.view_mode, False

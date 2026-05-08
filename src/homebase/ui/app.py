@@ -450,7 +450,9 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
         self.pending_restore_failed = 0
         self.error_counts: dict[str, int] = {}
         self.worker_debug_events: list[tuple[str, str]] = []
-        self._settings_table_was_active = False
+        self._main_table_was_locked = False
+        self._table_render_signature_by_view: dict[str, tuple[object, ...]] = {}
+        self._table_column_signature_by_view: dict[str, tuple[object, ...]] = {}
         self._state_dirty = False
         self._state_due_at = 0.0
         self._state_last_json = ""
@@ -872,6 +874,8 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
         if isinstance(widget, Input):
             widget.cursor_blink = False
             return
+        if self._main_table_interaction_locked():
+            return
         if isinstance(widget, DataTable):
             return
         table = self.query_one(WIDGET_PROJECTS, DataTable)
@@ -897,6 +901,9 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
 
     def _set_tabs_active_safe(self, tabs: Tabs, tab_id: str) -> None:
         textual_ui_tabs_state.set_tabs_active_safe(tabs, tab_id)
+
+    def _main_table_interaction_locked(self) -> bool:
+        return textual_ui_tabs_state.main_table_interaction_locked(self)
 
     def _child_key_for_top(self, top_key: str) -> str:
         return textual_ui_tabs_state.child_key_for_top(self, top_key)

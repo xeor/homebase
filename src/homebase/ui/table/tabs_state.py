@@ -95,8 +95,14 @@ def sync_side_tab_visibility(app: Any, *, widget_projects: str) -> None:
         "open",
     }
 
+    projects_locked = main_table_interaction_locked(app)
+
     try:
-        projects.can_focus = not settings_active
+        projects.can_focus = not projects_locked
+    except WIDGET_API_ERRORS:
+        pass
+    try:
+        projects.disabled = projects_locked
     except WIDGET_API_ERRORS:
         pass
     try:
@@ -112,12 +118,27 @@ def sync_side_tab_visibility(app: Any, *, widget_projects: str) -> None:
             settings_table.focus()
         except WIDGET_API_ERRORS:
             pass
-    if app._settings_table_was_active and not settings_active and not app._modal_active():
+    if app._main_table_was_locked and not projects_locked and not app._modal_active():
         try:
             projects.focus()
         except WIDGET_API_ERRORS:
             pass
-    app._settings_table_was_active = settings_active
+    app._main_table_was_locked = projects_locked
+
+
+def main_table_interaction_locked(app: Any) -> bool:
+    if app.side_main_tab == "settings" and app.side_settings_tab in {
+        "table",
+        "table_config",
+        "open",
+    }:
+        return True
+    if app.side_main_tab == "selected" and app.side_selected_tab in {
+        "readme",
+        "notes",
+    }:
+        return True
+    return False
 
 
 def refresh_settings_tab_labels(app: Any, settings_tabs: Any) -> None:
