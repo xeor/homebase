@@ -41,12 +41,20 @@ class _AppStub:
         self.multi_selected = {Path("/tmp/a"), Path("/tmp/b")}
         self.open_pane_count_by_project = {Path("/tmp/a"): 2, Path("/tmp/b"): 1}
         self._rows = [_row("a"), _row("b")]
+        self.active_rows = list(self._rows)
+        self.archived_rows = []
 
     def _current_rows(self) -> list[ProjectRow]:
         return self._rows
 
     def _selected_row(self) -> ProjectRow | None:
         return self._rows[0]
+
+    def _target_rows(self) -> list[ProjectRow]:
+        return self._rows
+
+    def _resolve_notes_path_for_row(self, row: ProjectRow) -> Path:
+        return row.path / "NOTES.md"
 
     @staticmethod
     def _esc(value: object) -> str:
@@ -71,3 +79,12 @@ def test_global_info_lines_handles_empty_query_and_no_selection() -> None:
     lines = content.global_info_lines(app)
     assert any(line == "query: -" for line in lines)
     assert any(line == "focused: -" for line in lines)
+
+
+def test_action_context_lines_contains_groups() -> None:
+    app = _AppStub()
+    lines = content.action_context_lines(app, base_dir=Path("/tmp"))
+    assert any("always" in line for line in lines)
+    assert any("per_row" in line for line in lines)
+    assert any("joined" in line for line in lines)
+    assert any("filepicker" in line for line in lines)

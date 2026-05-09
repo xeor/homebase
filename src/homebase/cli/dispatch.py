@@ -21,6 +21,7 @@ def dispatch_command(
     cmd_internal_complete: Callable[[str, int, list[str]], int],
     cmd_create_quick: Callable[[Path, str, str | None, bool], int],
     cmd_recent: Callable[[Path], int],
+    cmd_help_actions: Callable[[str, str, str, bool], int],
     cmd_setup: Callable[[Path, Path, bool], int],
     cmd_cache_warm: Callable[[], int],
     cmd_tags_sync: Callable[[Path, bool, bool], int],
@@ -42,6 +43,13 @@ def dispatch_command(
     if ns.command is None:
         return no_arg_flow(base_dir, cwd, initial_filter_expr)
     if ns.command == "help":
+        if str(getattr(ns, "topic", "")).strip() == "actions":
+            return cmd_help_actions(
+                str(getattr(ns, "source", "")).strip(),
+                str(getattr(ns, "bound", "")).strip(),
+                str(getattr(ns, "view", "")).strip(),
+                bool(getattr(ns, "show_defaults", False)),
+            )
         parser.print_help()
         return 0
     if ns.command == "status":

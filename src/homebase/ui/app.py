@@ -1311,6 +1311,9 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
             all_property_defs=all_property_defs,
         )
 
+    def _action_context_lines(self) -> list[str]:
+        return textual_ui_side_content.action_context_lines(self, base_dir=self.base_dir)
+
     def _preview_entries(self, path: Path, limit: int = 8) -> list[str]:
         return textual_ui_side_content.preview_entries(path, limit=limit)
 

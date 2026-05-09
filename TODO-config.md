@@ -21,10 +21,10 @@ system, not an action system. Keep the existing `wip.hotkeys` section.
 | 4. Dispatch refactor                  | done | Added unified `dispatch_action`, legacy target normalization wrapper, and migrated custom dispatch call sites to use it. |
 | 5. New schema (`actions:` / `hotbar:` / `keys:`) | done | Implemented new loaders + persistence (`load_actions/load_hotbar/load_keys`, `save_hotbar/save_keys`), wired runtime/reload paths, and removed legacy `full_path` bridge. |
 | 6. Side-tab auto-registration + eligibility checks | done | Added `discover_tab_actions`, merged tab actions into runtime built-ins, and enforced runtime hotbar scope safety for non-target actions. |
-| 7. Discoverability (`b help actions`, context view) | not started | — |
+| 7. Discoverability (`b help actions`, context view) | done | Added `b help actions` table/filters and info-context side view powered by template context builders. |
 | 8. README rewrite + final cleanup     | not started | — |
 
-**Currently active phase:** 7. Discoverability surfaces.
+**Currently active phase:** 8. README rewrite + final cleanup.
 
 **Phase log** (append a one-liner per completed phase: date, anything
 surprising encountered that the next phase should know about):
@@ -35,6 +35,7 @@ surprising encountered that the next phase should know about):
 - 2026-05-10 — Phase 4: introduced `ui/actions/dispatch.py` with id normalization + kind routing; hotkey/pick paths now forward through one dispatch entry point while preserving legacy prefixes.
 - 2026-05-10 — Phase 5: switched runtime loading/persistence to `actions` + `hotbar` + `keys`, removed custom-hotkeys config writes, and dropped `full_path` template alias.
 - 2026-05-10 — Phase 6: auto-registered `tab.<top>` / `tab.<top>.<child>` actions at runtime and added hotbar runtime guard to reject non-target scopes.
+- 2026-05-10 — Phase 7: added `b help actions` command output with binding visibility and introduced `info > stats` live action-template context inspection view.
 
 ## What's wrong today
 

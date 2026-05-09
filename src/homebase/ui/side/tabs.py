@@ -69,8 +69,7 @@ def refresh_side(app: Any, *, base_dir: Path, color_accent_hex: str, level_warn:
         if app.side_info_tab == "global":
             lines.extend(app._global_info_lines())
         elif app.side_info_tab == "stats":
-            _left, stats = app._cheat_columns()
-            lines.append(stats)
+            lines.extend(app._action_context_lines())
         elif app.side_info_tab == "cheat":
             cheat, _right = app._cheat_columns()
             lines.append(cheat)

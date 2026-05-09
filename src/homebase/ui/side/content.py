@@ -18,6 +18,7 @@ from ...core.constants import (
     COLOR_WARN_HEX,
 )
 from ...core.models import ProjectRow
+from ..actions import template as action_template
 
 
 def global_info_lines(app: Any) -> list[str]:
@@ -530,3 +531,41 @@ def build_side_files_text(
     else:
         lines.append("  [dim](none)[/]")
     return "\n".join(lines)
+
+
+def action_context_lines(app: Any, *, base_dir: Path) -> list[str]:
+    rows = app._target_rows()
+    selected = app._selected_row()
+    lines: list[str] = ["[bold]Action Template Context[/]"]
+
+    always = action_template.build_always_context(app, base_dir)
+    lines.append("[cyan]always[/]:")
+    for key in sorted(always):
+        lines.append(f"  {key}: {app._esc(always[key])}")
+
+    if selected is not None:
+        per_row = action_template.build_per_row_context(app, selected, base_dir)
+        lines.append("")
+        lines.append("[cyan]per_row[/]:")
+        for key in sorted(per_row):
+            lines.append(f"  {key}: {app._esc(per_row[key])}")
+    else:
+        lines.append("")
+        lines.append("[cyan]per_row[/]: [dim](no selected row)[/]")
+
+    if rows:
+        listed = action_template.build_list_context(app, list(rows), base_dir)
+        lines.append("")
+        lines.append("[cyan]joined[/]:")
+        for key in sorted(listed):
+            lines.append(f"  {key}: {app._esc(listed[key])}")
+    else:
+        lines.append("")
+        lines.append("[cyan]joined[/]: [dim](no selected rows)[/]")
+
+    picker = action_template.build_filepicker_context("")
+    lines.append("")
+    lines.append("[cyan]filepicker[/]:")
+    for key in sorted(picker):
+        lines.append(f"  {key}: {app._esc(picker[key])}")
+    return lines

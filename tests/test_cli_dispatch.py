@@ -31,6 +31,7 @@ def test_dispatch_command_status_path() -> None:
         cmd_internal_complete=lambda _a, _b, _c: 0,
         cmd_create_quick=lambda _a, _b, _c, _d: 0,
         cmd_recent=lambda _a: 0,
+        cmd_help_actions=lambda _a, _b, _c, _d: 0,
         cmd_setup=lambda _a, _b, _c: 0,
         cmd_cache_warm=lambda: 0,
         cmd_tags_sync=lambda _a, _b, _c: 0,

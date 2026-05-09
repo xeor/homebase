@@ -5,6 +5,7 @@ import sys
 from pathlib import Path
 
 from ..commands import interactive_flow
+from ..commands.actions import cmd_help_actions as cmd_help_actions_render
 from ..commands.archive import (
     cmd_archive_ls,
     cmd_archive_mv,
@@ -133,7 +134,7 @@ def main(argv: list[str]) -> int:
             [str(x) for x in ns.words],
             base_dir=base_dir,
         )
-    if ns.command == "help":
+    if ns.command == "help" and str(getattr(ns, "topic", "")).strip() != "actions":
         parser.print_help()
         return 0
 
@@ -221,6 +222,15 @@ def main(argv: list[str]) -> int:
                 debug=debug,
             ),
             cmd_recent=cmd_recent,
+            cmd_help_actions=lambda source, bound, view, show_defaults: cmd_help_actions_render(
+                actions=runtime_cfg.actions,
+                hotbar=list(runtime_cfg.hotbar),
+                keys=dict(runtime_cfg.keys),
+                source_filter=source,
+                bound_filter=bound,
+                view_filter=view,
+                show_defaults=show_defaults,
+            ),
             cmd_setup=lambda base_path, bin_path, dry_run: cmd_setup(
                 base_path,
                 bin_path,

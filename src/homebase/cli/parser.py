@@ -9,7 +9,12 @@ def build_cli_parser() -> argparse.ArgumentParser:
     parser.add_argument("--filter", dest="initial_filter", default="")
 
     sub = parser.add_subparsers(dest="command")
-    sub.add_parser("help")
+    p_help = sub.add_parser("help")
+    p_help.add_argument("topic", nargs="?", default="")
+    p_help.add_argument("--source", choices=["builtin", "config", "overridden"], default="")
+    p_help.add_argument("--bound", choices=["bound", "unbound"], default="")
+    p_help.add_argument("--view", choices=["active", "archive"], default="")
+    p_help.add_argument("--show-defaults", action="store_true")
     sub.add_parser("status")
     sub.add_parser("new")
     p_completion = sub.add_parser("completion")
