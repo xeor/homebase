@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from homebase.core.models import ProjectRow
-from homebase.ui.table.render import refresh_table
+from homebase.ui.table.render import _tag_color, refresh_table
 
 
 class _FakeSize:
@@ -83,6 +83,8 @@ class _FakeApp:
         self._rows = rows
         self._table = _FakeDataTable()
         self._table_render_signature_by_view: dict[str, tuple[object, ...]] = {}
+        self._property_cell_cache: dict[tuple[str, ...], object] = {}
+        self._property_cell_cache_sig: int = -1
         self.view_mode = "active"
         self.multi_selected: set[Path] = set()
         self.pending_tag_updates: set[Path] = set()
@@ -152,6 +154,59 @@ def test_refresh_table_skips_noop_rebuild() -> None:
 
     _run_refresh(app)
     assert app._table.clear_calls == 1
+
+
+def test_property_cell_cache_persists_across_renders_and_clears_on_sig_change() -> None:
+    row_a = _row(Path("/tmp/a"), "a")
+    row_a.properties = ["act", "doc"]
+    app = _FakeApp([row_a])
+
+    calls: list[tuple[str, ...]] = []
+
+    def _tokens(props: list[str]) -> str:
+        calls.append(tuple(props))
+        return "+".join(props) or "-"
+
+    def _refresh(sig: int) -> None:
+        refresh_table(
+            app,
+            widget_projects="#projects",
+            mode_active="active",
+            base_dir=Path("/tmp"),
+            color_error_hex="#f00",
+            color_success_hex="#0f0",
+            color_archive_hex="#666",
+            color_accent_hex="#0ff",
+            color_warn_hex="#ff0",
+            color_interactive_hex="#00f",
+            fmt_ymd=lambda _x: "-",
+            fmt_size_human=lambda _x: "0B",
+            property_tokens_text=_tokens,
+            property_defs_signature=sig,
+        )
+
+    _refresh(7)
+    first_calls = len(calls)
+    assert first_calls == 1
+
+    app._table_render_signature_by_view.clear()
+    _refresh(7)
+    assert len(calls) == first_calls
+
+    app._table_render_signature_by_view.clear()
+    _refresh(8)
+    assert len(calls) == first_calls + 1
+
+
+def test_tag_color_is_deterministic_and_cached() -> None:
+    _tag_color.cache_clear()
+    color_a = _tag_color("cli")
+    color_b = _tag_color("cli")
+    color_c = _tag_color("web")
+    assert color_a == color_b
+    assert color_a != color_c
+    info = _tag_color.cache_info()
+    assert info.hits >= 1
 
 
 def test_refresh_table_updates_cells_in_place_when_row_keys_match() -> None:

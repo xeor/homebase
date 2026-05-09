@@ -20,8 +20,31 @@ from ..metadata.api import (
     ensure_base_marker,
     load_base_meta,
     normalize_property_keys,
+    property_tokens,
     save_base_tags,
 )
+
+
+def build_row_haystack_lower(
+    *,
+    name: str,
+    description: str,
+    tags: list[str],
+    properties: list[str],
+    branch: str,
+    path: Path,
+) -> str:
+    return " ".join(
+        [
+            name,
+            description,
+            " ".join(tags),
+            " ".join(properties),
+            property_tokens(properties),
+            branch,
+            path.as_posix(),
+        ]
+    ).lower()
 
 
 def discover_copier_templates(base_dir: Path) -> list[str]:
@@ -455,9 +478,18 @@ def project_row(
         prev_size_refresh_count,
         force_refresh=force_size_refresh,
     )
+    name = path.name
+    haystack_lower = build_row_haystack_lower(
+        name=name,
+        description=description,
+        tags=tags,
+        properties=properties,
+        branch=branch,
+        path=path,
+    )
     return ProjectRow(
         path=path,
-        name=path.name,
+        name=name,
         branch=branch,
         dirty=dirty,
         last=core_utils.fmt_ymd(last_ts),
@@ -481,4 +513,5 @@ def project_row(
         pack_format=pack_format,
         size_bytes=size_bytes,
         size_refresh_count=size_refresh_count,
+        haystack_lower=haystack_lower,
     )

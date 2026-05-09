@@ -76,9 +76,9 @@ KNOWN_LAYERING_EXCEPTIONS = {
     "src/homebase/ui/__init__.py:3 imports homebase.app",
     "src/homebase/ui/__init__.py:4 imports homebase.context",
     "src/homebase/workspace/benchmark.py:23 imports homebase.commands.archive",
-    "src/homebase/workspace/projects.py:153 imports homebase.tmux.flow",
-    "src/homebase/workspace/projects.py:154 imports homebase.ui",
-    "src/homebase/workspace/projects.py:220 imports homebase.tmux.flow",
+    "src/homebase/workspace/projects.py:176 imports homebase.tmux.flow",
+    "src/homebase/workspace/projects.py:177 imports homebase.ui",
+    "src/homebase/workspace/projects.py:243 imports homebase.tmux.flow",
     "src/homebase/workspace/regression.py:21 imports homebase.commands.archive",
 }
 

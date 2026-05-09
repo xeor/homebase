@@ -6,6 +6,24 @@ from pathlib import Path
 from homebase.cache import store as cache_store
 
 
+def test_cache_connect_applies_performance_pragmas(tmp_path: Path) -> None:
+    conn = cache_store.cache_connect(tmp_path)
+    try:
+        journal = conn.execute("PRAGMA journal_mode").fetchone()[0]
+        synchronous = conn.execute("PRAGMA synchronous").fetchone()[0]
+        temp_store = conn.execute("PRAGMA temp_store").fetchone()[0]
+        cache_size = conn.execute("PRAGMA cache_size").fetchone()[0]
+        mmap_size = conn.execute("PRAGMA mmap_size").fetchone()[0]
+    finally:
+        conn.close()
+
+    assert str(journal).lower() == "wal"
+    assert int(synchronous) == 1  # NORMAL
+    assert int(temp_store) == 2  # MEMORY
+    assert int(cache_size) == -65536
+    assert int(mmap_size) >= 268435456
+
+
 def test_cache_store_and_load_rows(tmp_path: Path) -> None:
     payload = [
         (

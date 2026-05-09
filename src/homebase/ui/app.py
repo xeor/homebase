@@ -462,6 +462,8 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
         self._main_table_was_locked = False
         self._table_render_signature_by_view: dict[str, tuple[object, ...]] = {}
         self._table_column_signature_by_view: dict[str, tuple[object, ...]] = {}
+        self._property_cell_cache: dict[tuple[str, ...], object] = {}
+        self._property_cell_cache_sig: int = -1
         self._state_dirty = False
         self._state_due_at = 0.0
         self._state_last_json = ""

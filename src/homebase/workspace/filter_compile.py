@@ -7,7 +7,8 @@ from ..core.constants import NAMED_FILTERS
 from ..core.models import ProjectRow
 from ..filter import engine as filter_engine
 from ..metadata import property as property_utils
-from ..metadata.api import all_property_defs, property_tokens
+from ..metadata.api import all_property_defs
+from .projects import build_row_haystack_lower
 
 _FILTER_TOKEN_RE = re.compile(r"\(|\)|\bOR\b|\||[^\s()|]+", re.IGNORECASE)
 
@@ -16,17 +17,14 @@ def match_query(row: ProjectRow, query: str) -> bool:
     q = query.strip().lower()
     if not q:
         return True
-    hay = " ".join(
-        [
-            row.name,
-            row.description,
-            " ".join(row.tags),
-            " ".join(row.properties),
-            property_tokens(row.properties),
-            row.branch,
-            row.path.as_posix(),
-        ]
-    ).lower()
+    hay = row.haystack_lower or build_row_haystack_lower(
+        name=row.name,
+        description=row.description,
+        tags=row.tags,
+        properties=row.properties,
+        branch=row.branch,
+        path=row.path,
+    )
     return q in hay
 
 

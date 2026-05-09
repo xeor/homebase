@@ -58,6 +58,32 @@ def test_cmd_create_quick_generate_next_alpha_name(tmp_path: Path) -> None:
     assert (tmp_path / "b").is_dir()
 
 
+def test_build_row_haystack_lower_lowercases_and_joins() -> None:
+    hay = projects.build_row_haystack_lower(
+        name="MyProject",
+        description="A Demo",
+        tags=["CLI", "Web"],
+        properties=[],
+        branch="MAIN",
+        path=Path("/tmp/MyProject"),
+    )
+    assert hay == hay.lower()
+    for needle in ("myproject", "a demo", "cli", "web", "main", "/tmp/myproject"):
+        assert needle in hay
+
+
+def test_project_row_populates_haystack_lower(tmp_path: Path) -> None:
+    target = tmp_path / "demo-project"
+    target.mkdir()
+    (target / ".base.yaml").write_text("tags:\n  - cli\n  - web\n", encoding="utf-8")
+
+    row = projects.project_row(target, include_git_dirty=False)
+    assert row.haystack_lower
+    assert "demo-project" in row.haystack_lower
+    for tag in ("cli", "web"):
+        assert tag in row.haystack_lower
+
+
 def test_cmd_create_quick_debug_dry_run(tmp_path: Path) -> None:
     (tmp_path / ".homebase").mkdir()
     (tmp_path / ".homebase" / "config.yaml").write_text(

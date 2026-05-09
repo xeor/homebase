@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import colorsys
+import functools
 import hashlib
 from pathlib import Path
 from typing import Any, Callable
@@ -11,6 +12,16 @@ from textual.widgets import DataTable
 from ...core.constants import COLOR_PENDING_HEX
 from ...core.models import ProjectRow
 from ...core.utils import WIDGET_API_ERRORS
+
+
+@functools.lru_cache(maxsize=4096)
+def _tag_color(tag: str) -> str:
+    digest = hashlib.sha1(tag.encode("utf-8", errors="ignore")).digest()
+    hue = int.from_bytes(digest[:2], "big") / 65535.0
+    sat = 0.32
+    val = 0.95
+    r, g, b = colorsys.hsv_to_rgb(hue, sat, val)
+    return f"#{int(r * 255):02X}{int(g * 255):02X}{int(b * 255):02X}"
 
 
 def refresh_table(
@@ -28,6 +39,7 @@ def refresh_table(
     fmt_ymd: Callable[[int], str],
     fmt_size_human: Callable[[int], str],
     property_tokens_text: Callable[[list[str]], str],
+    property_defs_signature: int = -1,
 ) -> None:
     table = app.query_one(widget_projects, DataTable)
     rows = app._current_rows()
@@ -140,7 +152,10 @@ def refresh_table(
     }
     table_width = max(80, table.size.width)
     restore_width = max(14, int(table_width * 0.16))
-    property_cell_cache: dict[tuple[str, ...], object] = {}
+    if getattr(app, "_property_cell_cache_sig", -1) != property_defs_signature:
+        app._property_cell_cache = {}
+        app._property_cell_cache_sig = property_defs_signature
+    property_cell_cache: dict[tuple[str, ...], object] = app._property_cell_cache
 
     def trunc_ellipsis(value: str, width: int) -> str:
         text = value.strip()
@@ -151,14 +166,6 @@ def refresh_table(
         if width <= 3:
             return text[:width]
         return text[: width - 3] + "..."
-
-    def _tag_color(tag: str) -> str:
-        digest = hashlib.sha1(tag.encode("utf-8", errors="ignore")).digest()
-        hue = int.from_bytes(digest[:2], "big") / 65535.0
-        sat = 0.32
-        val = 0.95
-        r, g, b = colorsys.hsv_to_rgb(hue, sat, val)
-        return f"#{int(r * 255):02X}{int(g * 255):02X}{int(b * 255):02X}"
 
     def _tag_cell(tags: list[str], width: int) -> Text:
         if not tags:
@@ -267,12 +274,14 @@ def refresh_table(
             restore_short = trunc_ellipsis(str(restore_rel), restore_width)
 
         prop_key = tuple(row.properties)
-        prop_cell = property_cell_cache.get(prop_key)
-        if prop_cell is None:
-            prop_cell = property_tokens_text(row.properties)
-            property_cell_cache[prop_key] = prop_cell
-        elif isinstance(prop_cell, Text):
-            prop_cell = prop_cell.copy()
+        cached_prop_cell = property_cell_cache.get(prop_key)
+        if cached_prop_cell is None:
+            cached_prop_cell = property_tokens_text(row.properties)
+            property_cell_cache[prop_key] = cached_prop_cell
+        if isinstance(cached_prop_cell, Text):
+            prop_cell = cached_prop_cell.copy()
+        else:
+            prop_cell = cached_prop_cell
 
         row_cells: dict[str, object] = {
             "mark": mark,

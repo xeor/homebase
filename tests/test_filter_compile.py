@@ -40,3 +40,34 @@ def test_compile_filter_expr_supports_tag_query() -> None:
     pred, err = filter_compile.compile_filter_expr("#cli")
     assert err is None
     assert pred(_row())
+
+
+def test_match_query_uses_precomputed_haystack(monkeypatch) -> None:
+    from homebase.workspace import projects as projects_mod
+
+    row = _row()
+    row.haystack_lower = "preset-cached-token"
+
+    def _explode(**_kwargs):
+        raise AssertionError("haystack must not be rebuilt when precomputed")
+
+    monkeypatch.setattr(
+        projects_mod,
+        "build_row_haystack_lower",
+        _explode,
+    )
+    monkeypatch.setattr(
+        filter_compile,
+        "build_row_haystack_lower",
+        _explode,
+    )
+
+    assert filter_compile.match_query(row, "preset-cached-token")
+    assert not filter_compile.match_query(row, "no-such-thing")
+
+
+def test_match_query_falls_back_when_haystack_missing() -> None:
+    row = _row()
+    assert row.haystack_lower == ""
+    assert filter_compile.match_query(row, "demo")
+    assert filter_compile.match_query(row, "main")

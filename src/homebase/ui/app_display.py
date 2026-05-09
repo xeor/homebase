@@ -14,7 +14,7 @@ from ..core.constants import (
     WIDGET_PROJECTS,
 )
 from ..core.utils import fmt_age_short_from_iso, fmt_size_human, fmt_ymd
-from ..metadata.api import load_base_data, property_tokens_text
+from ..metadata.api import load_base_data, property_defs_signature, property_tokens_text
 from .side import tabs as textual_ui_side_tabs
 from .table import render as textual_ui_table_render
 from .table.layout import solve_visible_column_widths
@@ -130,6 +130,7 @@ class AppDisplayMixin:
             fmt_ymd=fmt_ymd,
             fmt_size_human=fmt_size_human,
             property_tokens_text=property_tokens_text,
+            property_defs_signature=property_defs_signature(),
         )
 
     def _refresh_side(self) -> None:

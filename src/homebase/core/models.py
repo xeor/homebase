@@ -95,6 +95,7 @@ class ProjectRow:
     last_reconciled_ts: int = 0
     size_bytes: int = 0
     size_refresh_count: int = 0
+    haystack_lower: str = ""
 
 
 @dataclass

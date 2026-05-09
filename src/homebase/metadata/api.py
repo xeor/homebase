@@ -215,6 +215,11 @@ def all_property_defs() -> list[PropertyDef]:
     ]
 
 
+def property_defs_signature() -> int:
+    _runtime_property_defs()
+    return _RUNTIME_PROPERTY_DEFS_MTIME_NS
+
+
 def normalize_property_keys(keys: list[str]) -> list[str]:
     return property_utils.normalize_property_keys(
         keys,

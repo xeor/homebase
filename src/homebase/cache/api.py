@@ -14,7 +14,7 @@ from ..core.constants import (
 )
 from ..core.models import ProjectRow
 from ..metadata.api import normalize_property_keys
-from ..workspace.projects import project_row
+from ..workspace.projects import build_row_haystack_lower, project_row
 from . import store as cache_store
 
 
@@ -58,19 +58,32 @@ def cache_load_rows(
             restore_target = Path(str(restore_raw)) if restore_raw else None
             cached_at = int(rec["cached_at"])
             reconciled_at = int(rec["reconciled_at"])
+            name = str(rec["name"])
+            branch = str(rec["branch"])
+            description = str(rec["description"])
+            tags = [str(x) for x in json.loads(str(rec["tags_json"]))]
+            properties = normalize_property_keys(
+                [str(x) for x in json.loads(str(rec["properties_json"]))]
+            )
+            haystack_lower = build_row_haystack_lower(
+                name=name,
+                description=description,
+                tags=tags,
+                properties=properties,
+                branch=branch,
+                path=p,
+            )
             row = ProjectRow(
                 path=p,
-                name=str(rec["name"]),
-                branch=str(rec["branch"]),
+                name=name,
+                branch=branch,
                 dirty=str(rec["dirty"]),
                 last=str(rec["last"]),
                 src=str(rec["src"]),
                 created=str(rec["created"]),
-                tags=[str(x) for x in json.loads(str(rec["tags_json"]))],
-                properties=normalize_property_keys(
-                    [str(x) for x in json.loads(str(rec["properties_json"]))]
-                ),
-                description=str(rec["description"]),
+                tags=tags,
+                properties=properties,
+                description=description,
                 created_ts=int(rec["created_ts"]),
                 last_ts=int(rec["last_ts"]),
                 git_ts=int(rec["git_ts"]),
@@ -92,6 +105,7 @@ def cache_load_rows(
                 cache_age_s=age,
                 last_cached_ts=cached_at,
                 last_reconciled_ts=reconciled_at,
+                haystack_lower=haystack_lower,
             )
             row.opened_ts = _opened_ts_for_path(p)
             return row
