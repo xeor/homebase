@@ -153,6 +153,7 @@ from .actions import archive_worker as textual_ui_archive_worker
 from .actions import bulk_confirm as textual_ui_bulk_confirm
 from .actions import bulk_dispatch as textual_ui_bulk_dispatch
 from .actions import bulk_preflight as textual_ui_bulk_preflight
+from .actions import dispatch as textual_ui_action_dispatch
 from .actions import item_edits as textual_ui_item_edits
 from .actions import pick_actions as textual_ui_pick_actions
 from .actions import project_create as textual_ui_project_create
@@ -1085,24 +1086,10 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
             self.push_screen(BCommandPalette(id="--command-palette"))
 
     def _dispatch_hotkey_target(self, target: str) -> None:
-        value = str(target or "").strip()
-        if not value:
+        normalized = textual_ui_action_dispatch.normalize_action_target(str(target or ""))
+        if not normalized:
             return
-        if value in {"open_selected", "action:open_selected"}:
-            self.action_open_selected()
-            return
-        if value.startswith("action:"):
-            self._on_pick_actions(value.split(":", 1)[1])
-            return
-        if value.startswith("tab:"):
-            payload = value.split(":", 1)[1]
-            if "/" in payload:
-                top_key, child_key = payload.split("/", 1)
-                self._jump_to_side_tab(top_key, child_key=child_key)
-                return
-            self._jump_to_side_tab(payload)
-            return
-        self._on_pick_actions(value)
+        textual_ui_action_dispatch.dispatch_action(self, normalized)
 
     def _hotbar_targets(self) -> list[str]:
         return textual_ui_action_items.hotbar_targets(self)
