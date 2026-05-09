@@ -59,10 +59,10 @@ from ..config.prefs import (
 )
 from ..core import utils as core_utils
 from ..core.constants import (
-    ACTION_SHORT_HELP,
     ARCHIVE_DIR_NAME,
     ARCHIVE_TZ,
     BASE_MARKER_FILE,
+    BUILTIN_ACTIONS,
     BUSY_LABEL_IDLE,
     CACHE_BG_REFRESH_S,
     CACHE_MAX_AGE_S,
@@ -985,7 +985,8 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
                 )
 
         grouped: dict[str, list[tuple[str, str]]] = {"target": [], "global": []}
-        grouped["target"].append(("open_selected", "[white]Open selected (default)[/]"))
+        if self._target_rows():
+            grouped["target"].append(("open_selected", "[white]Open selected (default)[/]"))
 
         custom_scope_by_id: dict[str, str] = {}
         custom_list_action_ids: set[str] = set()
@@ -2423,7 +2424,9 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
         return textual_ui_action_items.action_help_text(
             action_id,
             label,
-            action_short_help=ACTION_SHORT_HELP,
+            action_short_help={
+                aid: meta.help_text for aid, meta in BUILTIN_ACTIONS.items()
+            },
         )
 
     def _custom_action_by_id(self, cid: str) -> dict[str, str] | None:

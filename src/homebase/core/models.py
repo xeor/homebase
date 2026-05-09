@@ -2,7 +2,18 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Literal
+
+
+@dataclass(frozen=True)
+class BuiltinActionMeta:
+    id: str
+    default_label: str
+    help_text: str
+    scope: Literal["target", "workspace"]
+    view_scope: tuple[str, ...]
+    default_confirm_prompt: str | None
+    kind: Literal["builtin"] = "builtin"
 
 
 class RestoreTargetExistsError(ValueError):

@@ -15,7 +15,7 @@ system, not an action system. Keep the existing `wip.hotkeys` section.
 
 | Phase | Status      | Notes |
 |-------|-------------|-------|
-| 1. Built-in action registry           | not started | — |
+| 1. Built-in action registry           | done | Added `BuiltinActionMeta` + `BUILTIN_ACTIONS`; migrated core consumers and added registry/view-scope tests. |
 | 2. Action data model + merged map     | not started | — |
 | 3. Template engine v2                 | not started | — |
 | 4. Dispatch refactor                  | not started | — |
@@ -24,12 +24,12 @@ system, not an action system. Keep the existing `wip.hotkeys` section.
 | 7. Discoverability (`b help actions`, context view) | not started | — |
 | 8. README rewrite + final cleanup     | not started | — |
 
-**Currently active phase:** none. Start with Phase 1.
+**Currently active phase:** 2. Action data model + merged action map.
 
 **Phase log** (append a one-liner per completed phase: date, anything
 surprising encountered that the next phase should know about):
 
-- _none yet_
+- 2026-05-09 — Phase 1: introduced `BUILTIN_ACTIONS` metadata registry and kept `_VIEW_CONFIG_DEFAULT` in sync; found and fixed a command-palette target-entry edge case while wiring help text.
 
 ## What's wrong today
 

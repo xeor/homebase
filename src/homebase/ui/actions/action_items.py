@@ -8,6 +8,7 @@ from pathlib import Path
 from string import Template
 from typing import Any, Callable
 
+from ...core.constants import BUILTIN_ACTIONS
 from ...core.models import ProjectRow
 from ...notes.log_md import NoteValidationError, insert_log_entry, validate_note
 from ..screens.multiline_input import MultilineInputScreen
@@ -106,6 +107,10 @@ def valid_action_items(
     color_accent_hex: str,
     base_meta_issues: Callable[[Path], list[tuple[str, str, str]]],
 ) -> list[tuple[str, str]]:
+    def builtin_label(action_id: str, fallback: str) -> str:
+        meta = BUILTIN_ACTIONS.get(action_id)
+        return meta.default_label if meta is not None else fallback
+
     targets = app._target_rows()
     out: list[tuple[str, str]] = []
 
@@ -113,10 +118,15 @@ def valid_action_items(
     out.extend(app._notes_button_actions())
 
     if targets:
-        out.append(("tags_set", "[white]Tags...[/]"))
-        out.append(("reconcile_selection_cache", "[white]Reconcile target cache now[/]"))
+        out.append(("tags_set", f"[white]{builtin_label('tags_set', 'Tags...')}[/]"))
+        out.append(
+            (
+                "reconcile_selection_cache",
+                f"[white]{builtin_label('reconcile_selection_cache', 'Reconcile target cache now')}[/]",
+            )
+        )
         if app.view_mode == "active":
-            out.append(("suffix_set", "[white]Suffix...[/]"))
+            out.append(("suffix_set", f"[white]{builtin_label('suffix_set', 'Suffix...')}[/]"))
 
         for key, label in app.view_config[app.view_mode]["actions"]:
             if key in {"archive", "restore", "pack", "unpack", "toggle_pack", "delete"}:
@@ -126,7 +136,7 @@ def valid_action_items(
             out.append((key, f"[white]{label}[/]"))
 
     if targets:
-        out.append(("rename_item", "[white]Rename item...[/]"))
+        out.append(("rename_item", f"[white]{builtin_label('rename_item', 'Rename item...')}[/]"))
         has_review_meta = False
         has_legacy_meta = False
         for row in targets:
@@ -139,20 +149,44 @@ def valid_action_items(
             ):
                 has_legacy_meta = True
         if has_review_meta:
-            out.append(("review_meta", "[white]Open .base.yaml and review warnings[/]"))
+            out.append(
+                (
+                    "review_meta",
+                    f"[white]{builtin_label('review_meta', 'Open .base.yaml and review warnings')}[/]",
+                )
+            )
         if has_legacy_meta:
-            out.append(("rename_meta_ext", "[white]Rename .base.yml -> .base.yaml[/]"))
+            out.append(
+                (
+                    "rename_meta_ext",
+                    f"[white]{builtin_label('rename_meta_ext', 'Rename .base.yml -> .base.yaml')}[/]",
+                )
+            )
 
     out.extend(
         [
-            ("refresh_cache", "[white]Refresh cache[/]"),
-            ("full_reconcile", "[white]Full reconcile (force rescan)[/]"),
-            ("reload_global_config", "[white]Reload global config[/]"),
-            ("edit_global_config", "[white]Edit global config in $EDITOR[/]"),
+            ("refresh_cache", f"[white]{builtin_label('refresh_cache', 'Refresh cache')}[/]"),
+            (
+                "full_reconcile",
+                f"[white]{builtin_label('full_reconcile', 'Full reconcile (force rescan)')}[/]",
+            ),
+            (
+                "reload_global_config",
+                f"[white]{builtin_label('reload_global_config', 'Reload global config')}[/]",
+            ),
+            (
+                "edit_global_config",
+                f"[white]{builtin_label('edit_global_config', 'Edit global config in $EDITOR')}[/]",
+            ),
         ]
     )
     if app.active_rows or app.archived_rows:
-        out.append(("reconcile_all_cache", "[white]Reconcile all cached rows now[/]"))
+        out.append(
+            (
+                "reconcile_all_cache",
+                f"[white]{builtin_label('reconcile_all_cache', 'Reconcile all cached rows now')}[/]",
+            )
+        )
 
     if targets:
         out.extend(custom_actions_for_scope(app, "target", color_accent_hex=color_accent_hex))
