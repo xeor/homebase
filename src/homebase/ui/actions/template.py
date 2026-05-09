@@ -50,7 +50,6 @@ PER_ROW_VARS: set[str] = {
     "size_human",
     "note_path",
     "note_path_q",
-    "full_path",
 }
 
 LIST_VARS: set[str] = {
@@ -60,7 +59,6 @@ LIST_VARS: set[str] = {
     "rel_paths_q",
     "names",
     "names_q",
-    "full_path",
 }
 
 FILEPICKER_VARS: set[str] = {"selection", "selection_q"}
@@ -188,7 +186,6 @@ def build_per_row_context(app: Any, row: ProjectRow, base_dir: Path) -> dict[str
         "size_human": _fmt_human_bytes(row_size_bytes),
         "note_path": note_path,
         "note_path_q": _quote(note_path),
-        "full_path": _quote(str(row_path)),  # REMOVE IN PHASE 5
     }
 
 
@@ -211,7 +208,6 @@ def build_list_context(app: Any, rows: list[ProjectRow], base_dir: Path) -> dict
         "rel_paths_q": " ".join(_quote(path) for path in rel_paths),
         "names": " ".join(names),
         "names_q": " ".join(_quote(name) for name in names),
-        "full_path": quoted_paths,  # REMOVE IN PHASE 5
     }
 
 

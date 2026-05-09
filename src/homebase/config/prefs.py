@@ -141,41 +141,64 @@ def load_file_view_exclude_patterns(base_dir: Path) -> list[str]:
     )
 
 
-def load_custom_actions(base_dir: Path) -> list[dict[str, str]]:
-    return workspace_settings.load_custom_actions(load_global_config_dict(base_dir))
+def load_actions(base_dir: Path, *, builtins) -> dict[str, object]:
+    return workspace_settings.load_actions(
+        load_global_config_dict(base_dir),
+        builtins=builtins,
+    )
 
 
-def load_custom_hotkeys(base_dir: Path) -> list[dict[str, object]]:
-    return workspace_settings.load_custom_hotkeys(load_global_config_dict(base_dir))
+def load_hotbar(base_dir: Path, *, actions) -> list[object]:
+    return workspace_settings.load_hotbar(load_global_config_dict(base_dir), actions=actions)
 
 
-def save_custom_hotkeys(base_dir: Path, custom_hotkeys: list[dict[str, object]]) -> None:
+def load_keys(base_dir: Path, *, actions) -> dict[str, object]:
+    return workspace_settings.load_keys(load_global_config_dict(base_dir), actions=actions)
+
+
+def save_hotbar(base_dir: Path, hotbar: list[dict[str, object] | object]) -> None:
     data = load_global_config_dict(base_dir)
-    out: list[dict[str, object]] = []
-    seen: set[str] = set()
-    for idx, item in enumerate(custom_hotkeys):
-        hid = str(item.get("id", "")).strip() or f"custom_hotkey_{idx + 1}"
-        if hid in seen:
+    out: list[object] = []
+    for item in hotbar:
+        if isinstance(item, str):
+            value = item.strip()
+            if value:
+                out.append(value)
             continue
-        seen.add(hid)
-        target = str(item.get("target", "")).strip()
-        hotkey = str(item.get("hotkey", "")).strip().lower()
-        hotbar = bool(item.get("hotbar", False))
+        if not isinstance(item, dict):
+            continue
+        action_id = str(item.get("action", "")).strip()
+        if not action_id:
+            continue
         label = str(item.get("label", "")).strip()
-        if not target or (not hotkey and not hotbar):
-            continue
-        row: dict[str, object] = {
-            "id": hid,
-            "target": target,
-        }
-        if hotkey:
-            row["hotkey"] = hotkey
-        if hotbar:
-            row["hotbar"] = True
         if label:
-            row["label"] = label
-        out.append(row)
-    data["custom_hotkeys"] = out
+            out.append({"action": action_id, "label": label})
+        else:
+            out.append(action_id)
+    data["hotbar"] = out
+    save_global_config_dict(base_dir, data)
+
+
+def save_keys(base_dir: Path, keys_map: dict[str, dict[str, object] | object]) -> None:
+    data = load_global_config_dict(base_dir)
+    out: dict[str, object] = {}
+    for hotkey, value in keys_map.items():
+        key = str(hotkey).strip().lower()
+        if not key:
+            continue
+        if isinstance(value, str):
+            action_id = value.strip()
+            if action_id:
+                out[key] = action_id
+            continue
+        if not isinstance(value, dict):
+            continue
+        action_id = str(value.get("action", "")).strip()
+        if not action_id:
+            continue
+        label = str(value.get("label", "")).strip()
+        out[key] = {"action": action_id, **({"label": label} if label else {})}
+    data["keys"] = out
     save_global_config_dict(base_dir, data)
 
 

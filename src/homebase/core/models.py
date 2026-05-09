@@ -32,6 +32,18 @@ class Action:
     source: Literal["builtin", "config", "overridden"] = "builtin"
 
 
+@dataclass(frozen=True)
+class HotbarEntry:
+    action: str
+    label: str = ""
+
+
+@dataclass(frozen=True)
+class KeyEntry:
+    action: str
+    label: str = ""
+
+
 class RestoreTargetExistsError(ValueError):
     def __init__(self, source: Path, target: Path) -> None:
         self.source = source

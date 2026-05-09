@@ -2,11 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
 from zoneinfo import ZoneInfo
 
-from ..config.workspace import merge_actions
-from ..core.constants import BUILTIN_ACTIONS
 from ..core.models import Action, PropertyDef
 
 
@@ -23,9 +20,11 @@ class UIContext:
     saved_filter_queries: list[str] = field(default_factory=list)
     suffixes: list[str] = field(default_factory=list)
     file_view_exclude_patterns: list[str] = field(default_factory=list)
-    custom_actions: list[dict[str, Any]] = field(default_factory=list)
+    custom_actions: list[dict[str, object]] = field(default_factory=list)
     custom_hotkeys: list[dict[str, object]] = field(default_factory=list)
     actions: dict[str, Action] = field(default_factory=dict)
+    hotbar: list[dict[str, str]] = field(default_factory=list)
+    keys: dict[str, dict[str, str]] = field(default_factory=dict)
     open_mode_config: dict[str, str] = field(default_factory=dict)
     notes_config: dict[str, str] = field(default_factory=dict)
     reconcile_config: dict[str, dict[str, object]] = field(default_factory=dict)
@@ -48,9 +47,9 @@ def build_ui_context(base_dir: Path) -> UIContext:
         saved_filter_queries=list(_const.SAVED_FILTER_QUERIES),
         suffixes=list(_const.SUFFIXES),
         file_view_exclude_patterns=list(_const.FILE_VIEW_EXCLUDE_PATTERNS),
-        custom_actions=list(_const.CUSTOM_ACTIONS),
-        custom_hotkeys=list(_const.CUSTOM_HOTKEYS),
-        actions=merge_actions(BUILTIN_ACTIONS, {}, list(_const.CUSTOM_ACTIONS)),
+        actions={},
+        hotbar=[],
+        keys={},
         open_mode_config=dict(_const.OPEN_MODE_CONFIG),
         notes_config=dict(_const.NOTES_CONFIG),
         reconcile_config={

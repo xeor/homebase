@@ -1,8 +1,289 @@
 from __future__ import annotations
 
-from ..core.constants import VALID_NOTE_COMMANDS
-from ..core.models import Action, BuiltinActionMeta
+import re
+
+from ..core.models import Action, BuiltinActionMeta, HotbarEntry, KeyEntry
 from . import cache_profile as cache_profile_config
+
+_VAR_RE = re.compile(r"\{\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}\}")
+
+
+def _allowed_vars_for_action(*, scope: str, multi: str, kind: str) -> set[str]:
+    always = {
+        "base_dir",
+        "base_dir_q",
+        "base_name",
+        "archive_dir",
+        "archive_dir_q",
+        "active_count",
+        "archive_count",
+        "wip_count",
+        "count",
+        "view",
+        "filter",
+        "filter_q",
+        "now",
+        "now_iso",
+        "now_ts",
+        "today",
+        "user",
+        "home",
+        "home_q",
+    }
+    per_row = {
+        "path",
+        "path_q",
+        "rel_path",
+        "rel_path_q",
+        "name",
+        "name_q",
+        "parent_path",
+        "parent_path_q",
+        "branch",
+        "branch_q",
+        "dirty",
+        "description",
+        "description_q",
+        "tags",
+        "tags_space",
+        "tags_space_q",
+        "properties",
+        "suffix",
+        "wip",
+        "archived",
+        "packed",
+        "created",
+        "created_iso",
+        "created_ts",
+        "last_modified",
+        "last_modified_iso",
+        "last_modified_ts",
+        "last_opened",
+        "last_opened_iso",
+        "last_opened_ts",
+        "archived_at",
+        "archived_at_iso",
+        "archived_at_ts",
+        "size_bytes",
+        "size_human",
+        "note_path",
+        "note_path_q",
+    }
+    listed = {"paths", "paths_q", "rel_paths", "rel_paths_q", "names", "names_q"}
+    filepicker = {"selection", "selection_q"}
+    out = set(always)
+    if scope == "target" and multi == "per_row":
+        out.update(per_row)
+    if scope == "target" and multi == "joined":
+        out.update(listed)
+    if kind == "filepicker":
+        out.update(per_row)
+        out.update(filepicker)
+    return out
+
+
+def _validate_template_vars(template_text: str, *, allowed: set[str], field_name: str) -> None:
+    unknown = sorted({name for name in _VAR_RE.findall(template_text) if name not in allowed})
+    if unknown:
+        missing = ", ".join(unknown)
+        raise ValueError(f"{field_name} references unavailable template variable(s): {missing}")
+
+
+def load_actions(data: object, *, builtins: dict[str, BuiltinActionMeta]) -> dict[str, Action]:
+    if not isinstance(data, dict):
+        data = {}
+    raw = data.get("actions", {})
+    if raw is None:
+        raw = {}
+    if not isinstance(raw, dict):
+        raise ValueError("`actions` must be a map of action id -> action definition")
+
+    merged: dict[str, Action] = {}
+    for action_id, meta in builtins.items():
+        merged[action_id] = Action(
+            id=action_id,
+            label=meta.default_label,
+            kind="builtin",
+            scope=meta.scope,
+            multi="joined",
+            confirm=meta.default_confirm_prompt,
+            hidden=False,
+            view_scope=meta.view_scope,
+            source="builtin",
+        )
+
+    seen_note_ops: dict[str, str] = {}
+    for action_id, item in raw.items():
+        aid = str(action_id).strip()
+        if not aid:
+            continue
+        if not isinstance(item, dict):
+            raise ValueError(f"action {aid!r} must be a mapping")
+
+        if aid in builtins:
+            allowed_keys = {"label", "confirm"}
+            extra = sorted(set(item) - allowed_keys)
+            if extra:
+                raise ValueError(
+                    f"{aid!r} is built-in; only `label` and `confirm` are overridable"
+                )
+            if "confirm" in item and not isinstance(item.get("confirm"), str):
+                raise ValueError(f"{aid!r} built-in `confirm` must be a string")
+            existing = merged[aid]
+            merged[aid] = Action(
+                id=aid,
+                label=str(item.get("label", existing.label)).strip() or existing.label,
+                kind=existing.kind,
+                scope=existing.scope,
+                multi=existing.multi,
+                command=existing.command,
+                list_command=existing.list_command,
+                op=existing.op,
+                confirm=str(item["confirm"]) if "confirm" in item else existing.confirm,
+                hidden=existing.hidden,
+                view_scope=existing.view_scope,
+                source="overridden",
+            )
+            continue
+
+        kind = str(item.get("kind", "")).strip().lower()
+        if kind not in {"shell", "filepicker", "note"}:
+            raise ValueError(f"action {aid!r} must define valid `kind` (shell|filepicker|note)")
+        scope = str(item.get("scope", "target")).strip().lower() or "target"
+        if scope not in {"target", "workspace"}:
+            raise ValueError(f"action {aid!r} has invalid scope {scope!r}")
+        multi = str(item.get("multi", "joined")).strip().lower() or "joined"
+        if multi not in {"joined", "per_row"}:
+            raise ValueError(f"action {aid!r} has invalid multi {multi!r}")
+
+        label = str(item.get("label", aid)).strip() or aid
+        confirm: bool | str | None = item.get("confirm")
+        hidden = bool(item.get("hidden", False))
+        view_scope_raw = item.get("view_scope", ["active", "archive"])
+        if isinstance(view_scope_raw, list):
+            view_scope = tuple(
+                v for v in [str(x).strip() for x in view_scope_raw] if v in {"active", "archive"}
+            )
+            if not view_scope:
+                view_scope = ("active", "archive")
+        else:
+            view_scope = ("active", "archive")
+
+        command = str(item.get("command", "")).strip()
+        list_command = str(item.get("list", "")).strip() or str(item.get("list_command", "")).strip()
+        op = str(item.get("op", "")).strip() or str(item.get("note_command", "")).strip()
+
+        if kind == "shell":
+            if not command:
+                raise ValueError(f"action {aid!r} kind=shell requires `command`")
+            _validate_template_vars(
+                command,
+                allowed=_allowed_vars_for_action(scope=scope, multi=multi, kind=kind),
+                field_name=f"action {aid!r} command",
+            )
+        elif kind == "filepicker":
+            if scope != "target":
+                raise ValueError(f"action {aid!r} kind=filepicker requires scope=target")
+            if not list_command or not command:
+                raise ValueError(f"action {aid!r} kind=filepicker requires `list` and `command`")
+            _validate_template_vars(
+                list_command,
+                allowed=_allowed_vars_for_action(scope="target", multi="per_row", kind=kind),
+                field_name=f"action {aid!r} list",
+            )
+            _validate_template_vars(
+                command,
+                allowed=_allowed_vars_for_action(scope="target", multi="per_row", kind=kind),
+                field_name=f"action {aid!r} command",
+            )
+            multi = "joined"
+        elif kind == "note":
+            if scope != "target":
+                raise ValueError(f"action {aid!r} kind=note requires scope=target")
+            if op != "add_log":
+                raise ValueError(f"action {aid!r} note `op` must be `add_log`")
+            previous = seen_note_ops.get(op)
+            if previous is not None:
+                raise ValueError(
+                    f"duplicate note op {op!r}: defined on both {previous!r} and {aid!r}"
+                )
+            seen_note_ops[op] = aid
+            multi = "joined"
+
+        merged[aid] = Action(
+            id=aid,
+            label=label,
+            kind=kind,
+            scope="workspace" if scope == "workspace" else "target",
+            multi="per_row" if multi == "per_row" else "joined",
+            command=command or None,
+            list_command=list_command or None,
+            op=op or None,
+            confirm=confirm,
+            hidden=hidden,
+            view_scope=view_scope,
+            source="config",
+        )
+    return merged
+
+
+def load_hotbar(data: object, *, actions: dict[str, Action]) -> list[HotbarEntry]:
+    if not isinstance(data, dict):
+        return []
+    raw = data.get("hotbar", [])
+    if not isinstance(raw, list):
+        raise ValueError("`hotbar` must be a list")
+    out: list[HotbarEntry] = []
+    for item in raw:
+        action_id = ""
+        label = ""
+        if isinstance(item, str):
+            action_id = item.strip()
+        elif isinstance(item, dict):
+            action_id = str(item.get("action", "")).strip()
+            label = str(item.get("label", "")).strip()
+            if "key" in item:
+                raise ValueError("hotbar entries cannot contain `key` field")
+        if not action_id:
+            continue
+        action = actions.get(action_id)
+        if action is None:
+            raise ValueError(f"hotbar action not found: {action_id!r}")
+        if action.scope != "target":
+            raise ValueError(
+                f"{action_id!r} cannot be on the hotbar — only target-scope actions are eligible. Bind it via `keys:` instead."
+            )
+        out.append(HotbarEntry(action=action_id, label=label))
+    return out
+
+
+def load_keys(data: object, *, actions: dict[str, Action]) -> dict[str, KeyEntry]:
+    if not isinstance(data, dict):
+        return {}
+    raw = data.get("keys", {})
+    if not isinstance(raw, dict):
+        raise ValueError("`keys` must be a map")
+    out: dict[str, KeyEntry] = {}
+    for key_name, value in raw.items():
+        hotkey = str(key_name).strip().lower()
+        if not hotkey:
+            continue
+        if hotkey in out:
+            raise ValueError(f"duplicate key binding: {hotkey!r}")
+        if isinstance(value, str):
+            action_id = value.strip()
+            label = ""
+        elif isinstance(value, dict):
+            action_id = str(value.get("action", "")).strip()
+            label = str(value.get("label", "")).strip()
+        else:
+            raise ValueError(f"key binding {hotkey!r} must be string or map")
+        if not action_id:
+            continue
+        if action_id not in actions:
+            raise ValueError(f"key binding action not found: {action_id!r}")
+        out[hotkey] = KeyEntry(action=action_id, label=label)
+    return out
 
 
 def merge_actions(
@@ -140,117 +421,6 @@ def load_file_view_exclude_patterns(data: object) -> list[str]:
             continue
         seen.add(key)
         out.append(value)
-    return out
-
-
-def load_custom_actions(data: object) -> list[dict[str, str]]:
-    raw = data.get("custom_actions", []) if isinstance(data, dict) else []
-    if not isinstance(raw, list):
-        return []
-    out: list[dict[str, str]] = []
-    seen: set[str] = set()
-    seen_note_commands: dict[str, str] = {}
-    for idx, item in enumerate(raw):
-        if not isinstance(item, dict):
-            continue
-        cid = str(item.get("id", "")).strip() or f"custom_{idx + 1}"
-        if cid in seen:
-            continue
-        seen.add(cid)
-        label = str(item.get("label", cid)).strip() or cid
-        scope = str(item.get("scope", "target")).strip().lower()
-        if scope not in {"target", "global"}:
-            continue
-        command = str(item.get("command", "")).strip()
-        action = str(item.get("action", "")).strip()
-        list_command = str(item.get("list_command", "")).strip()
-        run_command = str(item.get("run_command", "")).strip()
-        note_command_raw = item.get("note_command", "")
-        note_command = str(note_command_raw).strip() if note_command_raw is not None else ""
-        if note_command and note_command not in VALID_NOTE_COMMANDS:
-            valid = ", ".join(sorted(VALID_NOTE_COMMANDS))
-            raise ValueError(
-                f"custom action {cid!r} has invalid note_command "
-                f"{note_command!r}; valid values: {valid}"
-            )
-        if note_command:
-            previous = seen_note_commands.get(note_command)
-            if previous is not None:
-                raise ValueError(
-                    f"duplicate note_command {note_command!r}: "
-                    f"defined on both {previous!r} and {cid!r}; "
-                    f"each note_command value may be defined at most once"
-                )
-            seen_note_commands[note_command] = cid
-        loop_on_multi_raw = item.get("loop_on_multi", False)
-        if isinstance(loop_on_multi_raw, bool):
-            loop_on_multi = loop_on_multi_raw
-        elif isinstance(loop_on_multi_raw, (int, float)):
-            loop_on_multi = bool(loop_on_multi_raw)
-        else:
-            loop_on_multi = str(loop_on_multi_raw).strip().lower() in {
-                "1",
-                "true",
-                "yes",
-                "on",
-            }
-        if (
-            not command
-            and not action
-            and not (list_command and run_command)
-            and not note_command
-        ):
-            continue
-        row = {
-            "id": cid,
-            "label": label,
-            "scope": scope,
-        }
-        if command:
-            row["command"] = command
-        if action:
-            row["action"] = action
-        if list_command and run_command:
-            row["list_command"] = list_command
-            row["run_command"] = run_command
-        if note_command:
-            row["note_command"] = note_command
-        if loop_on_multi:
-            row["loop_on_multi"] = "true"
-        out.append(row)
-    return out
-
-
-def load_custom_hotkeys(data: object) -> list[dict[str, object]]:
-    raw = data.get("custom_hotkeys", []) if isinstance(data, dict) else []
-    if not isinstance(raw, list):
-        return []
-    out: list[dict[str, object]] = []
-    seen: set[str] = set()
-    for idx, item in enumerate(raw):
-        if not isinstance(item, dict):
-            continue
-        hid = str(item.get("id", "")).strip() or f"custom_hotkey_{idx + 1}"
-        if hid in seen:
-            continue
-        seen.add(hid)
-        hotkey = str(item.get("hotkey", "")).strip().lower()
-        target = str(item.get("target", "")).strip()
-        hotbar = bool(item.get("hotbar", False))
-        label = str(item.get("label", "")).strip()
-        if not target or (not hotkey and not hotbar):
-            continue
-        row: dict[str, object] = {
-            "id": hid,
-            "target": target,
-        }
-        if hotkey:
-            row["hotkey"] = hotkey
-        if hotbar:
-            row["hotbar"] = True
-        if label:
-            row["label"] = label
-        out.append(row)
     return out
 
 

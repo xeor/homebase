@@ -54,7 +54,8 @@ from ..config.prefs import (
     load_table_columns_config,
     load_ui_state,
     resolve_filter_expression,
-    save_custom_hotkeys,
+    save_hotbar,
+    save_keys,
     save_ui_state,
 )
 from ..core import utils as core_utils
@@ -451,7 +452,7 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
         self.custom_actions = [
             action for action in self.actions.values() if action.source != "builtin"
         ]
-        self.custom_hotkeys = list(self.ctx.custom_hotkeys)
+        self.custom_hotkeys = self._bindings_from_ctx()
         self.pending_tag_updates: set[Path] = set()
         self._visible_column_effective_width_by_id: dict[str, int] = {}
         self.managed_processes: list[ManagedProcess] = []
@@ -1091,6 +1092,54 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
             return
         textual_ui_action_dispatch.dispatch_action(self, normalized)
 
+    def _bindings_from_ctx(self) -> list[dict[str, object]]:
+        if not self.ctx.hotbar and not self.ctx.keys and self.ctx.custom_hotkeys:
+            return [dict(item) for item in self.ctx.custom_hotkeys]
+        bindings: list[dict[str, object]] = []
+        for idx, item in enumerate(self.ctx.hotbar, start=1):
+            action_id = str(item.get("action", "")).strip()
+            if not action_id:
+                continue
+            row: dict[str, object] = {
+                "id": f"hotbar_{idx}",
+                "target": action_id,
+                "hotbar": True,
+            }
+            label = str(item.get("label", "")).strip()
+            if label:
+                row["label"] = label
+            bindings.append(row)
+        for idx, (hotkey, entry) in enumerate(self.ctx.keys.items(), start=1):
+            action_id = str(entry.get("action", "")).strip()
+            if not action_id:
+                continue
+            row = {
+                "id": f"key_{idx}",
+                "target": action_id,
+                "hotkey": str(hotkey).strip().lower(),
+            }
+            label = str(entry.get("label", "")).strip()
+            if label:
+                row["label"] = label
+            bindings.append(row)
+        return bindings
+
+    def _save_bindings(self, bindings: list[dict[str, object]]) -> None:
+        hotbar_payload: list[dict[str, object]] = []
+        keys_payload: dict[str, dict[str, object]] = {}
+        for row in bindings:
+            target = str(row.get("target", "")).strip()
+            if not target:
+                continue
+            label = str(row.get("label", "")).strip()
+            if bool(row.get("hotbar", False)):
+                hotbar_payload.append({"action": target, **({"label": label} if label else {})})
+            hotkey = str(row.get("hotkey", "")).strip().lower()
+            if hotkey:
+                keys_payload[hotkey] = {"action": target, **({"label": label} if label else {})}
+        save_hotbar(self.base_dir, hotbar_payload)
+        save_keys(self.base_dir, keys_payload)
+
     def _hotbar_targets(self) -> list[str]:
         return textual_ui_action_items.hotbar_targets(self)
 
@@ -1121,7 +1170,7 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
         return True
 
     def _toggle_hotbar_target_from_palette(self, target: str) -> bool:
-        value = str(target or "").strip()
+        value = textual_ui_action_dispatch.normalize_action_target(str(target or ""))
         if not value:
             return False
         bindings: list[dict[str, object]] = [dict(row) for row in self.custom_hotkeys]
@@ -1140,13 +1189,13 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
                 if not str(row.get("hotkey", "")).strip():
                     bindings.pop(found_idx)
                     try:
-                        save_custom_hotkeys(self.base_dir, bindings)
+                        self._save_bindings(bindings)
                         self.custom_hotkeys = bindings
                         self._normalize_hotbar_index()
                         self._refresh_search_display()
                         return True
                     except (OSError, TypeError, ValueError) as exc:
-                        self._show_runtime_error("save custom hotkeys", exc)
+                        self._show_runtime_error("save bindings", exc)
                         return False
             bindings[found_idx] = row
         else:
@@ -1158,20 +1207,20 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
                 }
             )
         try:
-            save_custom_hotkeys(self.base_dir, bindings)
+            self._save_bindings(bindings)
             self.custom_hotkeys = bindings
         except (OSError, TypeError, ValueError) as exc:
-            self._show_runtime_error("save custom hotkeys", exc)
+            self._show_runtime_error("save bindings", exc)
             return False
         self._normalize_hotbar_index()
         self._refresh_search_display()
         return True
 
     def _target_is_hotbar(self, target: str) -> bool:
-        value = str(target or "").strip()
+        value = textual_ui_action_dispatch.normalize_action_target(str(target or ""))
         if not value:
             return False
-        return value in set(self._hotbar_targets())
+        return value in {textual_ui_action_dispatch.normalize_action_target(t) for t in self._hotbar_targets()}
 
     def _hotbar_target_label(self, target: str) -> str:
         value = str(target or "").strip()
@@ -1182,12 +1231,14 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
             return custom_label
         if value.startswith("tab:"):
             return value.split(":", 1)[1]
-        if value.startswith("action:"):
-            action_id = value.split(":", 1)[1]
-            for aid, label in self._valid_action_items():
-                if aid == action_id:
-                    return self._label_plain(label)
-            return action_id
+        if value.startswith("tab."):
+            return value.split(".", 1)[1]
+        action_id = value.split(":", 1)[1] if value.startswith("action:") else value
+        for aid, label in self._valid_action_items():
+            if aid == action_id:
+                return self._label_plain(label)
+        if action_id in self.actions:
+            return self.actions[action_id].label
         return value
 
     def _apply_side_tab_state_to_widgets(self) -> None:

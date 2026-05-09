@@ -19,12 +19,12 @@ system, not an action system. Keep the existing `wip.hotkeys` section.
 | 2. Action data model + merged map     | done | Added `Action` model, `merge_actions`, `UIContext.actions`, dynamic `_VIEW_CONFIG_DEFAULT`, and migrated action consumers to merged map. |
 | 3. Template engine v2                 | done | Added `ui/actions/template.py` contexts/renderer/validator, migrated dispatch rendering, and kept legacy `full_path` bridge with Phase 5 marker. |
 | 4. Dispatch refactor                  | done | Added unified `dispatch_action`, legacy target normalization wrapper, and migrated custom dispatch call sites to use it. |
-| 5. New schema (`actions:` / `hotbar:` / `keys:`) | not started | — |
+| 5. New schema (`actions:` / `hotbar:` / `keys:`) | done | Implemented new loaders + persistence (`load_actions/load_hotbar/load_keys`, `save_hotbar/save_keys`), wired runtime/reload paths, and removed legacy `full_path` bridge. |
 | 6. Side-tab auto-registration + eligibility checks | not started | — |
 | 7. Discoverability (`b help actions`, context view) | not started | — |
 | 8. README rewrite + final cleanup     | not started | — |
 
-**Currently active phase:** 5. New schema (`actions:` / `hotbar:` / `keys:`).
+**Currently active phase:** 6. Side-tab auto-registration + eligibility checks.
 
 **Phase log** (append a one-liner per completed phase: date, anything
 surprising encountered that the next phase should know about):
@@ -33,6 +33,7 @@ surprising encountered that the next phase should know about):
 - 2026-05-10 — Phase 2: merged built-in + legacy custom actions into `ctx.actions`; command palette/action dispatch now resolve custom ids directly, with legacy schema still loading.
 - 2026-05-10 — Phase 3: introduced v2 template contexts (per-row/list/filepicker/always), switched rendering to shared template engine, and preserved legacy `full_path` alias (`# REMOVE IN PHASE 5`).
 - 2026-05-10 — Phase 4: introduced `ui/actions/dispatch.py` with id normalization + kind routing; hotkey/pick paths now forward through one dispatch entry point while preserving legacy prefixes.
+- 2026-05-10 — Phase 5: switched runtime loading/persistence to `actions` + `hotbar` + `keys`, removed custom-hotkeys config writes, and dropped `full_path` template alias.
 
 ## What's wrong today
 

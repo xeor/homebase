@@ -92,7 +92,7 @@ def test_run_custom_action_joins_full_path_when_not_looping() -> None:
             {
                 "id": "x",
                 "scope": "target",
-                "command": "cmd {{ full_path }}",
+                "command": "cmd {{ paths_q }}",
             }
         ],
         [Path("/tmp/a b"), Path("/tmp/c")],
@@ -107,7 +107,7 @@ def test_run_custom_action_loops_when_enabled() -> None:
             {
                 "id": "x",
                 "scope": "target",
-                "command": "cmd {{ full_path }}",
+                "command": "cmd {{ path_q }}",
                 "loop_on_multi": "true",
             }
         ],

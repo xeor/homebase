@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from homebase.config import workspace as workspace_settings
+from homebase.core.constants import BUILTIN_ACTIONS
 
 
 def test_load_suffixes_normalizes_and_deduplicates() -> None:
@@ -18,189 +19,6 @@ def test_load_file_view_exclude_patterns_merges_legacy() -> None:
         {"files_view": {"exclude_patterns": [".git"], "exclude_dirs": ["node_modules", ".git"]}}
     )
     assert out == [".git", "node_modules"]
-
-
-def test_load_custom_actions_filters_invalid_rows() -> None:
-    out = workspace_settings.load_custom_actions(
-        {
-                "custom_actions": [
-                {"command": "echo ok", "scope": "bad"},
-                {"id": "x", "command": ""},
-            ]
-        }
-    )
-    assert out == []
-
-
-def test_load_custom_actions_accepts_action_without_command() -> None:
-    out = workspace_settings.load_custom_actions(
-        {
-            "custom_actions": [
-                {"id": "x", "scope": "item", "action": "custom:open_item"},
-            ]
-        }
-    )
-    assert out == []
-
-
-def test_load_custom_actions_accepts_target_scope() -> None:
-    out = workspace_settings.load_custom_actions(
-        {
-            "custom_actions": [
-                {"id": "x", "scope": "target", "action": "custom:open_item"},
-            ]
-        }
-    )
-    assert out == [
-        {
-            "id": "x",
-            "label": "x",
-            "scope": "target",
-            "action": "custom:open_item",
-        }
-    ]
-
-
-def test_load_custom_actions_parses_loop_on_multi() -> None:
-    out = workspace_settings.load_custom_actions(
-        {
-            "custom_actions": [
-                {
-                    "id": "x",
-                    "scope": "target",
-                    "command": "open -a DaisyDisk {{ full_path }}",
-                    "loop_on_multi": True,
-                },
-            ]
-        }
-    )
-    assert out == [
-        {
-            "id": "x",
-            "label": "x",
-            "scope": "target",
-            "command": "open -a DaisyDisk {{ full_path }}",
-            "loop_on_multi": "true",
-        }
-    ]
-
-
-def test_load_custom_actions_accepts_note_command() -> None:
-    out = workspace_settings.load_custom_actions(
-        {
-            "custom_actions": [
-                {
-                    "id": "add_log_to_note",
-                    "label": "Add log to note",
-                    "scope": "target",
-                    "note_command": "add_log",
-                }
-            ]
-        }
-    )
-    assert out == [
-        {
-            "id": "add_log_to_note",
-            "label": "Add log to note",
-            "scope": "target",
-            "note_command": "add_log",
-        }
-    ]
-
-
-def test_load_custom_actions_rejects_unknown_note_command() -> None:
-    with pytest.raises(ValueError, match="invalid note_command"):
-        workspace_settings.load_custom_actions(
-            {
-                "custom_actions": [
-                    {
-                        "id": "bad",
-                        "scope": "target",
-                        "note_command": "set_status",
-                    }
-                ]
-            }
-        )
-
-
-def test_load_custom_actions_rejects_duplicate_note_command() -> None:
-    with pytest.raises(ValueError, match="duplicate note_command"):
-        workspace_settings.load_custom_actions(
-            {
-                "custom_actions": [
-                    {
-                        "id": "log_a",
-                        "scope": "target",
-                        "note_command": "add_log",
-                    },
-                    {
-                        "id": "log_b",
-                        "scope": "target",
-                        "note_command": "add_log",
-                    },
-                ]
-            }
-        )
-
-
-def test_load_custom_actions_accepts_list_action_form() -> None:
-    out = workspace_settings.load_custom_actions(
-        {
-            "custom_actions": [
-                {
-                    "id": "drawio",
-                    "scope": "target",
-                    "list_command": "find {{ full_path }} -name '*.drawio'",
-                    "run_command": "drawio {{ selection_q }}",
-                }
-            ]
-        }
-    )
-    assert out == [
-        {
-            "id": "drawio",
-            "label": "drawio",
-            "scope": "target",
-            "list_command": "find {{ full_path }} -name '*.drawio'",
-            "run_command": "drawio {{ selection_q }}",
-        }
-    ]
-
-
-def test_load_custom_hotkeys_filters_invalid_rows() -> None:
-    out = workspace_settings.load_custom_hotkeys(
-        {
-            "custom_hotkeys": [
-                {"id": "one", "hotkey": "F5", "target": "custom:open_item"},
-                {"id": "two", "hotkey": "", "target": "custom:open_item"},
-                {"id": "three", "hotkey": "f6", "target": ""},
-            ]
-        }
-    )
-    assert out == [{"id": "one", "hotkey": "f5", "target": "custom:open_item"}]
-
-
-def test_load_custom_hotkeys_keeps_optional_label() -> None:
-    out = workspace_settings.load_custom_hotkeys(
-        {
-            "custom_hotkeys": [
-                {
-                    "id": "one",
-                    "hotbar": True,
-                    "target": "action:archive",
-                    "label": "Archive now",
-                }
-            ]
-        }
-    )
-    assert out == [
-        {
-            "id": "one",
-            "hotbar": True,
-            "target": "action:archive",
-            "label": "Archive now",
-        }
-    ]
 
 
 def test_load_create_templates_filters_and_normalizes() -> None:
@@ -344,6 +162,59 @@ def test_load_reconcile_config_resolves_default_cache_profile() -> None:
     assert out["active"]["interval_s"] == 5.0
     assert out["active"]["batch_size"] == 2
     assert out["active"]["parallelism"] == 3
+
+
+def test_load_actions_parses_custom_shell_action() -> None:
+    out = workspace_settings.load_actions(
+        {
+            "actions": {
+                "open_item_in_codium": {
+                    "kind": "shell",
+                    "scope": "target",
+                    "multi": "joined",
+                    "command": "codium {{ paths_q }}",
+                }
+            }
+        },
+        builtins=BUILTIN_ACTIONS,
+    )
+    assert out["open_item_in_codium"].kind == "shell"
+    assert out["open_item_in_codium"].source == "config"
+
+
+def test_load_actions_rejects_builtin_non_override_fields() -> None:
+    with pytest.raises(ValueError, match="only `label` and `confirm`"):
+        workspace_settings.load_actions(
+            {"actions": {"archive": {"kind": "shell", "command": "echo x"}}},
+            builtins=BUILTIN_ACTIONS,
+        )
+
+
+def test_load_hotbar_rejects_workspace_scope_action() -> None:
+    actions = workspace_settings.load_actions(
+        {
+            "actions": {
+                "open_base": {
+                    "kind": "shell",
+                    "scope": "workspace",
+                    "command": "echo {{ base_dir_q }}",
+                }
+            },
+            "hotbar": ["open_base"],
+        },
+        builtins=BUILTIN_ACTIONS,
+    )
+    with pytest.raises(ValueError, match="cannot be on the hotbar"):
+        workspace_settings.load_hotbar(
+            {"hotbar": ["open_base"]},
+            actions=actions,
+        )
+
+
+def test_load_keys_rejects_unknown_action_id() -> None:
+    actions = workspace_settings.load_actions({}, builtins=BUILTIN_ACTIONS)
+    with pytest.raises(ValueError, match="action not found"):
+        workspace_settings.load_keys({"keys": {"f5": "nope"}}, actions=actions)
 
 
 def test_load_reconcile_config_default_profile_overrides_apply() -> None:

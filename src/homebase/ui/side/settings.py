@@ -9,13 +9,13 @@ from rich.text import Text
 from textual.events import Key
 from textual.widgets import DataTable, Static
 
-from ...config import workspace as workspace_settings
 from ...config.prefs import (
+    load_actions,
     load_archive_timezone_name,
     load_cache_profile_table,
-    load_custom_actions,
-    load_custom_hotkeys,
     load_file_view_exclude_patterns,
+    load_hotbar,
+    load_keys,
     load_notes_config,
     load_open_mode_config,
     load_reconcile_config,
@@ -27,7 +27,7 @@ from ...config.prefs import (
     save_table_columns_config,
 )
 from ...config.property_defs import load_property_defs
-from ...config.store import clear_global_config_cache, load_global_config_dict
+from ...config.store import clear_global_config_cache
 from ...core import runtime_init
 from ...core.constants import (
     BUILTIN_ACTIONS,
@@ -418,13 +418,6 @@ def edit_global_config_and_reload(app: Any, *, base_dir: Path) -> None:
 def reload_global_config(app: Any, *, base_dir: Path) -> None:
     clear_global_config_cache(base_dir)
 
-    def _load_actions(base_path: Path, custom_actions: list[dict[str, str]]) -> dict[str, object]:
-        data = load_global_config_dict(base_path)
-        user_actions = data.get("actions", {}) if isinstance(data, dict) else {}
-        if not isinstance(user_actions, dict):
-            user_actions = {}
-        return workspace_settings.merge_actions(BUILTIN_ACTIONS, user_actions, custom_actions)
-
     try:
         runtime_cfg = runtime_init.load_runtime_config(
             base_dir,
@@ -434,9 +427,9 @@ def reload_global_config(app: Any, *, base_dir: Path) -> None:
             load_saved_filter_queries=load_saved_filter_queries,
             load_suffixes=load_suffixes,
             load_file_view_exclude_patterns=load_file_view_exclude_patterns,
-            load_custom_actions=load_custom_actions,
-            load_custom_hotkeys=load_custom_hotkeys,
-            load_actions=_load_actions,
+            load_actions=lambda bd: load_actions(bd, builtins=BUILTIN_ACTIONS),
+            load_hotbar=lambda bd, actions: load_hotbar(bd, actions=actions),
+            load_keys=lambda bd, actions: load_keys(bd, actions=actions),
             load_open_mode_config=load_open_mode_config,
             load_notes_config=load_notes_config,
             load_reconcile_config=load_reconcile_config,
@@ -457,9 +450,12 @@ def reload_global_config(app: Any, *, base_dir: Path) -> None:
         saved_filter_queries=list(runtime_cfg.saved_filter_queries),
         suffixes=list(runtime_cfg.suffixes),
         file_view_exclude_patterns=list(runtime_cfg.file_view_exclude_patterns),
-        custom_actions=list(runtime_cfg.custom_actions),
-        custom_hotkeys=list(runtime_cfg.custom_hotkeys),
         actions=dict(runtime_cfg.actions),
+        hotbar=[{"action": str(item.action), "label": str(item.label)} for item in runtime_cfg.hotbar],
+        keys={
+            str(key): {"action": str(entry.action), "label": str(entry.label)}
+            for key, entry in runtime_cfg.keys.items()
+        },
         open_mode_config=dict(runtime_cfg.open_mode_config),
         notes_config=dict(runtime_cfg.notes_config),
         reconcile_config={mode: dict(conf) for mode, conf in runtime_cfg.reconcile_config.items()},
@@ -472,7 +468,11 @@ def reload_global_config(app: Any, *, base_dir: Path) -> None:
     app.custom_actions = [
         action for action in app.actions.values() if action.source != "builtin"
     ]
-    app.custom_hotkeys = list(app.ctx.custom_hotkeys)
+    bind_builder = getattr(app, "_bindings_from_ctx", None)
+    if callable(bind_builder):
+        app.custom_hotkeys = bind_builder()
+    else:
+        app.custom_hotkeys = list(getattr(app.ctx, "custom_hotkeys", []))
     app.open_mode = dict(app.ctx.open_mode_config)
     app.notes_config = dict(app.ctx.notes_config)
     app.reconcile_config = {
@@ -513,7 +513,7 @@ def global_config_status_text(app: Any, *, base_dir: Path) -> str:
         f"[cyan]saved filters[/]: {len(app.ctx.saved_filter_queries)}",
         f"[cyan]suffixes[/]: {len(app.ctx.suffixes)}",
         f"[cyan]custom actions[/]: {len(app.custom_actions)}",
-        f"[cyan]custom hotkeys[/]: {len(app.custom_hotkeys)}",
+        f"[cyan]keys[/]: {len(app.ctx.keys)}",
         "",
         "[dim]Use the button below to edit config and auto-reload when editor exits.[/]",
     ]

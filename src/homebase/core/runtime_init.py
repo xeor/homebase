@@ -14,9 +14,9 @@ class RuntimeConfig:
     saved_filter_queries: list[str]
     suffixes: list[str]
     file_view_exclude_patterns: list[str]
-    custom_actions: list[Any]
-    custom_hotkeys: list[Any]
     actions: dict[str, Any]
+    hotbar: list[Any]
+    keys: dict[str, Any]
     open_mode_config: dict[str, str]
     notes_config: dict[str, str]
     reconcile_config: dict[str, dict[str, object]]
@@ -34,9 +34,9 @@ def load_runtime_config(
     load_saved_filter_queries: Callable[[Path], tuple[dict[str, str], list[str]]],
     load_suffixes: Callable[[Path], list[str]],
     load_file_view_exclude_patterns: Callable[[Path], list[str]],
-    load_custom_actions: Callable[[Path], list[Any]],
-    load_custom_hotkeys: Callable[[Path], list[Any]],
-    load_actions: Callable[[Path, list[Any]], dict[str, Any]],
+    load_actions: Callable[[Path], dict[str, Any]],
+    load_hotbar: Callable[[Path, dict[str, Any]], list[Any]],
+    load_keys: Callable[[Path, dict[str, Any]], dict[str, Any]],
     load_open_mode_config: Callable[[Path], dict[str, str]],
     load_notes_config: Callable[[Path], dict[str, str]],
     load_reconcile_config: Callable[[Path], dict[str, dict[str, object]]],
@@ -54,7 +54,7 @@ def load_runtime_config(
             archive_tz = ZoneInfo("UTC")
 
     named_filters, saved_filter_queries = load_saved_filter_queries(base_dir)
-    custom_actions = load_custom_actions(base_dir)
+    actions = load_actions(base_dir)
     return RuntimeConfig(
         property_defs=load_property_defs(base_dir),
         wip_open_symbol_map=load_wip_symbol_map(base_dir),
@@ -62,9 +62,9 @@ def load_runtime_config(
         saved_filter_queries=saved_filter_queries,
         suffixes=load_suffixes(base_dir),
         file_view_exclude_patterns=load_file_view_exclude_patterns(base_dir),
-        custom_actions=custom_actions,
-        custom_hotkeys=load_custom_hotkeys(base_dir),
-        actions=load_actions(base_dir, custom_actions),
+        actions=actions,
+        hotbar=load_hotbar(base_dir, actions),
+        keys=load_keys(base_dir, actions),
         open_mode_config=load_open_mode_config(base_dir),
         notes_config=load_notes_config(base_dir),
         reconcile_config=load_reconcile_config(base_dir),

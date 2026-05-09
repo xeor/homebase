@@ -25,7 +25,7 @@ from ..commands.setup import (
 from ..core import runtime_init
 from ..core import utils as core_utils
 from ..core.constants import (
-    CUSTOM_ACTION_RESERVED_HOTKEYS,
+    BUILTIN_ACTIONS,
     DEFAULT_ARCHIVE_TZ_NAME,
     ENV_BASE_DIR,
 )
@@ -88,13 +88,13 @@ def _resolve_filter_expression(base_dir: Path, expr: str):
 
 def main(argv: list[str]) -> int:
     from ..config import prefs as app_prefs  # noqa: F401  (alias for clarity)
-    from ..config import workspace as workspace_settings
     from ..config.prefs import (
+        load_actions,
         load_archive_timezone_name,
         load_cache_profile_table,
-        load_custom_actions,
-        load_custom_hotkeys,
         load_file_view_exclude_patterns,
+        load_hotbar,
+        load_keys,
         load_notes_config,
         load_open_mode_config,
         load_reconcile_config,
@@ -103,8 +103,6 @@ def main(argv: list[str]) -> int:
         load_wip_symbol_map,
     )
     from ..config.property_defs import load_property_defs
-    from ..config.store import load_global_config_dict
-    from ..core.constants import BUILTIN_ACTIONS
     from ..tmux.flow import cmd_tmux_load, cmd_tmux_save
     from ..workspace.benchmark import cmd_benchmark, cmd_test
     from ..workspace.projects import cmd_create_quick, cmd_new
@@ -121,13 +119,6 @@ def main(argv: list[str]) -> int:
 
     base_dir = resolve_base_dir(ns.base_folder)
     os.environ[ENV_BASE_DIR] = str(base_dir)
-
-    def _load_actions(base_path: Path, custom_actions: list[dict[str, str]]) -> dict[str, object]:
-        data = load_global_config_dict(base_path)
-        user_actions = data.get("actions", {}) if isinstance(data, dict) else {}
-        if not isinstance(user_actions, dict):
-            user_actions = {}
-        return workspace_settings.merge_actions(BUILTIN_ACTIONS, user_actions, custom_actions)
 
     # Fast paths that must work even when the global config is broken
     # (otherwise shell completion keeps spamming "config error: ..." on
@@ -154,9 +145,9 @@ def main(argv: list[str]) -> int:
             load_saved_filter_queries=load_saved_filter_queries,
             load_suffixes=load_suffixes,
             load_file_view_exclude_patterns=load_file_view_exclude_patterns,
-            load_custom_actions=load_custom_actions,
-            load_custom_hotkeys=load_custom_hotkeys,
-            load_actions=_load_actions,
+            load_actions=lambda bd: load_actions(bd, builtins=BUILTIN_ACTIONS),
+            load_hotbar=lambda bd, actions: load_hotbar(bd, actions=actions),
+            load_keys=lambda bd, actions: load_keys(bd, actions=actions),
             load_open_mode_config=load_open_mode_config,
             load_notes_config=load_notes_config,
             load_reconcile_config=load_reconcile_config,
@@ -166,15 +157,6 @@ def main(argv: list[str]) -> int:
     except ValueError as exc:
         print(f"config error: {exc}", file=sys.stderr)
         return 1
-    custom_action_hotkey_err = runtime_init.validate_custom_hotkeys(
-        list(runtime_cfg.custom_hotkeys),
-        reserved_hotkeys=CUSTOM_ACTION_RESERVED_HOTKEYS
-        | {str(key).strip().lower() for key in runtime_cfg.wip_open_symbol_map},
-    )
-    if custom_action_hotkey_err is not None:
-        print(custom_action_hotkey_err, file=sys.stderr)
-        return 1
-
     ui_ctx = UIContext(
         base_dir=base_dir,
         archive_tz=runtime_cfg.archive_tz,
@@ -185,9 +167,12 @@ def main(argv: list[str]) -> int:
         saved_filter_queries=list(runtime_cfg.saved_filter_queries),
         suffixes=list(runtime_cfg.suffixes),
         file_view_exclude_patterns=list(runtime_cfg.file_view_exclude_patterns),
-        custom_actions=list(runtime_cfg.custom_actions),
-        custom_hotkeys=list(runtime_cfg.custom_hotkeys),
         actions=dict(runtime_cfg.actions),
+        hotbar=[{"action": str(item.action), "label": str(item.label)} for item in runtime_cfg.hotbar],
+        keys={
+            str(key): {"action": str(entry.action), "label": str(entry.label)}
+            for key, entry in runtime_cfg.keys.items()
+        },
         open_mode_config=dict(runtime_cfg.open_mode_config),
         notes_config=dict(runtime_cfg.notes_config),
         reconcile_config={
