@@ -22,9 +22,9 @@ system, not an action system. Keep the existing `wip.hotkeys` section.
 | 5. New schema (`actions:` / `hotbar:` / `keys:`) | done | Implemented new loaders + persistence (`load_actions/load_hotbar/load_keys`, `save_hotbar/save_keys`), wired runtime/reload paths, and removed legacy `full_path` bridge. |
 | 6. Side-tab auto-registration + eligibility checks | done | Added `discover_tab_actions`, merged tab actions into runtime built-ins, and enforced runtime hotbar scope safety for non-target actions. |
 | 7. Discoverability (`b help actions`, context view) | done | Added `b help actions` table/filters and info-context side view powered by template context builders. |
-| 8. README rewrite + final cleanup     | not started | — |
+| 8. README rewrite + final cleanup     | done | Rewrote README action/binding docs for new schema, added `docs/actions.md` technical reference, and removed legacy doc references (`custom_actions/custom_hotkeys`, `full_path`, `loop_on_multi`). |
 
-**Currently active phase:** 8. README rewrite + final cleanup.
+**Currently active phase:** complete (2026-05-10).
 
 **Phase log** (append a one-liner per completed phase: date, anything
 surprising encountered that the next phase should know about):
@@ -36,6 +36,7 @@ surprising encountered that the next phase should know about):
 - 2026-05-10 — Phase 5: switched runtime loading/persistence to `actions` + `hotbar` + `keys`, removed custom-hotkeys config writes, and dropped `full_path` template alias.
 - 2026-05-10 — Phase 6: auto-registered `tab.<top>` / `tab.<top>.<child>` actions at runtime and added hotbar runtime guard to reject non-target scopes.
 - 2026-05-10 — Phase 7: added `b help actions` command output with binding visibility and introduced `info > stats` live action-template context inspection view.
+- 2026-05-10 — Phase 8: split user-facing vs technical docs (`README.md` + `docs/actions.md`) and finalized action-schema documentation for the new config model.
 
 ## What's wrong today
 

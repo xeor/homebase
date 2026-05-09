@@ -146,8 +146,9 @@ Most used top-level sections:
 - `reconcile`
 - `table_behavior`
 - `table_columns`
-- `custom_actions`
-- `custom_hotkeys`
+- `actions`
+- `hotbar`
+- `keys`
 - `new_project`
 - `state`
 
@@ -325,27 +326,25 @@ file_view_exclude_patterns:
   - "*.min.js"
   - "node_modules/**"
 
-# Custom actions + hotkeys
-custom_actions:
-  - id: vscode
-    label: Open in VS Code
+# Actions + bindings
+actions:
+  open_item_in_codium:
+    kind: shell
     scope: target
-    command: code {{ full_path }}
+    multi: joined
+    command: 'codium {{ paths_q }}'
 
-  # Built-in note operation. note_command must be one of the fixed enum
-  # values (currently only `add_log`). Each note_command value may be
-  # defined at most once across all custom_actions — duplicates fail
-  # at startup. Writing happens in pure Python (no shell), prompts a
-  # multiline dialog, and writes the same text to every selected
-  # project's note (resolved via notes.path_template).
-  - id: add_log_to_note
-    label: Add log to note
+  add_log_to_note:
+    kind: note
     scope: target
-    note_command: add_log
+    op: add_log
 
-custom_hotkeys:
-  - key: alt+v
-    action_id: vscode
+hotbar:
+  - open_selected
+  - add_log_to_note
+
+keys:
+  'alt+v': open_item_in_codium
 
 # New-project defaults used by wizard
 new_project:
@@ -441,156 +440,71 @@ b c area51
 b c area51 --name area51-demo --debug
 ```
 
-## Advanced: Custom Action Hotkeys
+## Advanced: Actions and Bindings
 
-Custom actions are configured in `~/<base>/.homebase/config.yaml` (same file
-as other global settings).
+Actions are configured in `<base>/.homebase/config.yaml` with three sections:
 
-Minimal shape:
+- `actions`: definitions (built-in overrides and custom actions)
+- `hotbar`: ordered target actions for Enter-dispatch cycling (`ctrl+@`)
+- `keys`: fixed key bindings to action ids
+
+Minimal example:
 
 ```yaml
-custom_actions:
-  - id: vscode
-    label: Open in VS Code
-    scope: target
-    command: code {{ full_path }}
+actions:
+  archive: { label: Archive now }
 
-  - id: cursor
-    label: Open in Cursor
+  open_item_in_codium:
+    kind: shell
     scope: target
-    command: cursor {{ full_path }}
+    multi: joined
+    command: 'codium {{ paths_q }}'
 
-  - id: zed
-    label: Open in Zed
+  open_in_daisydisk:
+    kind: shell
     scope: target
-    command: zed {{ full_path }}
+    multi: per_row
+    command: 'open -n -a DaisyDisk {{ path_q }}'
 
-  - id: reveal_finder
-    label: Reveal in Finder
+  open_base_in_editor:
+    kind: shell
+    scope: workspace
+    command: '$EDITOR {{ base_dir_q }}'
+
+  pick_markdown:
+    kind: filepicker
     scope: target
-    command: open -R {{ full_path }}
+    list: 'find {{ path_q }} -type f -name "*.md"'
+    command: 'codium {{ selection_q }}'
 
-  - id: open_in_daisydisk
-    label: Open in DaisyDisk
+  add_log_to_note:
+    kind: note
     scope: target
-    command: open -a DaisyDisk {{ full_path }}
-    loop_on_multi: false
+    op: add_log
 
-  - id: open_iterm
-    label: Open iTerm here
-    scope: target
-    command: open -a iTerm {{ full_path }}
+hotbar:
+  - open_selected
+  - notes_create
+  - { action: open_item_in_codium, label: codium }
 
-  - id: drawio_pick
-    label: Pick drawio file
-    scope: target
-    list_command: find "{{ full_path }}" -name "*.drawio"
-    run_command: drawio {{ selection_q }}
-
-  - id: pick_markdown
-    label: Pick markdown file
-    scope: target
-    list_command: find "{{ full_path }}" -type f -name "*.md"
-    run_command: codium {{ selection_q }}
-
-  - id: add_log_to_note
-    label: Add log to note
-    scope: target
-    note_command: add_log
-
-custom_hotkeys:
-  - id: hk_vscode
-    hotkey: f5
-    target: action:custom:vscode
-  - id: hk_cursor
-    hotkey: f6
-    target: action:custom:cursor
-  - id: hk_reveal
-    hotkey: alt+f6
-    target: action:custom:reveal_finder
-  - id: hk_archive
-    hotkey: ctrl+f7
-    target: action:archive
-  - id: hk_tab_notes
-    hotkey: ctrl+f8
-    target: tab:selected/notes
+keys:
+  'f5': open_item_in_codium
+  'ctrl+alt+r': refresh_cache
+  'ctrl+l': tab.info.events
 ```
 
-- `id`: unique action id
-- `label`: shown in action picker
-- `scope`: `target` | `global`
-- `command`: shell command template; context vars from custom actions
-  still apply (`{{ full_path }}`, `{{ rel_path }}`, ...)
-- `loop_on_multi`: optional (`true`/`false`, default `false`).
-  - `false`: one command invocation; `{{ full_path }}` is auto-expanded to
-    one or many double-quoted paths (`"/p1"` or `"/p1" "/p2" ...`).
-  - `true`: run once per target row (loop behavior).
-- `list_command` + `run_command`: optional pair for list-actions.
-  `list_command` emits candidates (one per line), user picks one in a fuzzy list,
-  then `run_command` executes with `{{ selection }}` / `{{ selection_q }}`.
-- `note_command`: built-in note-edit operation. Pure-Python; no shell.
-  - Allowed values: `add_log`.
-  - Each `note_command` value may be defined at most once across all
-    `custom_actions` — duplicates (e.g. two entries with
-    `note_command: add_log`) fail at startup.
-  - `add_log`: prompts a multiline dialog, then appends an entry under
-    `## Log` in each selected project's note (resolved via
-    `notes.path_template`):
-    - missing file: created with `# <project name>` H1 and a `## Log`
-      section
-    - existing file without `## Log`: section appended at end of file
-    - existing file with `## Log`: entry inserted at end of section
-  - Each entry is `### <ISO-8601 local-tz timestamp>` followed by a
-    blank line and the user-provided text. The timestamp is captured
-    once per invocation and reused across all selected projects.
-  - Existing notes are validated before the dialog opens; files with
-    duplicate `## Log` sections (or other malformed structure) are
-    skipped with a notification while the rest of the selection
-    proceeds.
-- `custom_hotkeys[].hotkey`: key name from Textual key syntax (for
-  example `f1`..`f12`, `ctrl+f5`, `alt+v`, `ç`, `†` on macOS option keys)
-- `custom_hotkeys[].target`: command-palette id to trigger. Supported:
-  `action:<action_id>` and `tab:<top_key>` / `tab:<top_key>/<child_key>`.
-  Example action ids: `action:archive`, `action:refresh_cache`,
-  `action:custom:<custom_action_id>`.
+Behavior notes:
 
-Notes:
+- `scope`: `target` | `workspace` | `tab`
+- `multi`: `joined` (one run with list vars like `paths_q`) or `per_row` (one run per selected row with `path_q`)
+- `_q` variables are shell-quoted and should be used in `command`/`list`
+- `kind: filepicker` collects candidates per selected row, merges, then executes once on selected candidate
+- only `scope: target` actions are allowed in `hotbar`
+- `per_row` execution order is current selection order (top to bottom)
 
-- Hotkeys are matched case-insensitively.
-- Startup fails if two `custom_hotkeys` entries use the same hotkey.
-- Startup fails if a custom hotkey collides with an existing app
-  hotkey.
-- Startup fails if a `note_command` value (e.g. `add_log`) appears on
-  more than one `custom_actions` entry, or if it is not one of the
-  allowed values.
-- Hotkeys trigger when the main projects table has focus and no modal
-  is open.
-- list-actions run per target row when multiple targets are active
-  (results are merged); with one focused row they run once.
-- For non-loop target commands, `b` handles quoting for `{{ full_path }}`;
-  do not add extra quotes around `{{ full_path }}` in command templates.
-- Target/global custom action commands are launched as background managed
-  processes (non-blocking UI).
-- Global config edit remains blocking until editor exits, then config is reloaded.
-- Running managed processes are listed under `Info > Processes`.
-- Quitting `b` while managed processes are running prompts for confirmation,
-  and confirming quit terminates those managed processes.
+Technical reference (full schema, variable matrix, dispatch rules):
 
-List-action setup and usage:
-
-1. Add a custom action with `list_command` and `run_command` in `.homebase/config.yaml`.
-2. Reload config (`Settings > Global config > Reload global config`) or restart `b`.
-3. Open actions with `ctrl+a` or command palette with `ctrl+p`.
-4. Pick your list-action (marked with `(list)`).
-5. Type to fuzzy-filter candidates, press `enter` to execute the chosen path.
-
-Example behavior:
-
-- Focus a project `my-app`
-- Run `Pick markdown file`
-- App runs `find "<project-path>" -type f -name "*.md"`
-- You choose a file from the list
-- App executes `codium <chosen-file>`
+- `docs/actions.md`
 
 ## Packaging
 
@@ -622,6 +536,7 @@ Bump `version` in `pyproject.toml` before each release.
 pyproject.toml      # build config (hatchling), deps, scripts, ruff, pytest
 src/homebase/       # package
 tests/              # pytest scaffold
+docs/               # technical reference docs
 TODO.md             # active follow-ups + feature backlog
 README.md           # this file
 AGENTS.md           # AI agent rules + project conventions
