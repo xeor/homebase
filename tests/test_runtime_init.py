@@ -24,6 +24,7 @@ def test_load_runtime_config_uses_loaders(tmp_path: Path) -> None:
         load_file_view_exclude_patterns=lambda _p: ["*.pyc"],
         load_custom_actions=lambda _p: [],
         load_custom_hotkeys=lambda _p: [],
+        load_actions=lambda _p, _custom: {},
         load_open_mode_config=lambda _p: {},
         load_notes_config=lambda _p: {},
         load_reconcile_config=lambda _p: {},

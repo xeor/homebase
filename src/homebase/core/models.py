@@ -16,6 +16,22 @@ class BuiltinActionMeta:
     kind: Literal["builtin"] = "builtin"
 
 
+@dataclass(frozen=True)
+class Action:
+    id: str
+    label: str
+    kind: Literal["builtin", "shell", "filepicker", "note", "tab"]
+    scope: Literal["target", "workspace"]
+    multi: Literal["joined", "per_row"]
+    command: str | None = None
+    list_command: str | None = None
+    op: str | None = None
+    confirm: bool | str | None = None
+    hidden: bool = False
+    view_scope: tuple[str, ...] = ("active", "archive")
+    source: Literal["builtin", "config", "overridden"] = "builtin"
+
+
 class RestoreTargetExistsError(ValueError):
     def __init__(self, source: Path, target: Path) -> None:
         self.source = source

@@ -9,6 +9,7 @@ from rich.text import Text
 from textual.events import Key
 from textual.widgets import DataTable, Static
 
+from ...config import workspace as workspace_settings
 from ...config.prefs import (
     load_archive_timezone_name,
     load_cache_profile_table,
@@ -26,9 +27,10 @@ from ...config.prefs import (
     save_table_columns_config,
 )
 from ...config.property_defs import load_property_defs
-from ...config.store import clear_global_config_cache
+from ...config.store import clear_global_config_cache, load_global_config_dict
 from ...core import runtime_init
 from ...core.constants import (
+    BUILTIN_ACTIONS,
     DEFAULT_ARCHIVE_TZ_NAME,
     GLOBAL_CONFIG_FILE_NAME,
     HOMEBASE_DIR_NAME,
@@ -415,6 +417,14 @@ def edit_global_config_and_reload(app: Any, *, base_dir: Path) -> None:
 
 def reload_global_config(app: Any, *, base_dir: Path) -> None:
     clear_global_config_cache(base_dir)
+
+    def _load_actions(base_path: Path, custom_actions: list[dict[str, str]]) -> dict[str, object]:
+        data = load_global_config_dict(base_path)
+        user_actions = data.get("actions", {}) if isinstance(data, dict) else {}
+        if not isinstance(user_actions, dict):
+            user_actions = {}
+        return workspace_settings.merge_actions(BUILTIN_ACTIONS, user_actions, custom_actions)
+
     try:
         runtime_cfg = runtime_init.load_runtime_config(
             base_dir,
@@ -426,6 +436,7 @@ def reload_global_config(app: Any, *, base_dir: Path) -> None:
             load_file_view_exclude_patterns=load_file_view_exclude_patterns,
             load_custom_actions=load_custom_actions,
             load_custom_hotkeys=load_custom_hotkeys,
+            load_actions=_load_actions,
             load_open_mode_config=load_open_mode_config,
             load_notes_config=load_notes_config,
             load_reconcile_config=load_reconcile_config,
@@ -448,6 +459,7 @@ def reload_global_config(app: Any, *, base_dir: Path) -> None:
         file_view_exclude_patterns=list(runtime_cfg.file_view_exclude_patterns),
         custom_actions=list(runtime_cfg.custom_actions),
         custom_hotkeys=list(runtime_cfg.custom_hotkeys),
+        actions=dict(runtime_cfg.actions),
         open_mode_config=dict(runtime_cfg.open_mode_config),
         notes_config=dict(runtime_cfg.notes_config),
         reconcile_config={mode: dict(conf) for mode, conf in runtime_cfg.reconcile_config.items()},
@@ -456,7 +468,10 @@ def reload_global_config(app: Any, *, base_dir: Path) -> None:
             for scope, table in runtime_cfg.cache_profile_table.items()
         },
     )
-    app.custom_actions = list(app.ctx.custom_actions)
+    app.actions = dict(app.ctx.actions)
+    app.custom_actions = [
+        action for action in app.actions.values() if action.source != "builtin"
+    ]
     app.custom_hotkeys = list(app.ctx.custom_hotkeys)
     app.open_mode = dict(app.ctx.open_mode_config)
     app.notes_config = dict(app.ctx.notes_config)

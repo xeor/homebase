@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from zoneinfo import ZoneInfo
 
-from homebase.core.models import PaneRef, ProjectRow, PropertyDef
+from homebase.core.models import Action, PaneRef, ProjectRow, PropertyDef
 from homebase.ui.app import BApp
 from homebase.ui.context import UIContext
 
@@ -20,6 +20,17 @@ def test_bapp_uses_passed_ui_context_for_runtime_config(tmp_path) -> None:
         file_view_exclude_patterns=["*.lock"],
         custom_actions=[{"id": "cx", "label": "Custom", "command": "true"}],
         custom_hotkeys=[{"id": "hk", "hotkey": "f5", "target": "custom:cx"}],
+        actions={
+            "cx": Action(
+                id="cx",
+                label="Custom",
+                kind="shell",
+                scope="target",
+                multi="joined",
+                command="true",
+                source="config",
+            )
+        },
         open_mode_config={"profile": "terminal"},
         notes_config={"enabled": "yes"},
         reconcile_config={
@@ -31,7 +42,7 @@ def test_bapp_uses_passed_ui_context_for_runtime_config(tmp_path) -> None:
     app = BApp(tmp_path, ctx=ctx)
 
     assert app.ctx is ctx
-    assert app.custom_actions == ctx.custom_actions
+    assert [action.id for action in app.custom_actions] == ["cx"]
     assert app.custom_hotkeys == ctx.custom_hotkeys
     assert app.open_mode == ctx.open_mode_config
     assert app.notes_config == ctx.notes_config

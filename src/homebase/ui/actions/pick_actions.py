@@ -10,6 +10,12 @@ def on_pick_actions(app: Any, value: str | None) -> None:
     if value.startswith("custom:"):
         app._run_custom_action(value.split(":", 1)[1])
         return
+    ctx = getattr(app, "ctx", None)
+    actions = getattr(ctx, "actions", {}) if ctx is not None else {}
+    action = actions.get(value) if isinstance(actions, dict) else None
+    if action is not None and action.source != "builtin":
+        app._run_custom_action(value)
+        return
 
     button_handlers: dict[str, Callable[[], None]] = {
         "readme_create": lambda: app._run_readme_button_action("readme_create"),

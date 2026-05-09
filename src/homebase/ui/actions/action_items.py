@@ -9,7 +9,7 @@ from string import Template
 from typing import Any, Callable
 
 from ...core.constants import BUILTIN_ACTIONS
-from ...core.models import ProjectRow
+from ...core.models import Action, ProjectRow
 from ...notes.log_md import NoteValidationError, insert_log_entry, validate_note
 from ..screens.multiline_input import MultilineInputScreen
 
@@ -23,16 +23,13 @@ def custom_actions_for_scope(
     normal: list[tuple[str, str]] = []
     list_actions: list[tuple[str, str]] = []
     note_actions: list[tuple[str, str]] = []
-    for act in app.custom_actions:
-        if str(act.get("scope", "target")) != scope:
+    for act in app.ctx.actions.values():
+        if act.source == "builtin" or act.scope != scope:
             continue
-        cid = str(act.get("id", "")).strip()
-        label = str(act.get("label", cid)).strip() or cid
-        is_list_action = bool(
-            str(act.get("list_command", "")).strip()
-            and str(act.get("run_command", "")).strip()
-        )
-        is_note_action = bool(str(act.get("note_command", "")).strip())
+        cid = act.id
+        label = act.label
+        is_list_action = act.kind == "filepicker"
+        is_note_action = act.kind == "note"
         if is_note_action:
             plain_label = app._esc(label)
             rendered_label = f"[#FFB347]{plain_label}[/] [dim](note)[/]"
@@ -42,7 +39,7 @@ def custom_actions_for_scope(
         else:
             rendered_label = f"[{color_accent_hex}]{app._esc(label)}[/]"
         target = (
-            f"custom:{cid}",
+            cid,
             rendered_label,
         )
         if is_note_action:
@@ -214,17 +211,15 @@ def label_plain(label: str) -> str:
 
 
 def action_help_text(action_id: str, label: str, *, action_short_help: dict[str, str]) -> str:
-    if action_id.startswith("custom:"):
+    action = action_short_help.get(action_id)
+    if action is None:
         plain = label_plain(label)
         return f"Run custom action: {plain}"
-    return action_short_help.get(action_id, label_plain(label))
+    return action
 
 
-def custom_action_by_id(app: Any, cid: str) -> dict[str, str] | None:
-    for act in app.custom_actions:
-        if str(act.get("id", "")).strip() == cid:
-            return act
-    return None
+def custom_action_by_id(app: Any, cid: str) -> Action | None:
+    return app.ctx.actions.get(cid)
 
 
 def custom_action_context(
@@ -276,18 +271,14 @@ def render_custom_command(template_text: str, context: dict[str, str]) -> str:
 
 
 def run_custom_action(app: Any, action_id: str, *, base_dir: Path, fmt_ymd: Callable[[int], str]) -> None:
-    act = custom_action_by_id(app, action_id)
-    if act is None:
+    action = custom_action_by_id(app, action_id)
+    if action is None:
         app._log(f"custom action not found: {action_id}", "error")
         app._refresh_side()
         return
-    scope = str(act.get("scope", "target"))
-    menu_action = str(act.get("action", "")).strip()
-    if menu_action:
-        app._on_pick_actions(menu_action)
-        return
-    list_command = str(act.get("list_command", "")).strip()
-    run_command = str(act.get("run_command", "")).strip()
+    scope = "global" if action.scope == "workspace" else "target"
+    list_command = str(action.list_command or "").strip()
+    run_command = str(action.command or "").strip()
     if list_command and run_command:
         _run_custom_list_action(
             app,
@@ -298,7 +289,7 @@ def run_custom_action(app: Any, action_id: str, *, base_dir: Path, fmt_ymd: Call
             fmt_ymd=fmt_ymd,
         )
         return
-    note_command = str(act.get("note_command", "")).strip()
+    note_command = str(action.op or "") if action.kind == "note" else ""
     if note_command:
         _run_custom_note_action(
             app,
@@ -306,7 +297,7 @@ def run_custom_action(app: Any, action_id: str, *, base_dir: Path, fmt_ymd: Call
             note_command=note_command,
         )
         return
-    template_text = str(act.get("command", "")).strip()
+    template_text = str(action.command or "").strip()
     if not template_text:
         app._log(f"custom action has empty command: {action_id}", "error")
         app._refresh_side()
@@ -334,12 +325,7 @@ def run_custom_action(app: Any, action_id: str, *, base_dir: Path, fmt_ymd: Call
         app._log("custom target action skipped: no target", "warn")
         app._refresh_side()
         return
-    loop_on_multi = str(act.get("loop_on_multi", "")).strip().lower() in {
-        "1",
-        "true",
-        "yes",
-        "on",
-    }
+    loop_on_multi = action.multi == "per_row"
     if not loop_on_multi:
         first = targets[0]
         for row in targets:

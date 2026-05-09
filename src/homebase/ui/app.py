@@ -107,6 +107,7 @@ from ..core.constants import (
     WIDGET_PROJECTS,
 )
 from ..core.models import (
+    Action,
     ArchiveActionOutcome,
     CacheRefreshOutcome,
     ManagedProcess,
@@ -222,25 +223,24 @@ _ROW_BUILD_ERRORS = (
 
 _HOTBAR_PALETTE_TAG = f" \\[[{COLOR_ERROR_HEX}]@hotbar[/]]"
 
-_VIEW_CONFIG_DEFAULT: dict[str, dict[str, list[tuple[str, str]]]] = {
-    "active": {
-        "actions": [
-            ("archive", "archive target"),
-            ("set_desc", "set description on target"),
-            ("delete", "delete target"),
-        ],
-    },
-    "archive": {
-        "actions": [
-            ("toggle_pack", "toggle pack/unpack target"),
-            ("pack", "pack target (.base-pkg.tgz)"),
-            ("unpack", "unpack target"),
-            ("restore", "restore target"),
-            ("set_desc", "set description on target"),
-            ("delete", "delete target"),
-        ],
-    },
-}
+def _build_view_config_default() -> dict[str, dict[str, list[tuple[str, str]]]]:
+    ordered_ids = {
+        "active": ("archive", "set_desc", "delete"),
+        "archive": ("toggle_pack", "pack", "unpack", "restore", "set_desc", "delete"),
+    }
+    out: dict[str, dict[str, list[tuple[str, str]]]] = {"active": {"actions": []}, "archive": {"actions": []}}
+    for view_mode, action_ids in ordered_ids.items():
+        rows: list[tuple[str, str]] = []
+        for action_id in action_ids:
+            meta = BUILTIN_ACTIONS.get(action_id)
+            if meta is None or view_mode not in meta.view_scope:
+                continue
+            rows.append((action_id, meta.default_label))
+        out[view_mode]["actions"] = rows
+    return out
+
+
+_VIEW_CONFIG_DEFAULT: dict[str, dict[str, list[tuple[str, str]]]] = _build_view_config_default()
 
 
 class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path | None, list[str]]]):
@@ -446,7 +446,10 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
         self.multi_selected: set[Path] = set()
         self.pending_desc_targets: list[Path] = []
         self.pending_rename_target: Path | None = None
-        self.custom_actions = list(self.ctx.custom_actions)
+        self.actions = dict(self.ctx.actions)
+        self.custom_actions = [
+            action for action in self.actions.values() if action.source != "builtin"
+        ]
         self.custom_hotkeys = list(self.ctx.custom_hotkeys)
         self.pending_tag_updates: set[Path] = set()
         self._visible_column_effective_width_by_id: dict[str, int] = {}
@@ -990,13 +993,13 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
 
         custom_scope_by_id: dict[str, str] = {}
         custom_list_action_ids: set[str] = set()
-        for act in self.custom_actions:
-            cid = str(act.get("id", "")).strip()
-            scope = str(act.get("scope", "target")).strip().lower()
-            if cid:
-                custom_scope_by_id[f"custom:{cid}"] = scope
-                if str(act.get("list_command", "")).strip() and str(act.get("run_command", "")).strip():
-                    custom_list_action_ids.add(f"custom:{cid}")
+        for action in self.ctx.actions.values():
+            if action.source == "builtin":
+                continue
+            scope = "global" if action.scope == "workspace" else "target"
+            custom_scope_by_id[action.id] = scope
+            if action.kind == "filepicker":
+                custom_list_action_ids.add(action.id)
 
         target_actions = {
             "readme_create",
@@ -2429,7 +2432,7 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
             },
         )
 
-    def _custom_action_by_id(self, cid: str) -> dict[str, str] | None:
+    def _custom_action_by_id(self, cid: str) -> Action | None:
         return textual_ui_action_items.custom_action_by_id(self, cid)
 
     def _custom_hotkey_target_map(self) -> dict[str, str]:

@@ -88,6 +88,7 @@ def _resolve_filter_expression(base_dir: Path, expr: str):
 
 def main(argv: list[str]) -> int:
     from ..config import prefs as app_prefs  # noqa: F401  (alias for clarity)
+    from ..config import workspace as workspace_settings
     from ..config.prefs import (
         load_archive_timezone_name,
         load_cache_profile_table,
@@ -102,6 +103,8 @@ def main(argv: list[str]) -> int:
         load_wip_symbol_map,
     )
     from ..config.property_defs import load_property_defs
+    from ..config.store import load_global_config_dict
+    from ..core.constants import BUILTIN_ACTIONS
     from ..tmux.flow import cmd_tmux_load, cmd_tmux_save
     from ..workspace.benchmark import cmd_benchmark, cmd_test
     from ..workspace.projects import cmd_create_quick, cmd_new
@@ -118,6 +121,13 @@ def main(argv: list[str]) -> int:
 
     base_dir = resolve_base_dir(ns.base_folder)
     os.environ[ENV_BASE_DIR] = str(base_dir)
+
+    def _load_actions(base_path: Path, custom_actions: list[dict[str, str]]) -> dict[str, object]:
+        data = load_global_config_dict(base_path)
+        user_actions = data.get("actions", {}) if isinstance(data, dict) else {}
+        if not isinstance(user_actions, dict):
+            user_actions = {}
+        return workspace_settings.merge_actions(BUILTIN_ACTIONS, user_actions, custom_actions)
 
     # Fast paths that must work even when the global config is broken
     # (otherwise shell completion keeps spamming "config error: ..." on
@@ -146,6 +156,7 @@ def main(argv: list[str]) -> int:
             load_file_view_exclude_patterns=load_file_view_exclude_patterns,
             load_custom_actions=load_custom_actions,
             load_custom_hotkeys=load_custom_hotkeys,
+            load_actions=_load_actions,
             load_open_mode_config=load_open_mode_config,
             load_notes_config=load_notes_config,
             load_reconcile_config=load_reconcile_config,
@@ -176,6 +187,7 @@ def main(argv: list[str]) -> int:
         file_view_exclude_patterns=list(runtime_cfg.file_view_exclude_patterns),
         custom_actions=list(runtime_cfg.custom_actions),
         custom_hotkeys=list(runtime_cfg.custom_hotkeys),
+        actions=dict(runtime_cfg.actions),
         open_mode_config=dict(runtime_cfg.open_mode_config),
         notes_config=dict(runtime_cfg.notes_config),
         reconcile_config={

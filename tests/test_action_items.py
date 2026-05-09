@@ -3,18 +3,25 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 
+from homebase.core.models import Action
 from homebase.ui.actions import action_items
 
 
 class _AppStub:
     def __init__(self) -> None:
-        self.custom_actions = [
-            {
-                "id": "hotkey_open_item",
-                "scope": "target",
-                "action": "custom:open_item",
+        self.ctx = SimpleNamespace(
+            actions={
+                "hotkey_open_item": Action(
+                    id="hotkey_open_item",
+                    label="open",
+                    kind="shell",
+                    scope="target",
+                    multi="joined",
+                    command="echo ok",
+                    source="config",
+                )
             }
-        ]
+        )
         self.picked: str | None = None
 
     def _on_pick_actions(self, value: str | None) -> None:
@@ -23,7 +30,21 @@ class _AppStub:
 
 class _RunAppStub:
     def __init__(self, actions: list[dict[str, str]], targets: list[Path]) -> None:
-        self.custom_actions = actions
+        action_map: dict[str, Action] = {}
+        for row in actions:
+            cid = str(row.get("id", "")).strip()
+            if not cid:
+                continue
+            action_map[cid] = Action(
+                id=cid,
+                label=cid,
+                kind="shell",
+                scope="target",
+                multi="per_row" if str(row.get("loop_on_multi", "")).lower() == "true" else "joined",
+                command=str(row.get("command", "")),
+                source="config",
+            )
+        self.ctx = SimpleNamespace(actions=action_map)
         self.view_mode = "active"
         self._targets = [SimpleNamespace(path=p, name=p.name, tags=[], properties=[], created="", last="", opened_ts=0, branch="") for p in targets]
         self.logged: list[tuple[str, str]] = []
@@ -57,10 +78,11 @@ class _RunAppStub:
         self.commands.append(command)
 
 
-def test_run_custom_action_dispatches_action_target() -> None:
+def test_custom_action_by_id_reads_from_ctx_actions() -> None:
     app = _AppStub()
-    action_items.run_custom_action(app, "hotkey_open_item", base_dir=Path("/tmp"), fmt_ymd=lambda _x: "")
-    assert app.picked == "custom:open_item"
+    action = action_items.custom_action_by_id(app, "hotkey_open_item")
+    assert action is not None
+    assert action.id == "hotkey_open_item"
 
 
 def test_run_custom_action_joins_full_path_when_not_looping() -> None:
