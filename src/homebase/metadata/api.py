@@ -276,12 +276,24 @@ def _property_template_context(path: Path, *, archived: bool) -> dict[str, str]:
     return out
 
 
+_PROPERTY_TOKENS_CACHE: dict[tuple[tuple[str, ...], int], str] = {}
+_PROPERTY_TOKENS_CACHE_MAX = 4096
+
+
 def property_tokens(keys: list[str]) -> str:
-    return property_utils.property_tokens(
+    cache_key = (tuple(keys), property_defs_signature())
+    cached = _PROPERTY_TOKENS_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+    if len(_PROPERTY_TOKENS_CACHE) >= _PROPERTY_TOKENS_CACHE_MAX:
+        _PROPERTY_TOKENS_CACHE.clear()
+    result = property_utils.property_tokens(
         keys,
         all_defs=all_property_defs(),
         normalize_keys=normalize_property_keys,
     )
+    _PROPERTY_TOKENS_CACHE[cache_key] = result
+    return result
 
 
 def property_tokens_text(keys: list[str]) -> Text:
