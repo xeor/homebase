@@ -255,6 +255,31 @@ BUILTIN_ACTIONS: dict[str, BuiltinActionMeta] = {
     ),
 }
 
+
+def discover_tab_actions() -> dict[str, BuiltinActionMeta]:
+    out: dict[str, BuiltinActionMeta] = {}
+    for top_key, top_label in SIDE_TOP_TABS:
+        top_id = f"tab.{top_key}"
+        out[top_id] = BuiltinActionMeta(
+            id=top_id,
+            default_label=str(top_label),
+            help_text=f"Jump to {top_label} panel",
+            scope="tab",
+            view_scope=("active", "archive"),
+            default_confirm_prompt=None,
+        )
+        for child_key, child_label in SIDE_CHILD_TABS.get(top_key, []):
+            child_id = f"tab.{top_key}.{child_key}"
+            out[child_id] = BuiltinActionMeta(
+                id=child_id,
+                default_label=str(child_label),
+                help_text=f"Jump to {top_label} / {child_label}",
+                scope="tab",
+                view_scope=("active", "archive"),
+                default_confirm_prompt=None,
+            )
+    return out
+
 CUSTOM_ACTION_RESERVED_HOTKEYS: set[str] = {
     "ctrl+n",
     "ctrl+p",

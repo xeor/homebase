@@ -4,6 +4,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+from ..config.workspace import load_actions
+from ..core.constants import BUILTIN_ACTIONS, discover_tab_actions
 from ..core.models import Action, PropertyDef
 
 
@@ -47,7 +49,10 @@ def build_ui_context(base_dir: Path) -> UIContext:
         saved_filter_queries=list(_const.SAVED_FILTER_QUERIES),
         suffixes=list(_const.SUFFIXES),
         file_view_exclude_patterns=list(_const.FILE_VIEW_EXCLUDE_PATTERNS),
-        actions={},
+        actions=load_actions(
+            {"actions": {}},
+            builtins={**BUILTIN_ACTIONS, **discover_tab_actions()},
+        ),
         hotbar=[],
         keys={},
         open_mode_config=dict(_const.OPEN_MODE_CONFIG),

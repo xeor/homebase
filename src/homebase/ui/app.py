@@ -1173,6 +1173,13 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
         value = textual_ui_action_dispatch.normalize_action_target(str(target or ""))
         if not value:
             return False
+        action = self.actions.get(value)
+        if action is not None and action.scope != "target":
+            self._log(
+                f"{value} cannot be on hotbar: only target-scope actions are eligible",
+                "warn",
+            )
+            return False
         bindings: list[dict[str, object]] = [dict(row) for row in self.custom_hotkeys]
         found_idx = -1
         for i, row in enumerate(bindings):

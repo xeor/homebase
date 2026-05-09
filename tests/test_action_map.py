@@ -1,7 +1,9 @@
 from __future__ import annotations
 
-from homebase.config.workspace import merge_actions
-from homebase.core.constants import BUILTIN_ACTIONS
+import pytest
+
+from homebase.config.workspace import load_actions, load_hotbar, merge_actions
+from homebase.core.constants import BUILTIN_ACTIONS, discover_tab_actions
 
 
 def test_merge_actions_with_empty_user_actions_returns_builtins() -> None:
@@ -28,3 +30,11 @@ def test_merge_actions_overrides_builtin_label_source() -> None:
     )
     assert merged["archive"].source == "overridden"
     assert merged["archive"].label == "Archive now"
+
+
+def test_load_hotbar_rejects_tab_action() -> None:
+    builtins = dict(BUILTIN_ACTIONS)
+    builtins.update(discover_tab_actions())
+    actions = load_actions({}, builtins=builtins)
+    with pytest.raises(ValueError, match="cannot be on the hotbar"):
+        load_hotbar({"hotbar": ["tab.info.events"]}, actions=actions)

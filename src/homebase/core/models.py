@@ -10,7 +10,7 @@ class BuiltinActionMeta:
     id: str
     default_label: str
     help_text: str
-    scope: Literal["target", "workspace"]
+    scope: Literal["target", "workspace", "tab"]
     view_scope: tuple[str, ...]
     default_confirm_prompt: str | None
     kind: Literal["builtin"] = "builtin"
@@ -21,7 +21,7 @@ class Action:
     id: str
     label: str
     kind: Literal["builtin", "shell", "filepicker", "note", "tab"]
-    scope: Literal["target", "workspace"]
+    scope: Literal["target", "workspace", "tab"]
     multi: Literal["joined", "per_row"]
     command: str | None = None
     list_command: str | None = None

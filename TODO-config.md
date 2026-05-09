@@ -20,11 +20,11 @@ system, not an action system. Keep the existing `wip.hotkeys` section.
 | 3. Template engine v2                 | done | Added `ui/actions/template.py` contexts/renderer/validator, migrated dispatch rendering, and kept legacy `full_path` bridge with Phase 5 marker. |
 | 4. Dispatch refactor                  | done | Added unified `dispatch_action`, legacy target normalization wrapper, and migrated custom dispatch call sites to use it. |
 | 5. New schema (`actions:` / `hotbar:` / `keys:`) | done | Implemented new loaders + persistence (`load_actions/load_hotbar/load_keys`, `save_hotbar/save_keys`), wired runtime/reload paths, and removed legacy `full_path` bridge. |
-| 6. Side-tab auto-registration + eligibility checks | not started | — |
+| 6. Side-tab auto-registration + eligibility checks | done | Added `discover_tab_actions`, merged tab actions into runtime built-ins, and enforced runtime hotbar scope safety for non-target actions. |
 | 7. Discoverability (`b help actions`, context view) | not started | — |
 | 8. README rewrite + final cleanup     | not started | — |
 
-**Currently active phase:** 6. Side-tab auto-registration + eligibility checks.
+**Currently active phase:** 7. Discoverability surfaces.
 
 **Phase log** (append a one-liner per completed phase: date, anything
 surprising encountered that the next phase should know about):
@@ -34,6 +34,7 @@ surprising encountered that the next phase should know about):
 - 2026-05-10 — Phase 3: introduced v2 template contexts (per-row/list/filepicker/always), switched rendering to shared template engine, and preserved legacy `full_path` alias (`# REMOVE IN PHASE 5`).
 - 2026-05-10 — Phase 4: introduced `ui/actions/dispatch.py` with id normalization + kind routing; hotkey/pick paths now forward through one dispatch entry point while preserving legacy prefixes.
 - 2026-05-10 — Phase 5: switched runtime loading/persistence to `actions` + `hotbar` + `keys`, removed custom-hotkeys config writes, and dropped `full_path` template alias.
+- 2026-05-10 — Phase 6: auto-registered `tab.<top>` / `tab.<top>.<child>` actions at runtime and added hotbar runtime guard to reject non-target scopes.
 
 ## What's wrong today
 
@@ -199,7 +200,7 @@ actions:
 | Field        | Type                       | Meaning                                                              |
 |--------------|----------------------------|----------------------------------------------------------------------|
 | `kind`       | enum                       | `shell`, `filepicker`, `note`. Required.                             |
-| `scope`      | `target` / `workspace`     | Does the action need a row? Default `target`.                        |
+| `scope`      | `target` / `workspace` / `tab` | Does the action need a row, workspace context, or tab jump. Default `target`. |
 | `multi`      | `joined` / `per_row`       | How the action dispatches against the current selection. `joined` (default) → run **once**, with list-form vars (`paths_q`, `names_q`, …) resolved to the full selection (1 or N rows). `per_row` → run **once per selected row**, with per-row vars (`path_q`, `name`, …) resolved per iteration. Independent of selection count: the variable family is determined by the action's declaration, not by how many rows the user picked. Only meaningful on `kind: shell`; ignored on `kind: filepicker` and `kind: note`. |
 | `when`       | str (predicate)            | Predicate; only show/dispatch when condition holds. *(future, slot reserved)* |
 | `hidden`     | bool                       | Hide from action picker; still dispatchable via key/hotbar.          |

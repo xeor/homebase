@@ -28,6 +28,7 @@ from ..core.constants import (
     BUILTIN_ACTIONS,
     DEFAULT_ARCHIVE_TZ_NAME,
     ENV_BASE_DIR,
+    discover_tab_actions,
 )
 from ..ui import run_textual_ui as _run_textual_ui
 from ..ui.context import UIContext
@@ -137,6 +138,8 @@ def main(argv: list[str]) -> int:
         return 0
 
     try:
+        runtime_builtins = dict(BUILTIN_ACTIONS)
+        runtime_builtins.update(discover_tab_actions())
         runtime_cfg = runtime_init.load_runtime_config(
             base_dir,
             default_archive_tz_name=DEFAULT_ARCHIVE_TZ_NAME,
@@ -145,7 +148,7 @@ def main(argv: list[str]) -> int:
             load_saved_filter_queries=load_saved_filter_queries,
             load_suffixes=load_suffixes,
             load_file_view_exclude_patterns=load_file_view_exclude_patterns,
-            load_actions=lambda bd: load_actions(bd, builtins=BUILTIN_ACTIONS),
+            load_actions=lambda bd: load_actions(bd, builtins=runtime_builtins),
             load_hotbar=lambda bd, actions: load_hotbar(bd, actions=actions),
             load_keys=lambda bd, actions: load_keys(bd, actions=actions),
             load_open_mode_config=load_open_mode_config,

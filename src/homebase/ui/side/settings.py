@@ -37,6 +37,7 @@ from ...core.constants import (
     OPEN_MODE_CONFIG,
     OPEN_MODE_PROFILES,
     TABLE_SIDE_WIDTH_PRESETS,
+    discover_tab_actions,
 )
 from ...core.utils import WIDGET_API_ERRORS
 from ..context import UIContext
@@ -419,6 +420,8 @@ def reload_global_config(app: Any, *, base_dir: Path) -> None:
     clear_global_config_cache(base_dir)
 
     try:
+        runtime_builtins = dict(BUILTIN_ACTIONS)
+        runtime_builtins.update(discover_tab_actions())
         runtime_cfg = runtime_init.load_runtime_config(
             base_dir,
             default_archive_tz_name=DEFAULT_ARCHIVE_TZ_NAME,
@@ -427,7 +430,7 @@ def reload_global_config(app: Any, *, base_dir: Path) -> None:
             load_saved_filter_queries=load_saved_filter_queries,
             load_suffixes=load_suffixes,
             load_file_view_exclude_patterns=load_file_view_exclude_patterns,
-            load_actions=lambda bd: load_actions(bd, builtins=BUILTIN_ACTIONS),
+            load_actions=lambda bd: load_actions(bd, builtins=runtime_builtins),
             load_hotbar=lambda bd, actions: load_hotbar(bd, actions=actions),
             load_keys=lambda bd, actions: load_keys(bd, actions=actions),
             load_open_mode_config=load_open_mode_config,
