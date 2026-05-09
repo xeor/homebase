@@ -1,17 +1,16 @@
 from __future__ import annotations
 
 import re
-import shlex
 import subprocess
 from datetime import datetime
 from pathlib import Path
-from string import Template
 from typing import Any, Callable
 
 from ...core.constants import BUILTIN_ACTIONS
 from ...core.models import Action, ProjectRow
 from ...notes.log_md import NoteValidationError, insert_log_entry, validate_note
 from ..screens.multiline_input import MultilineInputScreen
+from . import template as action_template
 
 
 def custom_actions_for_scope(
@@ -231,43 +230,17 @@ def custom_action_context(
     index: int = 0,
     total: int = 1,
 ) -> dict[str, str]:
-    ctx: dict[str, str] = {
-        "base_dir": str(base_dir),
-        "view_mode": app.view_mode,
-        "selection_index": str(index),
-        "selection_count": str(total),
-    }
+    _ = fmt_ymd, index, total
     if row is None:
-        return ctx
-    rel = row.path
-    try:
-        rel = row.path.relative_to(base_dir)
-    except ValueError:
-        pass
-    ctx.update(
-        {
-            "full_path": str(row.path),
-            "rel_path": str(rel),
-            "name": row.name,
-            "parent_path": str(row.path.parent),
-            "tags": ",".join(row.tags),
-            "properties": ",".join(row.properties),
-            "created": row.created,
-            "last_modified": row.last,
-            "last_opened": fmt_ymd(row.opened_ts) if row.opened_ts > 0 else "",
-            "branch": row.branch,
-        }
-    )
-    return ctx
+        return action_template.build_always_context(app, base_dir)
+    return {
+        **action_template.build_always_context(app, base_dir),
+        **action_template.build_per_row_context(app, row, base_dir),
+    }
 
 
 def render_custom_command(template_text: str, context: dict[str, str]) -> str:
-    converted = re.sub(
-        r"\{\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}\}",
-        lambda m: "${" + m.group(1) + "}",
-        template_text,
-    )
-    return Template(converted).safe_substitute(context)
+    return action_template.render_template(template_text, context)
 
 
 def run_custom_action(app: Any, action_id: str, *, base_dir: Path, fmt_ymd: Callable[[int], str]) -> None:
@@ -304,7 +277,7 @@ def run_custom_action(app: Any, action_id: str, *, base_dir: Path, fmt_ymd: Call
         return
 
     if scope == "global":
-        ctx = custom_action_context(app, None, base_dir=base_dir, fmt_ymd=fmt_ymd, index=1, total=1)
+        ctx = action_template.build_always_context(app, base_dir)
         cmd = render_custom_command(template_text, ctx)
         try:
             app._start_managed_shell_command(
@@ -330,15 +303,11 @@ def run_custom_action(app: Any, action_id: str, *, base_dir: Path, fmt_ymd: Call
         first = targets[0]
         for row in targets:
             app._mark_row_active(row.path)
-        ctx = custom_action_context(
-            app,
-            first,
-            base_dir=base_dir,
-            fmt_ymd=fmt_ymd,
-            index=1,
-            total=len(targets),
-        )
-        ctx["full_path"] = " ".join(_double_quoted(str(row.path)) for row in targets)
+        ctx = {
+            **action_template.build_always_context(app, base_dir),
+            **action_template.build_per_row_context(app, first, base_dir),
+            **action_template.build_list_context(app, list(targets), base_dir),
+        }
         cmd = render_custom_command(template_text, ctx)
         try:
             app._start_managed_shell_command(
@@ -361,14 +330,10 @@ def run_custom_action(app: Any, action_id: str, *, base_dir: Path, fmt_ymd: Call
     shown_error = False
     for i, row in enumerate(targets, start=1):
         app._mark_row_active(row.path)
-        ctx = custom_action_context(
-            app,
-            row,
-            base_dir=base_dir,
-            fmt_ymd=fmt_ymd,
-            index=i,
-            total=total,
-        )
+        ctx = {
+            **action_template.build_always_context(app, base_dir),
+            **action_template.build_per_row_context(app, row, base_dir),
+        }
         cmd = render_custom_command(template_text, ctx)
         try:
             app._start_managed_shell_command(
@@ -388,10 +353,6 @@ def run_custom_action(app: Any, action_id: str, *, base_dir: Path, fmt_ymd: Call
     app._refresh_side()
 
 
-def _double_quoted(value: str) -> str:
-    return '"' + str(value).replace("\\", "\\\\").replace('"', '\\"') + '"'
-
-
 def _run_custom_list_action(
     app: Any,
     action_id: str,
@@ -409,7 +370,10 @@ def _run_custom_list_action(
     items: list[tuple[str, str, ProjectRow]] = []
     multi = len(targets) > 1
     for row in targets:
-        ctx = custom_action_context(app, row, base_dir=base_dir, fmt_ymd=fmt_ymd, index=1, total=1)
+        ctx = {
+            **action_template.build_always_context(app, base_dir),
+            **action_template.build_per_row_context(app, row, base_dir),
+        }
         list_cmd = render_custom_command(list_command, ctx)
         try:
             proc = subprocess.run(
@@ -499,9 +463,11 @@ def _on_pick_custom_list_selection(
         return
     selection_value, row = selected
     app._mark_row_active(row.path)
-    ctx = custom_action_context(app, row, base_dir=base_dir, fmt_ymd=fmt_ymd, index=1, total=1)
-    ctx["selection"] = selection_value
-    ctx["selection_q"] = shlex.quote(selection_value)
+    ctx = {
+        **action_template.build_always_context(app, base_dir),
+        **action_template.build_per_row_context(app, row, base_dir),
+        **action_template.build_filepicker_context(selection_value),
+    }
     cmd = render_custom_command(run_command, ctx)
     try:
         app._start_managed_shell_command(

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import shlex
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -97,7 +98,7 @@ def test_run_custom_action_joins_full_path_when_not_looping() -> None:
         [Path("/tmp/a b"), Path("/tmp/c")],
     )
     action_items.run_custom_action(app, "x", base_dir=Path("/tmp"), fmt_ymd=lambda _x: "")
-    assert app.commands == ['cmd "/tmp/a b" "/tmp/c"']
+    assert app.commands == [f"cmd {shlex.quote('/tmp/a b')} {shlex.quote('/tmp/c')}"]
 
 
 def test_run_custom_action_loops_when_enabled() -> None:
