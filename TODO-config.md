@@ -56,17 +56,44 @@ Two concepts. **Action** = a thing that can be invoked.
 **Binding** = a way to invoke it (hotbar slot or key). Bindings
 reference actions by id, never re-define them.
 
+### Built-in vs custom
+
+- **Built-in actions** (`archive`, `delete`, `open_selected`,
+  `notes_create`, `tags_set`, `restore`, `pack`, `unpack`,
+  `toggle_pack`, `set_desc`, `rename_item`, `refresh_cache`,
+  `full_reconcile`, `reload_global_config`, `edit_global_config`,
+  `reconcile_all_cache`, `reconcile_selection_cache`,
+  `review_meta`, `rename_meta_ext`, `readme_create`, `readme_edit`,
+  `notes_open`, `suffix_set`, …) are implemented in code. The user
+  **may only override `label`**. Behavior, scope, multi-mode,
+  view-scope, confirm-prompt, and so on are fixed in code.
+COMMENT: confirm-prompt should also be possible to override
+
+- **Custom actions** are user-defined and have a full action
+  template (`kind`, `scope`, `multi`, `command`, …).
+- **Side-tab actions** (`tab.<name>`) are auto-registered built-ins
+  for tab navigation. Same rule: only `label` is user-overridable.
+- **Id collisions are rejected at load time.** A custom action
+  whose id matches a built-in id is an error — built-in ids are
+  reserved. To get different behavior than a built-in, define a
+  custom action under a different id and bind your hotbar/keys to
+  the new id.
+
 ### `actions:` map
 
 ```yaml
 actions:
 
-  # ---- built-in: override only (label / confirm / hidden / when) ----
+  # ---- built-in: only label is overridable ----
   archive:        { label: Archive }
-  delete:         { label: Delete forever, confirm: true }
+  delete:         { label: Delete forever }
   open_selected:  { label: Open in tmux }
   notes_create:   { label: New note }
   tags_set:       { label: Tags… }
+
+  # ---- side-tab (built-in too — auto-registered, label override only) ----
+  tab.selected:   { label: Selected }
+  tab.events:     { label: Events }
 
   # ---- custom: shell, scope=target, joined paths (single invocation) ----
   open_item_in_editor:
@@ -106,60 +133,116 @@ actions:
     scope: target
     op: add_log
 
-  # ---- side-tab jump (auto-registered; override here only if needed) ----
-  tab.selected:    { label: Selected }
-  tab.events:      { label: Events }
+  # ---- custom: with confirmation prompt that uses context vars ----
+  delete_archived:
+    kind: shell
+    label: Wipe archived
+    scope: workspace
+    confirm: "Really delete {{ archive_count }} archived projects?"
+    command: 'rm -rf {{ archive_dir_q }}'
 ```
 
 #### Field reference
 
-Top-level (apply to every action):
+**Allowed on every action** (built-in *and* custom):
 
-| Field      | Type               | Meaning                                         |
-|------------|--------------------|-------------------------------------------------|
-| `label`    | str                | Display name. Built-ins use the system default if absent. |
-| `kind`     | enum               | `shell`, `filepicker`, `note`, `tab`. **Required** for new (custom) actions; **forbidden** when overriding a built-in. |
-| `scope`    | `target`/`workspace` | Does the action need a row? Default `target`. |
-| `multi`    | `joined`/`per_row` | When scope=target and multiple rows selected, how to dispatch. Default `joined`. Ignored for `scope: workspace`. |
-| `confirm`  | bool / str         | If true, prompt with the action's default. If a string, use it as the prompt. |
-| `when`     | str (predicate)    | Only show/dispatch when condition holds. *(future)* |
-| `hidden`   | bool               | Don't show in the action picker (still dispatchable via key/hotbar). |
-| `view_scope` | list[str]        | Which views the action applies to (`[active]`, `[archive]`, default both). |
+| Field    | Type | Meaning                                                      |
+|----------|------|--------------------------------------------------------------|
+| `label`  | str  | Display name. Built-ins use the system default if absent.    |
 
-`kind`-specific fields (validated against `kind`):
+**Custom actions only** (rejected at config-load time on a built-in id):
 
-| `kind`        | Required fields              | Notes                              |
-|---------------|------------------------------|------------------------------------|
-| `shell`       | `command`                    | Template; vars below.              |
-| `filepicker`  | `list`, `command`            | `list` emits candidates; user picks; `command` runs with `selection`. |
-| `note`        | `op`                         | Built-in op enum. Only `add_log` today. Each `op` value may appear at most once across all actions. |
-| `tab`         | `target_main`, `target_child?` | Auto-registered for known tabs; entry is for label override. |
+| Field      | Type                       | Meaning                                                              |
+|------------|----------------------------|----------------------------------------------------------------------|
+| `kind`     | enum                       | `shell`, `filepicker`, `note`. Required.                             |
+| `scope`    | `target` / `workspace`     | Does the action need a row? Default `target`.                        |
+| `multi`    | `joined` / `per_row`       | When `scope=target` with multiple rows selected, how to dispatch. Default `joined`. Only meaningful on `kind: shell`; ignored on `kind: filepicker` and `kind: note` (see *kind*-specific table). |
+| `confirm`  | bool / str                 | `true` → default prompt; `false`/absent → no prompt; string → custom prompt (template variables allowed; see below). |
+| `when`     | str (predicate)            | Predicate; only show/dispatch when condition holds. *(future, slot reserved)* |
+| `hidden`   | bool                       | Hide from action picker; still dispatchable via key/hotbar.          |
+| `view_scope` | list[str]                | Which views the action applies to (`[active]`, `[archive]`; default both). |
+| `icon`     | str                        | Small glyph rendered in menu. *(future, slot reserved)*              |
+| `group`    | str                        | Category in the action menu. *(future, slot reserved)*               |
+
+`kind`-specific fields (validated against `kind`, custom actions only):
+
+| `kind`        | Required fields              | Allowed `scope`           | Notes                              |
+|---------------|------------------------------|---------------------------|------------------------------------|
+| `shell`       | `command`                    | `target` *or* `workspace` | Template; vars below.              |
+| `filepicker`  | `list`, `command`            | `target` only             | `list` emits candidates per row, results merged; user picks once; `command` runs once with `{{ selection }}`. **`multi:` is not exposed** — semantics are fixed: collection phase loops on multi-selection, dispatch is single-shot. |
+| `note`        | `op`                         | `target` only             | Built-in op enum. Only `add_log` today. Each `op` value may appear at most once across all actions. |
 
 ### Template variables
 
 `{{ path }}` (single-row) and `{{ paths }}` (joined) are now distinct;
 no more polymorphic `{{ full_path }}`.
 
-| Var               | Available in           | Meaning                              |
-|-------------------|------------------------|--------------------------------------|
-| `{{ path }}`      | scope=target, multi=per_row | Absolute path of the current row.   |
-| `{{ path_q }}`    | scope=target, multi=per_row | Same, shell-quoted.                  |
-| `{{ paths }}`     | scope=target, multi=joined  | All selected paths, space-joined.    |
-| `{{ paths_q }}`   | scope=target, multi=joined  | All selected paths, each shell-quoted, space-joined. |
-| `{{ rel_path }}` / `{{ rel_path_q }}` | scope=target | Path relative to base_dir. (Per-row only; joined form not provided — niche.) |
-| `{{ name }}`      | scope=target, multi=per_row | Project name.                        |
-| `{{ branch }}`    | scope=target, multi=per_row | Git branch.                          |
-| `{{ tags }}`      | scope=target, multi=per_row | Comma-joined tags.                   |
-| `{{ properties }}`| scope=target, multi=per_row | Comma-joined property keys.          |
-| `{{ base_dir }}` / `{{ base_dir_q }}` | always | Workspace root.                      |
-| `{{ selection }}` / `{{ selection_q }}` | filepicker only | Picked candidate. |
+| Var                                     | Available in                | Meaning                              |
+|-----------------------------------------|-----------------------------|--------------------------------------|
+| `{{ path }}`                            | scope=target, multi=per_row | Absolute path of the current row.    |
+| `{{ path_q }}`                          | scope=target, multi=per_row | Same, shell-quoted.                  |
+| `{{ paths }}`                           | scope=target, multi=joined  | All selected paths, space-joined.    |
+| `{{ paths_q }}`                         | scope=target, multi=joined  | All selected paths, each shell-quoted, space-joined. |
+| `{{ rel_path }}` / `{{ rel_path_q }}`   | scope=target (per-row only) | Path relative to base_dir.           |
+| `{{ name }}`                            | scope=target, multi=per_row | Project name.                        |
+| `{{ branch }}`                          | scope=target, multi=per_row | Git branch.                          |
+| `{{ tags }}`                            | scope=target, multi=per_row | Comma-joined tags.                   |
+| `{{ properties }}`                      | scope=target, multi=per_row | Comma-joined property keys.          |
+| `{{ count }}`                           | always                      | Number of currently selected rows in the active view (0 if no selection). Always reflects the visible selection — independent of action `scope`. Useful in `confirm:` strings. |
+| `{{ base_dir }}` / `{{ base_dir_q }}`   | always                      | Workspace root.                      |
+| `{{ archive_dir }}` / `{{ archive_dir_q }}` | always                  | Archive directory.                   |
+| `{{ archive_count }}`                   | always                      | Number of archived projects.         |
+| `{{ selection }}` / `{{ selection_q }}` | filepicker only             | Picked candidate.                    |
+COMMENT: I want more template variables, both from the workspace context and from the item selected. Think about what might be useful and create them. Context variables should also be possible to view under info>stats (it can be renamed to stats/context).
 
 Rules:
 - A template that references a variable not available in the action's
   `scope`/`multi` context fails at config-load time with a clear error.
 - `_q` suffix means shell-quoted. Use it for any value that lands
-  inside a shell command. Validation can warn if you use a non-`_q`
-  form in a `command:` template (likely a footgun).
+  inside a shell command. Validation warns if you use a non-`_q`
+  form in a `command:` template.
+- **`per_row` ordering is selection order** (top → bottom of the
+  visible list at dispatch time). Stable and documented; do not rely
+  on any other order.
+
+### `confirm:` prompt — template variables
+
+`confirm:` strings are templates. Same context as the action's
+`command:` template applies (so `{{ count }}`, `{{ paths }}`,
+`{{ base_dir }}`, etc. resolve before the prompt is shown).
+
+Built-in actions ship with a fixed prompt where one is needed
+(e.g. `delete` already has its own confirmation in code) and are
+**not** user-configurable beyond `label`. Confirm prompts on custom
+actions look like:
+
+```yaml
+wipe_selected:
+  kind: shell
+  label: Wipe selected
+  scope: target
+  multi: joined
+  confirm: "Delete {{ count }} project(s) under {{ base_dir }}?"
+  command: 'rm -rf {{ paths_q }}'
+```
+
+A future iteration may extend `confirm:` to a structured form for
+richer prompts (multi-line text, default-no buttons, additional
+inputs). The string-or-bool form proposed here covers today's needs
+and forward-compatibly slots into the structured form later via
+something like:
+
+```yaml
+# possible future
+confirm:
+  prompt: "Delete {{ count }} projects?"
+  default: cancel        # cancel | accept
+  inputs:
+    reason: { label: "Reason", required: true }
+```
+
+The string-or-bool form remains valid; the map form is purely
+additive.
 
 ### `hotbar:` — ordered list
 
@@ -174,6 +257,8 @@ hotbar:
 - Position in the list = on-screen position (1, 2, 3, …).
 - Item is either a string (action id) or a map with overrides.
 - `key:` (optional) attaches a key shortcut to this hotbar entry.
+COMMENT: There shoulnt be a key attached to it. Key can be removed
+
 - `label:` (optional) overrides the action's label *for this binding
   only* (lets the same action appear differently in different
   bindings).
@@ -192,16 +277,20 @@ keys:
 ```
 
 - Short form: `key: action_id`.
-- Long form: `key: { action: ..., label: ..., when: ... }`.
-- Same key can't appear twice.
-- A key already present on the hotbar is fine — they're independent
-  ways to reach the same action.
+- Long form: `key: { action: ..., label: ... }`.
+  (`when:` reserved for future, see *Future-friendly hooks*.)
+- A key may appear at most **once across the entire bindings set**
+  — the union of `hotbar` `key:` fields and `keys:` keys. If you
+  want a hotbar slot *and* a keyboard shortcut for the same action,
+  attach the `key:` to the `hotbar` entry; do not also list it in
+  `keys:`.
 
 ### Side-tab navigation
 
 Today: `target: tab:side_main/selected`. New: side tabs are
 auto-registered as actions with stable ids
-(`tab.selected`, `tab.events`, …). To change a tab's hotbar label, do:
+(`tab.selected`, `tab.events`, …). Like other built-ins, only
+`label` is overridable.
 
 ```yaml
 actions:
@@ -212,6 +301,8 @@ hotbar:
 ```
 
 No magic prefixes anywhere.
+
+COMMENT: Take care that the tab menu are hieractical. Ie, the events are really under info.events. There are two levels of menues. The example above should be tab.info.events
 
 ## The current config rewritten
 
@@ -369,6 +460,50 @@ Differences that matter:
 - Quoting required at the call site (`_q`); validation flags
   unquoted vars in commands.
 
+## `b help actions` — discoverability
+
+Add a CLI command (or side-tab listing) that prints every dispatchable
+action so the user can learn what's overridable without grepping
+source code.
+
+Sketch:
+
+```
+$ b help actions
+SOURCE      ID                          LABEL                      KIND        SCOPE      MULTI     BOUND
+builtin     archive                     Archive                    -           target     -         -
+builtin     delete                      Delete                     -           target     -         -
+overridden  open_selected               Open (tmux)                -           target     -         hotbar:1
+overridden  notes_create                Notes                      -           target     -         hotbar:2
+overridden  tags_set                    Tags…                      -           target     -         '†'
+builtin     tab.selected                Selected                   -           -          -         -
+builtin     tab.events                  Events                     -           -          -         -
+config      open_item_in_codium         Open in VSCodium           shell       target     joined    hotbar:4 'ç'
+config      open_in_daisydisk           Open/scan with DaisyDisk   shell       target     per_row   -
+config      pick_markdown_in_codium     Pick markdown (Codium)     filepicker  target     -         -
+config      add_log_to_note             Add log to note            note        target     -         hotbar:3
+config      open_base_in_editor         Open base dir in editor    shell       workspace  -         -
+```
+
+- `SOURCE` column shows where the action comes from:
+  `builtin` (no override), `config` (user-defined custom action),
+  `overridden` (built-in with a `label` override in config).
+- `LABEL` is the *effective* label after overrides. Pass
+  `--show-defaults` to also print the system default alongside
+  overridden labels.
+- `KIND` / `SCOPE` / `MULTI` are blank (`-`) for built-ins —
+  their behavior lives in code, not in the user-visible schema.
+- `BOUND` column shows user-configured bindings only — hotbar slot
+  (`hotbar:N`, 1-indexed) and any keys. Hardcoded UI keys
+  (e.g. `enter` to open the selected row, arrow keys to navigate)
+  are part of the application, not the bindings system, and are not
+  shown here.
+- Filter flags: `--source builtin|config|overridden`,
+  `--unbound` (only show actions with no binding), `--bound`,
+  `--view active|archive`.
+
+This doubles as documentation: every overridable id surfaces here.
+
 ## Code changes required (non-trivial)
 
 This is a structural refactor — touch points:
@@ -377,97 +512,109 @@ This is a structural refactor — touch points:
    `load_custom_hotkeys` with `load_actions(data)` returning a
    `dict[str, ActionDef]`, plus `load_hotbar(data)` and
    `load_keys(data)`. Validate:
-   - `kind` is required for non-built-in ids; forbidden for built-ins.
-   - `kind`-specific required fields present.
+   - Built-in id entries may carry only `label`; any other field is
+     a load-time error with a clear message
+     (e.g. *"`archive` is built-in; only `label` is overridable"*).
+   - Custom action entries must declare `kind`; kind-specific
+     required fields present.
    - Template vars valid for given `scope`/`multi`.
    - Each binding's `action` resolves to an action id.
    - No duplicate keys / hotbar slots.
 
 2. **`core/constants.py`** — rename `ACTION_SHORT_HELP` to
-   `BUILTIN_ACTIONS: dict[str, BuiltinActionMeta]` with fields
-   `default_label`, `help_text`, `default_confirm`, `view_scope`.
-   This becomes the canonical list a user can override.
+   `BUILTIN_ACTIONS: dict[str, BuiltinActionMeta]` with
+   `default_label`, `help_text`, `default_confirm`, `view_scope`
+   etc. — these live in code (not YAML), and define the immutable
+   behavior of each built-in. The user-facing override in YAML is
+   limited to `label`.
 
-3. **`ui/context.py`** — store the merged action map (built-ins
-   with overrides + custom additions) on `RuntimeContext`. The
-   merge happens at config-load time so the rest of the UI consumes
-   a single uniform shape.
+3. **`ui/context.py`** — store the merged action map on
+   `RuntimeContext`. Merge happens at config-load time so the rest
+   of the UI consumes a single uniform shape:
+   - Start with `BUILTIN_ACTIONS` (with their hard-coded behavior).
+   - For each entry in `actions:`:
+     - Id matches a built-in: allowed only if the entry contains
+       *only* `label` (label override). Any other field
+       (`kind`, `scope`, `multi`, `command`, …) → load-time error
+       (*"`<id>` is built-in; only `label` is overridable"*).
+     - Id is new: must declare `kind`; treated as a custom action.
 
 4. **`ui/actions/action_items.py`** — drop the implicit-decoration
    logic. Render `(filepicker)` / `(note)` from `action.kind` at
    menu-render time (still in code, but now derived rather than
    tied to which YAML fields are present).
    `valid_action_items()` builds its list from the merged action
-   map filtered by `view_scope` / target eligibility.
+   map, filtered by view-scope / target eligibility.
    `run_custom_action()` becomes `dispatch_action()`, switches on
    `kind`, uses the new template vars (`path` vs `paths`).
 
 5. **`ui/app.py`** — replace `_dispatch_hotkey_target`'s
    prefix-string switch with a single
    `dispatch_action(action_id)`. Side tabs are dispatched through
-   `kind: tab` actions. `_toggle_hotbar_target_from_palette` writes
-   to the new ordered `hotbar:` list (insert/move/remove).
+   `tab.<name>` action ids. `_toggle_hotbar_target_from_palette`
+   writes to the new ordered `hotbar:` list (insert/move/remove,
+   preserving index for unchanged entries).
 
 6. **`config/prefs.py`** — `save_custom_hotkeys` becomes
-   `save_hotbar` + `save_keys`. The hotbar-toggle from the
-   command palette appends/removes from the ordered list and
-   preserves index for unchanged entries.
+   `save_hotbar` + `save_keys` (or one combined `save_bindings`).
 
-7. **`README.md`** — rewrite the `Custom Action Hotkeys` section
-   end-to-end. Drop `loop_on_multi`, `scope: global`, and
-   `{{ full_path }}` magic. Document `kind`, `scope`, `multi`,
-   `path` vs `paths`, `_q` rule.
+7. **CLI** — add `b help actions` (`commands/help.py` or
+   `commands/actions.py`) producing the table sketched above.
+   Filters: `--source`, `--bound`, `--unbound`, `--view`.
 
-8. **Migration** — none needed (user opted out of
-   compatibility). Tests for the new schema replace the old ones.
+8. **`README.md`** — rewrite the `Custom Action Hotkeys` section
+   end-to-end. Drop `loop_on_multi`, `scope: global`,
+   `{{ full_path }}` magic. Document `kind`, `scope`,
+   `multi`, `path` vs `paths`, `_q` rule, `per_row` selection
+   ordering, and filepicker dispatch semantics.
 
-## Future-friendly hooks (cost: zero today, optional fields)
+9. **Migration** — none needed (user opted out of compatibility).
+   Tests for the new schema replace the old ones.
 
-Already accommodated by the schema; no code now:
+## Behavior notes (must be documented)
 
-- `actions.<id>.icon` — small unicode/emoji shown in menu.
-- `actions.<id>.confirm` — bool (default prompt) or string (custom
-  prompt).
-- `actions.<id>.when` — predicate, e.g. `target.archived`,
-  `count > 1`, `view == 'archive'`.
-- `actions.<id>.group` — categorize in the action menu.
-- `kind: chain` with `steps: [action_id, ...]` for macros.
-- `actions.<id>.label_by_view` — different label in active vs
-  archive.
-- `actions.<id>.hidden: true` — bind by key without showing in menu.
+These are decisions worth calling out explicitly in user-facing docs:
 
-## Open questions
+- **`multi: per_row` runs in selection order.** Top-to-bottom of
+  the visible list at dispatch time. Stable, intentional. If the
+  ordering matters to you (e.g. running a chain of commits), order
+  your selection accordingly.
+- **Filepicker on multi-selection.** The `list` template runs once
+  per selected row, candidates are merged into a single fuzzy list,
+  the user picks one entry, `command` runs once. This is *not*
+  per-row dispatch of `command` — the picker's UX is "pick one
+  thing, do one thing". `multi:` is not exposed on `kind:
+  filepicker`.
+- **`scope: workspace`** (the action does not need a row context).
+  Replaces today's `scope: global`. The naming change is
+  deliberate — "workspace" describes what's in scope.
+- **Built-ins are immutable except for label.** No `confirm`
+  override, no `view_scope` override, no `kind` override. The
+  reasoning: built-ins ship with code that depends on those values;
+  letting the user change them invites action-specific bugs that
+  are hard to debug. If you need different behavior, define a
+  custom action.
 
-- **`view_scope` on built-ins.** Today some actions are active-only
-  (`archive`) or archive-only (`restore`, `unpack`). Hardcoded in
-  `_VIEW_CONFIG_DEFAULT`. Move to per-action `view_scope: [active]`
-  in `BUILTIN_ACTIONS`, allow user override. Recommendation: yes —
-  one place where the answer lives.
+## Future extensions (slots reserved, no code now)
 
-- **Built-in registry: enumerate or implicit?** I'd enumerate
-  every built-in id in `core/constants.BUILTIN_ACTIONS` so the user
-  can run `b help actions` to list every overridable id. Code stays
-  the source of truth for default labels; YAML only overrides.
+Fields/kinds the schema is designed to grow into. Each one sits in a
+named slot already documented in the field reference; they're listed
+here as the explicit roadmap of what we don't have to build today
+but won't have to redesign for either.
 
-- **`confirm:` shape.** I'd allow:
-  - `confirm: true` → use the action's default prompt.
-  - `confirm: false` (or absent) → no prompt.
-  - `confirm: "Really delete N projects?"` → custom prompt.
-
-- **Should `multi: per_row` be invocation order strict (top→bottom of
-  selection) or arbitrary?** Today's loop is selection order. I'd
-  keep that; document it.
-
-- **Filepicker + multi-selection.** Today the picker runs per-row
-  when multiple are selected, with merged candidate list (one
-  selection runs once at the end). This stays — the filepicker's
-  inherent UX is "single final action". The `multi:` field on
-  filepicker actions controls whether the *list-collection* phase
-  loops or not. Recommendation: just document this behavior; do not
-  expose `multi:` on `kind: filepicker` (force a fixed semantics).
-
-- **`scope: workspace` naming.** Today's word is `global`. I prefer
-  `workspace` because it's more descriptive — "this action targets
-  the workspace, not a project". But `global` has the merit of being
-  shorter and matches the existing CLI vocabulary in some places.
-  Pick one and stick with it.
+- **`when:` predicate** — e.g. `target.archived`, `count > 1`,
+  `view == 'archive'`. Filters when an action shows in the menu and
+  whether bindings dispatch.
+- **`icon:` glyph** — small unicode/emoji rendered next to the
+  label in the menu.
+- **`group:` category** — group actions under headings in the
+  picker.
+- **Structured `confirm:`** — the map form sketched in the
+  *confirm:* section (prompt + default + inputs). Coexists with the
+  string-or-bool form.
+- **`label_by_view:`** — different label per view
+  (e.g. `{ active: Box up, archive: Restore from box }`).
+- **`kind: chain`** — `steps: [action_id, ...]` macros that run a
+  sequence of other actions.
+- **Structured `keys:` `when:`** — same predicate language applied
+  to bindings (only dispatch in some context).
