@@ -8,6 +8,29 @@ validated, action template clean and orthogonal.
 WIP is **out of scope** of this redesign — it's a quick-jump favorites
 system, not an action system. Keep the existing `wip.hotkeys` section.
 
+## Implementation status
+
+> Source of truth for "where is this work?" Read this section first.
+> Update it at the end of every phase.
+
+| Phase | Status      | Notes |
+|-------|-------------|-------|
+| 1. Built-in action registry           | not started | — |
+| 2. Action data model + merged map     | not started | — |
+| 3. Template engine v2                 | not started | — |
+| 4. Dispatch refactor                  | not started | — |
+| 5. New schema (`actions:` / `hotbar:` / `keys:`) | not started | — |
+| 6. Side-tab auto-registration + eligibility checks | not started | — |
+| 7. Discoverability (`b help actions`, context view) | not started | — |
+| 8. README rewrite + final cleanup     | not started | — |
+
+**Currently active phase:** none. Start with Phase 1.
+
+**Phase log** (append a one-liner per completed phase: date, anything
+surprising encountered that the next phase should know about):
+
+- _none yet_
+
 ## What's wrong today
 
 Looking at the current `config.yaml` and `README.md`:
@@ -850,3 +873,511 @@ but won't have to redesign for either.
   sequence of other actions.
 - **Structured `keys:` `when:`** — same predicate language applied
   to bindings (only dispatch in some context).
+
+## Implementation plan
+
+The redesign ships in 8 phases. Each phase is a self-contained
+work unit:
+
+- **Self-contained:** read the *Implementation status* section above
+  to know which phase is active, then jump to that phase's heading.
+  No prior context outside this file is needed. The phase's brief
+  references other sections of this same file by name (e.g. *Field
+  reference*, *Template variables*).
+- **Testable in isolation:** every phase ends with a Done-when
+  checklist that the suite + lint + manual smoke must satisfy.
+- **Mergeable:** the app must boot and behave correctly between
+  phases. No phase leaves the codebase broken.
+
+**Working procedure for every phase:**
+
+1. Read this file's *Implementation status* table — confirm you're
+   on the active phase.
+2. Read the phase's brief end-to-end before writing code.
+3. Implement the listed tasks.
+4. Add the listed tests; run `uv run pytest` (must be green).
+5. Run `uv run ruff check src/homebase/ tests/` (must be clean).
+6. Manual smoke per the phase's *Done when*.
+7. **Update this TODO file** in the same commit as the code:
+   - Mark the phase row as `done` in the status table.
+   - Append a one-liner to the *Phase log*.
+   - Set the next phase as the *Currently active phase*.
+8. Commit.
+
+Layering and style rules in `AGENTS.md` apply to every phase
+without restating: `core/` imports nothing else from the package;
+no bare `except`; no `from X import *`; tests use `tmp_path`, not
+mocks of fs/sqlite; new pure-data helpers in `*_utils.py` /
+`*_engine.py` get unit tests.
+
+---
+
+### Phase 1 — Built-in action registry
+
+**Goal.** Build a single canonical metadata registry for every
+existing built-in action. No user-visible behavior change. This
+unlocks all later phases (label override, view-scope, confirm
+defaults).
+
+**Files.**
+- `src/homebase/core/models.py`
+- `src/homebase/core/constants.py`
+- `src/homebase/ui/app.py`
+- `src/homebase/ui/actions/action_items.py`
+
+**Tasks.**
+
+1. In `core/models.py`, add a `BuiltinActionMeta` dataclass:
+   - `id: str`
+   - `default_label: str`
+   - `help_text: str`
+   - `scope: Literal["target", "workspace"]`
+   - `view_scope: tuple[str, ...]` — subset of `("active", "archive")`.
+   - `default_confirm_prompt: str | None` — `None` means "never
+     prompts"; non-`None` is the default prompt text. (User
+     overrides under `confirm:` replace this string.)
+   - `kind: Literal["builtin"]` (constant, for symmetry with the
+     `Action` shape introduced in Phase 2).
+2. In `core/constants.py`, replace `ACTION_SHORT_HELP: dict[str, str]`
+   with `BUILTIN_ACTIONS: dict[str, BuiltinActionMeta]`. Move every
+   id from today's `ACTION_SHORT_HELP` over with full metadata.
+   Source of truth for `view_scope`: today's `_VIEW_CONFIG_DEFAULT`
+   in `ui/app.py` (active-only / archive-only / both). Source for
+   `default_confirm_prompt`: code paths that prompt before running
+   (`delete`, etc.). Source for `scope`: target if the action runs
+   on row(s); workspace if it doesn't.
+3. Migrate consumers:
+   - `ui/app.py` import `BUILTIN_ACTIONS` instead of
+     `ACTION_SHORT_HELP`.
+   - `action_help_text(action_id, label, *, action_short_help=…)`
+     keeps its signature for now but the dict passed in is built
+     from `BUILTIN_ACTIONS`'s `help_text` fields.
+   - `valid_action_items` reads `default_label` from
+     `BUILTIN_ACTIONS` (still merged with `_VIEW_CONFIG_DEFAULT`
+     for the per-view extras until Phase 2 takes that over).
+4. Don't touch `_VIEW_CONFIG_DEFAULT` yet — Phase 2 derives it
+   from the registry. Keep both in sync this phase.
+
+**Tests** (new file `tests/test_builtin_actions.py`):
+- Every action id present in today's `ACTION_SHORT_HELP` has an
+  entry in `BUILTIN_ACTIONS`.
+- Every entry has non-empty `default_label` and `help_text`.
+- `view_scope` matches what `_VIEW_CONFIG_DEFAULT` currently
+  encodes for the same id.
+- Existing tests stay green. Layering test stays green.
+
+**Done when.**
+- `uv run pytest` green.
+- `uv run ruff check src/homebase/ tests/` clean.
+- Manual smoke: `uv run b` opens, action menu (`ctrl+a`) shows the
+  same items as before, hotbar still cycles, custom actions still
+  dispatch.
+
+**Update TODO.** Status table → Phase 1 = `done`; phase log entry;
+*Currently active phase* → 2.
+
+---
+
+### Phase 2 — Action data model + merged action map
+
+**Goal.** Define the unified `Action` shape and merge built-ins +
+existing `custom_actions` into one map on `RuntimeContext`. UI
+sites read from the merged map. The old YAML schema still loads —
+this phase only changes the *shape* the app holds in memory.
+
+**Files.**
+- `src/homebase/core/models.py`
+- `src/homebase/config/workspace.py` (or new `config/action_map.py`)
+- `src/homebase/ui/context.py`
+- `src/homebase/core/runtime_init.py`
+- `src/homebase/ui/actions/action_items.py`
+- `src/homebase/ui/app.py`
+
+**Tasks.**
+
+1. In `core/models.py`, add `Action` dataclass with the full schema
+   per the *Field reference* tables: `id`, `label`, `kind`
+   (`"builtin" | "shell" | "filepicker" | "note" | "tab"`),
+   `scope`, `multi`, `command`, `list_command`, `op`,
+   `confirm` (`bool | str | None`), `hidden`, `view_scope`,
+   `source` (`"builtin" | "config" | "overridden"`).
+2. Add `merge_actions(builtins, user_actions, custom_actions_legacy)
+   -> dict[str, Action]`:
+   - Start with built-ins → `Action(kind="builtin", source="builtin")`.
+   - For each entry in `custom_actions_legacy` (the old YAML still
+     parsed): if its `id` matches a built-in id, treat as a label
+     override (`source="overridden"`). Otherwise build an `Action`
+     with `kind` inferred from which fields are present (`command`
+     → `shell`, `list_command`+`run_command` → `filepicker`,
+     `note_command` → `note`).
+   - Return the merged dict keyed by id. Custom actions inferred
+     here use the legacy field names — Phase 5 cleans that up.
+3. Add `RuntimeContext.actions: dict[str, Action]`. Populate in
+   `runtime_init.runtime_init`.
+4. Migrate consumers to read `app.ctx.actions`:
+   - `valid_action_items()` builds its menu list from the merged
+     map filtered by view-scope and target eligibility.
+   - `custom_action_by_id(app, cid)` → `app.ctx.actions.get(cid)`
+     (returns `Action`, not `dict`).
+   - `custom_actions_for_scope(app, scope)` filters
+     `app.ctx.actions` by `source != "builtin"` and matching
+     scope.
+5. Keep `app.custom_actions` as a derived list (Action objects with
+   `source != "builtin"`) for any temporary callers; Phase 5
+   removes it.
+6. Build `_VIEW_CONFIG_DEFAULT` dynamically from `BUILTIN_ACTIONS`
+   filtered by `view_scope`.
+
+**Tests.**
+- `tests/test_action_map.py` — merge with empty user actions
+  returns built-ins; custom additions appear with `source="config"`;
+  built-in id with a label override appears as
+  `source="overridden"`.
+- Existing tests stay green (action menu still shows same items,
+  custom dispatch still works).
+
+**Done when.**
+- pytest green, ruff clean.
+- TUI smoke: action menu unchanged; existing hotbar/custom_hotkeys
+  still dispatch correctly.
+
+**Update TODO.** Phase 2 = `done`; log; active phase → 3.
+
+---
+
+### Phase 3 — Template engine v2
+
+**Goal.** Implement the per-row / list-form / filepicker / always
+variable families, with quoting and load-time validation. Apply
+to existing custom-action `command` / `list_command` / `run_command`
+strings.
+
+**Files.**
+- `src/homebase/ui/actions/template.py` (new)
+- `src/homebase/ui/actions/action_items.py`
+- (later phases) `src/homebase/config/workspace.py` for validation
+
+**Tasks.**
+
+1. New module `ui/actions/template.py`:
+   - `PER_ROW_VARS`, `LIST_VARS`, `FILEPICKER_VARS`, `ALWAYS_VARS`:
+     the exact sets from the *Template variables* section of this
+     file. Each variable has both a bare and (where shell-relevant)
+     a `_q` form.
+   - `build_per_row_context(app, row, base_dir) -> dict[str, str]`.
+   - `build_list_context(app, rows, base_dir) -> dict[str, str]`
+     (resolves `paths`, `paths_q`, `rel_paths`, `rel_paths_q`,
+     `names`, `names_q`). Works for any selection size ≥ 1.
+   - `build_filepicker_context(picked: str) -> dict[str, str]`.
+   - `build_always_context(app, base_dir) -> dict[str, str]`
+     (resolves `base_dir(_q)`, `archive_dir(_q)`, `archive_count`,
+     `active_count`, `wip_count`, `count`, `view`, `filter(_q)`,
+     `now(_iso/_ts)`, `today`, `user`, `home(_q)`, `base_name`).
+   - `render_template(text: str, *contexts) -> str` — merge
+     contexts, interpret `{{ var }}` and `${var}` via `string.Template.safe_substitute`. The `_q` variants come pre-quoted via `shlex.quote`.
+   - `validate_template(text: str, allowed: set[str])
+     -> list[str]` — return load-time error messages for any
+     `{{ x }}` not in `allowed`. Also return a *warning* per bare
+     (non-`_q`) variable found in a `command:` template (used at
+     parse time to surface footguns; doesn't fail the load).
+2. Migrate `custom_action_context` and `render_custom_command`
+   from `action_items.py` to delegate to the new module.
+3. Bridge for legacy `{{ full_path }}` (lives until Phase 5):
+   - In a `multi: per_row` (or legacy `loop_on_multi: true`)
+     context, expose `full_path` as an alias of `path_q` so
+     existing user templates keep working.
+   - In a `multi: joined` (legacy `loop_on_multi: false`) context,
+     expose `full_path` as alias of `paths_q`.
+   - Tag this bridge with a code comment `# REMOVE IN PHASE 5`
+     so it's easy to find.
+
+**Tests** (`tests/test_template.py`):
+- Every variable name in each family resolves correctly for a
+  representative row + workspace.
+- `_q` quoting is `shlex.quote` style (round-trip safe).
+- `validate_template` returns errors for unknown vars and the
+  expected warning for unquoted vars.
+- List context produces a list of one for one selected row, list of
+  N for N — concrete:
+  - 1 row `/p/a` → `paths_q` resolves to `"/p/a"`.
+  - 2 rows `/p/a`, `/p/b` → `paths_q` resolves to `"/p/a" "/p/b"`.
+
+**Done when.**
+- pytest green, ruff clean.
+- TUI smoke: every existing custom action still executes correctly.
+
+**Update TODO.** Phase 3 = `done`; log; active phase → 4.
+
+---
+
+### Phase 4 — Dispatch refactor
+
+**Goal.** One entry point for invoking any action:
+`dispatch_action(app, action_id)`. Switches on `Action.kind`. The
+old prefix-string `_dispatch_hotkey_target` collapses to a thin
+shim that strips legacy prefixes and forwards.
+
+**Files.**
+- `src/homebase/ui/actions/dispatch.py` (new)
+- `src/homebase/ui/app.py`
+- `src/homebase/ui/actions/action_items.py`
+- `src/homebase/ui/sync/git_refresh.py` and any other call sites
+  for `run_custom_action`.
+
+**Tasks.**
+
+1. New module `ui/actions/dispatch.py`:
+   - `dispatch_action(app, action_id: str) -> None`.
+   - Resolve `Action` from `app.ctx.actions`; log error and bail
+     on unknown id.
+   - Switch on `action.kind`:
+     - `builtin`: call `app._on_pick_actions(action_id)`.
+     - `shell`: build context (per_row vs list-form per
+       `action.scope`/`action.multi`), render template, launch via
+       the existing `_start_managed_shell_command`. For `per_row`,
+       loop in selection order.
+     - `filepicker`: existing list-action flow (Phase 3 builders).
+     - `note`: existing note flow with `op` enum.
+     - `tab`: split `action_id` on `.` after the `tab.` prefix,
+       call `app._jump_to_side_tab(top, child)`.
+2. Replace `_dispatch_hotkey_target` body with a wrapper:
+   - Accept `value` (legacy prefix-string OR plain action id).
+   - Strip a leading `action:` or `action:custom:` prefix; strip
+     `tab:<top>/<child>` → `tab.<top>.<child>`.
+   - Call `dispatch_action(app, normalized_id)`.
+3. Replace `run_custom_action` with `dispatch_action` at every
+   call site.
+
+**Tests** (`tests/test_dispatch.py`):
+- Each kind dispatches correctly with a fake app providing the
+  needed hooks.
+- Legacy prefix strings (`action:archive`,
+  `action:custom:open_item_in_codium`, `tab:side_main/selected`)
+  normalize and dispatch the same as the new ids.
+
+**Done when.**
+- pytest green, ruff clean.
+- TUI smoke: every existing binding (hotbar, custom_hotkeys keys)
+  still triggers the correct effect.
+
+**Update TODO.** Phase 4 = `done`; log; active phase → 5.
+
+---
+
+### Phase 5 — New schema: `actions:` / `hotbar:` / `keys:`
+
+**Goal.** Replace the YAML shape. `custom_actions:` and
+`custom_hotkeys:` are removed. Migrate the user's
+`<base>/.homebase/config.yaml` in the same commit. Drop the
+template bridge (`full_path` alias) from Phase 3.
+
+**Files.**
+- `src/homebase/config/workspace.py`
+- `src/homebase/config/prefs.py`
+- `src/homebase/cli/entry.py`
+- `<base>/.homebase/config.yaml` (the user's actual config)
+- `src/homebase/ui/actions/template.py` (remove the legacy bridge)
+
+**Tasks.**
+
+1. Implement `load_actions(data) -> dict[str, ActionDef]` per the
+   *Field reference* tables in this file. Validation
+   (load-time errors, exact-message guidance):
+   - Built-in id entries may carry only `label` and `confirm`. Any
+     other field → error
+     (*"`<id>` is built-in; only `label` and `confirm` are
+     overridable"*).
+   - Built-in `confirm` must be a string (not bool).
+   - Custom action entries require `kind`. kind-specific required
+     fields present (`shell`→`command`, `filepicker`→`list`+
+     `command`, `note`→`op`).
+   - `note` `op` must be `add_log`. Each `op` value at most once.
+   - `kind: filepicker` and `kind: note` require `scope: target`.
+   - Template var availability: bare-form var in a command emits
+     warning; unavailable var (per scope/multi) is an error.
+2. Implement `load_hotbar(data) -> list[HotbarEntry]`. Each entry:
+   `action: <id>`, optional `label:`. No `key:` field allowed.
+   Validation: action exists; resolved `Action.scope == "target"`
+   (else *"`<id>` cannot be on the hotbar — only target-scope
+   actions are eligible. Bind it via `keys:` instead."*).
+3. Implement `load_keys(data) -> dict[str, KeyEntry]`. Validation:
+   no duplicate keys; action exists.
+4. Delete `load_custom_actions` / `load_custom_hotkeys` and
+   `validate_custom_hotkeys` once all callers are migrated.
+5. Update `cli/entry.py` to load + validate the new shape.
+6. `config/prefs.py`: add `save_hotbar(base_dir, list)` and
+   `save_keys(base_dir, dict)`. Remove `save_custom_hotkeys`.
+   `_toggle_hotbar_target_from_palette` now writes to the new
+   ordered `hotbar:` list.
+7. Migrate the user's config.yaml: rewrite `custom_actions:` /
+   `custom_hotkeys:` into `actions:` / `hotbar:` / `keys:` per the
+   *The current config rewritten* section above.
+8. Remove the `full_path` bridge from `ui/actions/template.py`
+   (the `# REMOVE IN PHASE 5` comments).
+
+**Tests.**
+- `tests/test_load_actions.py` — every validation error path,
+  using `tmp_path` workspaces with synthetic config.yaml.
+- `tests/test_load_hotbar.py` / `test_load_keys.py` — same.
+- Update `tests/test_workspace_settings.py` (today's old
+  `custom_actions` tests) — replace with new schema tests.
+
+**Done when.**
+- pytest green, ruff clean.
+- TUI smoke against the migrated config: action menu, hotbar,
+  keys all work as before.
+
+**Update TODO.** Phase 5 = `done`; log; active phase → 6.
+
+---
+
+### Phase 6 — Side-tab auto-registration + binding eligibility
+
+**Goal.** `tab.<top>` and `tab.<top>.<child>` ids are auto-
+registered as built-in actions; built-in label/confirm overrides
+applied at merge time; hotbar enforces scope=target eligibility at
+runtime as well as load time.
+
+**Files.**
+- `src/homebase/core/constants.py`
+- `src/homebase/ui/context.py`
+- `src/homebase/config/workspace.py`
+- `src/homebase/ui/app.py`
+
+**Tasks.**
+
+1. In `core/constants.py` (or a new `core/tab_actions.py` since
+   tabs depend on UI structure), expose
+   `discover_tab_actions(app_or_ctx) -> dict[str, BuiltinActionMeta]`.
+   Walks the side-tab tree (the source of truth lives in
+   `ui/side/`); produces an entry for each top-level tab and each
+   child tab, with id `tab.<top>` or `tab.<top>.<child>` and
+   `default_label` from the tab's existing label. `scope` is
+   neither target nor workspace — add a third value
+   `scope: "tab"` and document it in the *Field reference* (small
+   schema patch — update *Field reference* in this file as part of
+   this phase's commit).
+2. Merge tab actions into `BUILTIN_ACTIONS` at runtime startup
+   (not at module import — UI must exist).
+3. Apply built-in label and confirm overrides during
+   `merge_actions` (Phase 2's merge stub — flesh it out fully now).
+4. Hotbar runtime safety net: if `_toggle_hotbar_target_from_palette`
+   is asked to add an ineligible action (`scope != "target"`), log
+   a runtime warning and refuse.
+5. Update *Field reference* in this file: `scope` enum gains
+   `"tab"`. Hotbar eligibility says only `scope: "target"` is
+   allowed (already does).
+
+**Tests.**
+- `tests/test_tab_actions.py` — every visible tab produces an
+  entry; ids match the documented `tab.<top>.<child>` format;
+  dispatch routes to `_jump_to_side_tab` with the right args.
+- `tests/test_action_map.py` (extend) — confirm override merges;
+  ineligible hotbar candidates rejected.
+
+**Done when.**
+- pytest green, ruff clean.
+- TUI smoke: pressing the key bound to `tab.info.events` jumps to
+  the right place; hotbar palette refuses to add a tab.
+
+**Update TODO.** Phase 6 = `done`; log; active phase → 7.
+
+---
+
+### Phase 7 — Discoverability surfaces
+
+**Goal.** Two user-facing surfaces for "what actions exist and
+where do they go":
+- `b help actions` CLI command.
+- Side-panel context view (live template-variable inspector).
+
+**Files.**
+- `src/homebase/commands/actions.py` (new) and CLI parser update
+  in `cli/`.
+- `src/homebase/ui/side/` — new sub-tab content module.
+
+**Tasks.**
+
+1. CLI: implement `b help actions` per the *`b help actions` —
+   discoverability* section above. Filters: `--source`, `--bound`,
+   `--unbound`, `--view`, `--show-defaults`.
+   - Prints `SOURCE`, `ID`, `LABEL`, `KIND`, `SCOPE`, `MULTI`,
+     `BOUND` columns.
+   - `BOUND` reports `hotbar:N` (1-indexed) and any `keys:` entries
+     bound to this id; hardcoded UI keys are excluded.
+2. Side-panel context view: pick the placement (recommended:
+   rename `info` → `stats`, add `tab.stats.context`). Reuse the
+   Phase 3 context builders against the current selection. Two
+   columns: variable name, current value. Group by per-row /
+   list-form / filepicker / always.
+3. Live update: rebind on selection change and filter change.
+
+**Tests.**
+- `tests/test_help_actions_cli.py` — snapshot the table for a
+  representative config.
+- `tests/test_side_context.py` — rendering against a mocked
+  selection.
+
+**Done when.**
+- pytest green, ruff clean.
+- `b help actions` runs and matches expectation; context tab
+  shows live values that update with selection.
+
+**Update TODO.** Phase 7 = `done`; log; active phase → 8.
+
+---
+
+### Phase 8 — README rewrite + final cleanup
+
+**Goal.** User-facing documentation matches the implementation;
+no vestigial code remains.
+
+**Files.**
+- `README.md`
+- any code identified as dead during the previous phases.
+
+**Tasks.**
+
+1. Rewrite the `Custom Action Hotkeys` section of `README.md`:
+   - Drop `loop_on_multi`, `scope: global`, `{{ full_path }}`.
+   - Document `kind`, `scope` (`target` / `workspace` / `tab`),
+     `multi`, the per-row vs list-form variable families, the
+     `_q` rule, `per_row` selection ordering, filepicker dispatch
+     semantics, hotbar's role as Enter-dispatch chooser.
+   - Update top-level config sections list (replace
+     `custom_actions` / `custom_hotkeys` with `actions` / `hotbar`
+     / `keys`).
+2. Refresh the *Full Config Example* in README to use the new
+   shape end-to-end.
+3. Search for and remove any code noted as dead in earlier
+   phases (`run_custom_action` if all callers migrated; the
+   `_HOTBAR_PALETTE_TAG` palette code if its semantics changed;
+   etc.).
+4. Final manual smoke against every example in the new README.
+
+**Tests.**
+- `tests/test_layering.py` still green.
+- Any doctest-style example exercises (optional).
+
+**Done when.**
+- pytest green, ruff clean.
+- README examples match the implementation; no broken references.
+- No dead code remaining from the redesign.
+
+**Update TODO.** Phase 8 = `done`; final phase log entry; mark
+the redesign complete in the *Currently active phase* line
+(*"Currently active phase: complete (date)"*).
+
+---
+
+## After Phase 8 — followups
+
+These are explicitly out of scope for the redesign but worth
+filing so they don't get lost:
+
+- Implement the `when:` predicate (sketched in *Future
+  extensions*).
+- Implement `kind: chain` for action macros.
+- Extend `confirm:` to the structured form (prompt + default +
+  inputs).
+- `label_by_view` / `icon` / `group` if/when needed.
