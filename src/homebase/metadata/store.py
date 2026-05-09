@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import copy
 import shutil
 import subprocess
 from pathlib import Path
 from typing import Callable
 
 import yaml
+
+_BASE_DATA_CACHE: dict[Path, tuple[int, dict[str, object]]] = {}
+_BASE_DATA_CACHE_MAX = 8192
 
 
 def load_base_data(
@@ -18,13 +22,28 @@ def load_base_data(
     if is_packed_archive_path(path):
         return packed_read_base_data(path)
     meta_file = path / base_marker_file
-    if not meta_file.is_file():
+    try:
+        st_mtime_ns = meta_file.stat().st_mtime_ns
+    except OSError:
+        _BASE_DATA_CACHE.pop(meta_file, None)
         return {}
+    cached = _BASE_DATA_CACHE.get(meta_file)
+    if cached is not None and cached[0] == st_mtime_ns:
+        return copy.deepcopy(cached[1])
     try:
         raw = yaml.safe_load(meta_file.read_text())
     except (OSError, yaml.YAMLError):
+        _BASE_DATA_CACHE.pop(meta_file, None)
         return {}
-    return raw if isinstance(raw, dict) else {}
+    data: dict[str, object] = raw if isinstance(raw, dict) else {}
+    if len(_BASE_DATA_CACHE) >= _BASE_DATA_CACHE_MAX:
+        _BASE_DATA_CACHE.clear()
+    _BASE_DATA_CACHE[meta_file] = (st_mtime_ns, data)
+    return copy.deepcopy(data)
+
+
+def _clear_base_data_cache() -> None:
+    _BASE_DATA_CACHE.clear()
 
 
 def save_base_data(

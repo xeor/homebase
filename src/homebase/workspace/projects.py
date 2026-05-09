@@ -328,70 +328,111 @@ def cmd_create_quick(
     return 0
 
 
+_GIT_INFO_CACHE: dict[Path, tuple[int, str, str, int, str]] = {}
+_GIT_INFO_CACHE_MAX = 8192
+
+
+def _git_state_signature(git_dir: Path) -> tuple[int, str] | None:
+    head_file = git_dir / "HEAD"
+    index_file = git_dir / "index"
+    try:
+        head_text = head_file.read_text(encoding="utf-8", errors="replace").strip()
+    except OSError:
+        return None
+    try:
+        index_mtime_ns = int(index_file.stat().st_mtime_ns)
+    except OSError:
+        index_mtime_ns = 0
+    return index_mtime_ns, head_text
+
+
+def _git_dirty_check(path: Path, *, skip_cached_check: bool) -> str:
+    try:
+        p1 = subprocess.run(
+            ["git", "-C", str(path), "diff", "--quiet", "--ignore-submodules", "--"],
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            capture_output=True,
+            check=False,
+        )
+        if skip_cached_check:
+            if p1.returncode == 0:
+                return ""
+            if p1.returncode == 1:
+                return "*"
+            return (
+                "*"
+                if core_utils.run_out("git", "-C", str(path), "status", "--porcelain")
+                else ""
+            )
+        p2 = subprocess.run(
+            ["git", "-C", str(path), "diff", "--cached", "--quiet", "--ignore-submodules", "--"],
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            capture_output=True,
+            check=False,
+        )
+        if p1.returncode == 0 and p2.returncode == 0:
+            return ""
+        if p1.returncode == 1 or p2.returncode == 1:
+            return "*"
+        return (
+            "*"
+            if core_utils.run_out("git", "-C", str(path), "status", "--porcelain")
+            else ""
+        )
+    except (subprocess.SubprocessError, OSError, ValueError):
+        return "?"
+
+
+def _git_clear_cache() -> None:
+    _GIT_INFO_CACHE.clear()
+
+
 def git_info(path: Path, include_dirty: bool = True) -> tuple[str, str, int]:
-    if not (path / ".git").is_dir():
+    git_dir = path / ".git"
+    if not git_dir.is_dir():
         return "-", "-", 0
+
+    sig = _git_state_signature(git_dir)
+    cached = _GIT_INFO_CACHE.get(path) if sig is not None else None
+    if (
+        cached is not None
+        and sig is not None
+        and cached[0] == sig[0]
+        and cached[1] == sig[1]
+    ):
+        cached_branch = cached[2]
+        cached_git_ts = cached[3]
+        if not include_dirty:
+            return cached_branch, "~", cached_git_ts
+        dirty = _git_dirty_check(path, skip_cached_check=True)
+        return cached_branch, dirty, cached_git_ts
+
     try:
         branch = (
             core_utils.run_out("git", "-C", str(path), "branch", "--show-current") or "(detached)"
         )
     except (subprocess.SubprocessError, OSError, ValueError):
         branch = "?"
+
     if include_dirty:
-        try:
-            p1 = subprocess.run(
-                [
-                    "git",
-                    "-C",
-                    str(path),
-                    "diff",
-                    "--quiet",
-                    "--ignore-submodules",
-                    "--",
-                ],
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                capture_output=True,
-                check=False,
-            )
-            p2 = subprocess.run(
-                [
-                    "git",
-                    "-C",
-                    str(path),
-                    "diff",
-                    "--cached",
-                    "--quiet",
-                    "--ignore-submodules",
-                    "--",
-                ],
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                capture_output=True,
-                check=False,
-            )
-            if p1.returncode == 0 and p2.returncode == 0:
-                dirty = ""
-            elif p1.returncode in {1} or p2.returncode in {1}:
-                dirty = "*"
-            else:
-                # Fallback correctness path.
-                dirty = (
-                    "*"
-                    if core_utils.run_out("git", "-C", str(path), "status", "--porcelain")
-                    else ""
-                )
-        except (subprocess.SubprocessError, OSError, ValueError):
-            dirty = "?"
+        dirty = _git_dirty_check(path, skip_cached_check=False)
     else:
         dirty = "~"
+
     try:
         git_ts_s = core_utils.run_out("git", "-C", str(path), "log", "-1", "--format=%ct")
         git_ts = int(git_ts_s) if git_ts_s else 0
     except (subprocess.SubprocessError, OSError, ValueError):
         git_ts = 0
+
+    if sig is not None and branch != "?":
+        if len(_GIT_INFO_CACHE) >= _GIT_INFO_CACHE_MAX:
+            _GIT_INFO_CACHE.clear()
+        _GIT_INFO_CACHE[path] = (sig[0], sig[1], branch, git_ts, dirty)
     return branch, dirty, git_ts
 
 

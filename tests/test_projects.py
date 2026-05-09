@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 
 from homebase.workspace import projects
@@ -82,6 +83,54 @@ def test_project_row_populates_haystack_lower(tmp_path: Path) -> None:
     assert "demo-project" in row.haystack_lower
     for tag in ("cli", "web"):
         assert tag in row.haystack_lower
+
+
+def _init_git_repo(repo: Path) -> None:
+    repo.mkdir(parents=True, exist_ok=True)
+    subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+    subprocess.run(["git", "config", "user.email", "t@example.com"], cwd=repo, check=True)
+    subprocess.run(["git", "config", "user.name", "test"], cwd=repo, check=True)
+    subprocess.run(["git", "config", "commit.gpgsign", "false"], cwd=repo, check=True)
+    (repo / "f.txt").write_text("a\n", encoding="utf-8")
+    subprocess.run(["git", "add", "f.txt"], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "init"], cwd=repo, check=True)
+
+
+def test_git_info_caches_branch_and_ts_until_index_changes(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    _init_git_repo(repo)
+    projects._git_clear_cache()
+
+    branch1, dirty1, ts1 = projects.git_info(repo)
+    assert dirty1 == ""
+    assert repo in projects._GIT_INFO_CACHE
+
+    branch2, dirty2, ts2 = projects.git_info(repo)
+    assert (branch1, ts1) == (branch2, ts2)
+    assert dirty2 == ""
+
+    (repo / "f.txt").write_text("b\n", encoding="utf-8")
+    _, dirty3, _ = projects.git_info(repo)
+    assert dirty3 == "*"
+    assert repo in projects._GIT_INFO_CACHE
+
+    subprocess.run(["git", "add", "f.txt"], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "second"], cwd=repo, check=True)
+    branch4, dirty4, ts4 = projects.git_info(repo)
+    assert dirty4 == ""
+    assert ts4 >= ts1
+
+
+def test_git_info_returns_unverified_when_dirty_skipped(tmp_path: Path) -> None:
+    repo = tmp_path / "repo2"
+    _init_git_repo(repo)
+    projects._git_clear_cache()
+
+    _, dirty_warm, _ = projects.git_info(repo, include_dirty=True)
+    assert dirty_warm == ""
+
+    _, dirty_skip, _ = projects.git_info(repo, include_dirty=False)
+    assert dirty_skip == "~"
 
 
 def test_cmd_create_quick_debug_dry_run(tmp_path: Path) -> None:

@@ -72,6 +72,7 @@ KNOWN_LAYERING_EXCEPTIONS = {
     "src/homebase/metadata/api.py:28 imports homebase.filter",
     "src/homebase/metadata/api.py:29 imports homebase.workspace",
     "src/homebase/metadata/api.py:10 imports homebase.archive",
+    "src/homebase/metadata/app_workspace.py:5 imports homebase.workspace.rows",
     "src/homebase/tmux/flow.py:8 imports homebase.commands",
     "src/homebase/ui/__init__.py:3 imports homebase.app",
     "src/homebase/ui/__init__.py:4 imports homebase.context",

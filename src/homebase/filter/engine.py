@@ -225,40 +225,52 @@ def compile_filter_expr(
             return lambda row: (getattr(row, "suffix", "") or "") == suffix
         if token.startswith("#") and len(token) > 1:
             needle = token[1:].lower()
-            return lambda row: any(str(tag).lower() == needle for tag in getattr(row, "tags", []))
+
+            def _tag_match(row: Any) -> bool:
+                cached = getattr(row, "tags_lower", None)
+                if cached is not None:
+                    return needle in cached
+                for tag in getattr(row, "tags", []):
+                    if str(tag).lower() == needle:
+                        return True
+                return False
+
+            return _tag_match
         if token.startswith("!") and len(token) > 1:
             needle = token[1:].lower()
             return lambda row: any(needle in property_alias_set_fn(str(prop)) for prop in getattr(row, "properties", []))
         return lambda row: match_query_fn(row, low)
 
-    compiled: list[tuple[str, Callable[[Any], bool] | None]] = []
+    def _and_pred(a: Callable[[Any], bool], b: Callable[[Any], bool]) -> Callable[[Any], bool]:
+        return lambda row: a(row) and b(row)
+
+    def _or_pred(a: Callable[[Any], bool], b: Callable[[Any], bool]) -> Callable[[Any], bool]:
+        return lambda row: a(row) or b(row)
+
+    pred_stack: list[Callable[[Any], bool]] = []
+    malformed = False
     for token in out:
-        if token in {"AND", "OR"}:
-            compiled.append((token, None))
+        if token == "AND":
+            if len(pred_stack) < 2:
+                malformed = True
+                break
+            b = pred_stack.pop()
+            a = pred_stack.pop()
+            pred_stack.append(_and_pred(a, b))
+        elif token == "OR":
+            if len(pred_stack) < 2:
+                malformed = True
+                break
+            b = pred_stack.pop()
+            a = pred_stack.pop()
+            pred_stack.append(_or_pred(a, b))
         else:
-            compiled.append(("TERM", term_pred(token)))
+            pred_stack.append(term_pred(token))
 
-    def predicate(row: Any) -> bool:
-        stack: list[bool] = []
-        for kind, pred in compiled:
-            if kind == "AND":
-                if len(stack) < 2:
-                    return False
-                b = stack.pop()
-                a = stack.pop()
-                stack.append(a and b)
-            elif kind == "OR":
-                if len(stack) < 2:
-                    return False
-                b = stack.pop()
-                a = stack.pop()
-                stack.append(a or b)
-            else:
-                if pred is None:
-                    return False
-                stack.append(pred(row))
-        return stack[0] if len(stack) == 1 else False
+    if malformed or len(pred_stack) != 1:
+        return (lambda _row: False), None
 
+    predicate = pred_stack[0]
     return predicate, None
 
 

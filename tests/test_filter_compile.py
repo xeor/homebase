@@ -71,3 +71,18 @@ def test_match_query_falls_back_when_haystack_missing() -> None:
     assert row.haystack_lower == ""
     assert filter_compile.match_query(row, "demo")
     assert filter_compile.match_query(row, "main")
+
+
+def test_project_row_post_init_derives_tags_lower() -> None:
+    row = _row()
+    assert row.tags_lower == frozenset({"cli"})
+
+
+def test_compile_filter_expr_tag_match_uses_cached_set() -> None:
+    row = _row()
+    row.tags = ["original-only-in-tags"]
+    row.tags_lower = frozenset({"only-in-cache"})
+    pred_cached, _ = filter_compile.compile_filter_expr("#only-in-cache")
+    pred_tags, _ = filter_compile.compile_filter_expr("#original-only-in-tags")
+    assert pred_cached(row) is True
+    assert pred_tags(row) is False

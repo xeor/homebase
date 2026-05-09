@@ -49,6 +49,66 @@ def test_compile_filter_expr_supports_named_filter() -> None:
     assert pred(Row(name="x", tags=["web"])) is True
 
 
+def test_compile_filter_expr_short_circuits_and() -> None:
+    calls: list[str] = []
+
+    def left(_row: Row) -> bool:
+        calls.append("left")
+        return False
+
+    def right(_row: Row) -> bool:
+        calls.append("right")
+        return True
+
+    def match_query(row: Row, q: str) -> bool:
+        if q == "left":
+            return left(row)
+        if q == "right":
+            return right(row)
+        return False
+
+    pred, err = filter_engine.compile_filter_expr(
+        "left right",
+        token_re=TOKEN_RE,
+        match_query_fn=match_query,
+        property_alias_set_fn=lambda key: {key.lower()},
+        get_named_filter=lambda _name: "",
+    )
+    assert err is None
+    assert pred(Row()) is False
+    assert calls == ["left"]
+
+
+def test_compile_filter_expr_short_circuits_or() -> None:
+    calls: list[str] = []
+
+    def left(_row: Row) -> bool:
+        calls.append("left")
+        return True
+
+    def right(_row: Row) -> bool:
+        calls.append("right")
+        return True
+
+    def match_query(row: Row, q: str) -> bool:
+        if q == "left":
+            return left(row)
+        if q == "right":
+            return right(row)
+        return False
+
+    pred, err = filter_engine.compile_filter_expr(
+        "left OR right",
+        token_re=TOKEN_RE,
+        match_query_fn=match_query,
+        property_alias_set_fn=lambda key: {key.lower()},
+        get_named_filter=lambda _name: "",
+    )
+    assert err is None
+    assert pred(Row()) is True
+    assert calls == ["left"]
+
+
 def test_normalize_and_pretty_filter_expression() -> None:
     normalized = filter_engine.normalize_filter_expression("( OR #a | | #b )", token_re=TOKEN_RE)
     assert normalized == "( #a OR #b )"

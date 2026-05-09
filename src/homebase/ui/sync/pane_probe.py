@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import functools
 import os
 import subprocess
 import threading
@@ -8,6 +9,19 @@ from pathlib import Path
 from typing import Any
 
 from ...core.models import PaneRef
+
+
+@functools.lru_cache(maxsize=8192)
+def _resolved_path_str(path_str: str) -> str | None:
+    try:
+        return str(Path(path_str).resolve())
+    except (OSError, RuntimeError, ValueError):
+        return None
+
+
+def _resolve_cached(path: Path) -> Path | None:
+    resolved = _resolved_path_str(str(path))
+    return Path(resolved) if resolved is not None else None
 
 
 def project_for_path(cwd: Path, project_roots: set[Path]) -> Path | None:
@@ -41,7 +55,11 @@ def start_probe_open_panes(app: Any) -> None:
             rows_all = app._current_rows()[:scan_limit]
             if not rows_all:
                 rows_all = (app.active_rows + app.archived_rows)[:scan_limit]
-            project_roots = {row.path.resolve() for row in rows_all}
+            project_roots: set[Path] = set()
+            for row in rows_all:
+                resolved = _resolve_cached(row.path)
+                if resolved is not None:
+                    project_roots.add(resolved)
             if not project_roots:
                 app.call_from_thread(app._on_probe_open_panes_done, mapping)
                 return
@@ -72,9 +90,8 @@ def start_probe_open_panes(app: Any) -> None:
                 cwd_raw = cwd_raw.strip()
                 if not cwd_raw:
                     continue
-                try:
-                    cwd = Path(cwd_raw).resolve()
-                except (OSError, ValueError):
+                cwd = _resolve_cached(Path(cwd_raw))
+                if cwd is None:
                     continue
                 project = project_for_path(cwd, project_roots)
                 if project is None:

@@ -96,6 +96,11 @@ class ProjectRow:
     size_bytes: int = 0
     size_refresh_count: int = 0
     haystack_lower: str = ""
+    tags_lower: frozenset[str] = frozenset()
+
+    def __post_init__(self) -> None:
+        if not self.tags_lower and self.tags:
+            self.tags_lower = frozenset(str(tag).lower() for tag in self.tags)
 
 
 @dataclass

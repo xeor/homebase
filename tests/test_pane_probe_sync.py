@@ -78,6 +78,25 @@ class _App:
         )
 
 
+def test_resolve_cached_returns_same_path_and_caches(tmp_path: Path) -> None:
+    pane_probe._resolved_path_str.cache_clear()
+    target = tmp_path / "real"
+    target.mkdir()
+    link = tmp_path / "link"
+    link.symlink_to(target)
+
+    a = pane_probe._resolve_cached(link)
+    b = pane_probe._resolve_cached(link)
+    assert a == b == target.resolve()
+    info = pane_probe._resolved_path_str.cache_info()
+    assert info.hits >= 1
+
+
+def test_resolve_cached_returns_none_for_invalid_path() -> None:
+    pane_probe._resolved_path_str.cache_clear()
+    assert pane_probe._resolve_cached(Path("\x00invalid\x00")) is None
+
+
 def test_pane_probe_desired_interval_uses_profile_policy(monkeypatch) -> None:
     monkeypatch.setenv("TMUX", "1")
     pdef = PropertyDef(
