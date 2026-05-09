@@ -7,6 +7,7 @@ from typing import Any, Callable
 import yaml
 
 from ...core.models import ProjectRow
+from ...workspace.projects import refresh_row_caches
 
 
 def tag_plan_model_for_paths(
@@ -75,6 +76,7 @@ def rename_tag_globally(
             except (OSError, yaml.YAMLError, json.JSONDecodeError, TypeError, ValueError) as exc:
                 return False, f"rename failed for {row.name}: {exc}", existed
             row.tags = merged
+            refresh_row_caches(row)
             row.stale = False
             row.cache_age_s = 0
             changed_rows.append(row)
@@ -116,6 +118,7 @@ def delete_tag_globally(
             except (OSError, yaml.YAMLError, json.JSONDecodeError, TypeError, ValueError) as exc:
                 return False, f"delete failed for {row.name}: {exc}"
             row.tags = remaining
+            refresh_row_caches(row)
             row.stale = False
             row.cache_age_s = 0
             changed_rows.append(row)
@@ -218,6 +221,7 @@ def on_pick_tags(
             elif op == "remove":
                 tags.discard(tag)
         row.tags = sorted(tags)
+        refresh_row_caches(row)
         row.stale = False
         row.cache_age_s = 0
         changed_rows.append(row)

@@ -136,6 +136,7 @@ from ..tmux.flow import (
 from ..workspace.projects import (
     classify_name,
     project_row,
+    refresh_row_caches,
 )
 from ..workspace.rows import (
     _normalize_sort_mode_for_view,
@@ -1357,6 +1358,7 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
             if self._dynamic_indicator_matches(key, row):
                 props.append(key)
         row.properties = normalize_property_keys(props)
+        refresh_row_caches(row)
 
     def _apply_dynamic_properties_all_rows(self) -> None:
         self.dynamic_indicator_cache = {}
@@ -2629,6 +2631,7 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
         )
         row.name = stem
         row.is_fork, row.is_tmp, row.suffix = classify_name(row.name)
+        refresh_row_caches(row)
         return row
 
     def _start_archive_action_worker(self, action: str, paths: list[Path]) -> None:

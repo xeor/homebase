@@ -11,7 +11,7 @@ from textual.css.query import NoMatches
 from ...core import utils as core_utils
 from ...core.models import ProjectRow
 from ...core.utils import WIDGET_API_ERRORS
-from ...workspace.projects import git_info
+from ...workspace.projects import git_info, refresh_row_caches
 
 
 def maybe_refresh_visible_git(app: Any) -> None:
@@ -131,6 +131,7 @@ def on_git_refresh_done(app: Any, updated: list[tuple[Path, str, str, int]]) -> 
         else:
             row.src = "fs"
         row.last_cached_ts = now_ts
+        refresh_row_caches(row)
         touched.append(row)
     if touched:
         app._touch_rows_cache(touched)

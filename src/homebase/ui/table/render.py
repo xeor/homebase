@@ -84,6 +84,7 @@ def refresh_table(
         )
     col_sig = tuple(col_sig_parts)
     row_sig = tuple(_row_sig(row) for row in rows)
+    busy_frame_sig = app._busy_frame_index if app.git_refresh_paths else 0
     render_sig = (
         app.view_mode,
         col_sig,
@@ -99,7 +100,7 @@ def refresh_table(
             )
         ),
         tuple(sorted(str(path) for path in app.open_pane_overflow_projects)),
-        app._busy_frame_index,
+        busy_frame_sig,
     )
     prev_sig = app._table_render_signature_by_view.get(app.view_mode)
     if (

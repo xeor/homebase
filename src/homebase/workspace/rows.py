@@ -16,7 +16,7 @@ from ..core.constants import (
 from ..core.models import ProjectRow
 from . import discovery as discovery_utils
 from . import discovery_helpers, filter_compile
-from .projects import classify_name, project_row
+from .projects import classify_name, project_row, refresh_row_caches
 
 _FILTER_TOKEN_RE = filter_compile._FILTER_TOKEN_RE
 
@@ -201,6 +201,7 @@ def collect_archived(
         archived_restore_target=archived_restore_target,
         project_row=_project_row_with_opened,
         classify_name=classify_name,
+        refresh_row_caches=refresh_row_caches,
     )
     return [row for row in rows if isinstance(row, ProjectRow)]
 

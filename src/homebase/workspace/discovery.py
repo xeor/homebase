@@ -182,6 +182,7 @@ def collect_archived(
     archived_restore_target: Callable[[Path, Path], Path],
     project_row: Callable[..., object],
     classify_name: Callable[[str], tuple[bool, bool, str | None]],
+    refresh_row_caches: Callable[[object], None],
 ) -> list[object]:
     rows: list[object] = []
     root = base_dir / archive_dir_name
@@ -218,6 +219,7 @@ def collect_archived(
             )
             row.name = stem
             row.is_fork, row.is_tmp, row.suffix = classify_name(row.name)
+            refresh_row_caches(row)
             rows.append(row)
             dirnames[:] = []
             continue
@@ -247,5 +249,6 @@ def collect_archived(
             )
             row.name = stem
             row.is_fork, row.is_tmp, row.suffix = classify_name(row.name)
+            refresh_row_caches(row)
             rows.append(row)
     return rows

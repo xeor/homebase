@@ -47,6 +47,18 @@ def build_row_haystack_lower(
     ).lower()
 
 
+def refresh_row_caches(row: ProjectRow) -> None:
+    row.tags_lower = frozenset(str(tag).lower() for tag in row.tags)
+    row.haystack_lower = build_row_haystack_lower(
+        name=row.name,
+        description=row.description,
+        tags=row.tags,
+        properties=row.properties,
+        branch=row.branch,
+        path=row.path,
+    )
+
+
 def discover_copier_templates(base_dir: Path) -> list[str]:
     root = base_dir / ".copier"
     if not root.is_dir():
@@ -332,6 +344,32 @@ _GIT_INFO_CACHE: dict[Path, tuple[int, str, str, int, str]] = {}
 _GIT_INFO_CACHE_MAX = 8192
 
 
+def _resolve_head_ref_text(git_dir: Path, head_text: str) -> str:
+    if not head_text.startswith("ref: "):
+        return head_text
+    ref_rel = head_text[5:].strip()
+    if not ref_rel:
+        return head_text
+    ref_file = git_dir / ref_rel
+    try:
+        ref_sha = ref_file.read_text(encoding="utf-8", errors="replace").strip()
+        if ref_sha:
+            return f"{head_text}@{ref_sha}"
+    except OSError:
+        pass
+    packed_refs = git_dir / "packed-refs"
+    try:
+        for line in packed_refs.read_text(encoding="utf-8", errors="replace").splitlines():
+            if not line or line[0] in {"#", "^"}:
+                continue
+            parts = line.strip().split(maxsplit=1)
+            if len(parts) == 2 and parts[1] == ref_rel:
+                return f"{head_text}@{parts[0]}"
+    except OSError:
+        pass
+    return head_text
+
+
 def _git_state_signature(git_dir: Path) -> tuple[int, str] | None:
     head_file = git_dir / "HEAD"
     index_file = git_dir / "index"
@@ -343,41 +381,39 @@ def _git_state_signature(git_dir: Path) -> tuple[int, str] | None:
         index_mtime_ns = int(index_file.stat().st_mtime_ns)
     except OSError:
         index_mtime_ns = 0
-    return index_mtime_ns, head_text
+    return index_mtime_ns, _resolve_head_ref_text(git_dir, head_text)
 
 
-def _git_dirty_check(path: Path, *, skip_cached_check: bool) -> str:
+def _git_diff_quiet(path: Path, cached: bool) -> str:
+    args = ["git", "-C", str(path), "diff"]
+    if cached:
+        args.append("--cached")
+    args += ["--quiet", "--ignore-submodules", "--"]
+    p = subprocess.run(
+        args,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        capture_output=True,
+        check=False,
+    )
+    if p.returncode == 0:
+        return ""
+    if p.returncode == 1:
+        return "*"
+    return "?"
+
+
+def _combine_dirty(working: str, cached_side: str) -> str:
+    if working == "?" or cached_side == "?":
+        return "?"
+    if working == "*" or cached_side == "*":
+        return "*"
+    return ""
+
+
+def _porcelain_dirty(path: Path) -> str:
     try:
-        p1 = subprocess.run(
-            ["git", "-C", str(path), "diff", "--quiet", "--ignore-submodules", "--"],
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            capture_output=True,
-            check=False,
-        )
-        if skip_cached_check:
-            if p1.returncode == 0:
-                return ""
-            if p1.returncode == 1:
-                return "*"
-            return (
-                "*"
-                if core_utils.run_out("git", "-C", str(path), "status", "--porcelain")
-                else ""
-            )
-        p2 = subprocess.run(
-            ["git", "-C", str(path), "diff", "--cached", "--quiet", "--ignore-submodules", "--"],
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            capture_output=True,
-            check=False,
-        )
-        if p1.returncode == 0 and p2.returncode == 0:
-            return ""
-        if p1.returncode == 1 or p2.returncode == 1:
-            return "*"
         return (
             "*"
             if core_utils.run_out("git", "-C", str(path), "status", "--porcelain")
@@ -406,10 +442,16 @@ def git_info(path: Path, include_dirty: bool = True) -> tuple[str, str, int]:
     ):
         cached_branch = cached[2]
         cached_git_ts = cached[3]
+        cached_side_dirty = cached[4]
         if not include_dirty:
             return cached_branch, "~", cached_git_ts
-        dirty = _git_dirty_check(path, skip_cached_check=True)
-        return cached_branch, dirty, cached_git_ts
+        try:
+            working_dirty = _git_diff_quiet(path, cached=False)
+        except (subprocess.SubprocessError, OSError, ValueError):
+            return cached_branch, "?", cached_git_ts
+        if working_dirty == "?":
+            return cached_branch, _porcelain_dirty(path), cached_git_ts
+        return cached_branch, _combine_dirty(working_dirty, cached_side_dirty), cached_git_ts
 
     try:
         branch = (
@@ -418,8 +460,17 @@ def git_info(path: Path, include_dirty: bool = True) -> tuple[str, str, int]:
     except (subprocess.SubprocessError, OSError, ValueError):
         branch = "?"
 
+    cached_side_dirty = ""
     if include_dirty:
-        dirty = _git_dirty_check(path, skip_cached_check=False)
+        try:
+            working_dirty = _git_diff_quiet(path, cached=False)
+            cached_side_dirty = _git_diff_quiet(path, cached=True)
+            if working_dirty == "?" or cached_side_dirty == "?":
+                dirty = _porcelain_dirty(path)
+            else:
+                dirty = _combine_dirty(working_dirty, cached_side_dirty)
+        except (subprocess.SubprocessError, OSError, ValueError):
+            dirty = "?"
     else:
         dirty = "~"
 
@@ -429,10 +480,14 @@ def git_info(path: Path, include_dirty: bool = True) -> tuple[str, str, int]:
     except (subprocess.SubprocessError, OSError, ValueError):
         git_ts = 0
 
-    if sig is not None and branch != "?":
+    if (
+        sig is not None
+        and branch != "?"
+        and (not include_dirty or cached_side_dirty in {"", "*"})
+    ):
         if len(_GIT_INFO_CACHE) >= _GIT_INFO_CACHE_MAX:
             _GIT_INFO_CACHE.clear()
-        _GIT_INFO_CACHE[path] = (sig[0], sig[1], branch, git_ts, dirty)
+        _GIT_INFO_CACHE[path] = (sig[0], sig[1], branch, git_ts, cached_side_dirty)
     return branch, dirty, git_ts
 
 

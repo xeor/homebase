@@ -92,7 +92,7 @@ class _FakeApp:
         self.open_pane_count_by_project: dict[Path, int] = {}
         self.open_pane_overflow_projects: set[Path] = set()
         self._busy_frame_index = 0
-        self._busy_frames = ["."]
+        self._busy_frames = [".", "o"]
         self._restore_pending = {"active": False, "archive": False}
         self._restore_apply_scroll = {"active": False, "archive": False}
         self._view_row_offset = {"active": 0, "archive": 0}
@@ -154,6 +154,25 @@ def test_refresh_table_skips_noop_rebuild() -> None:
 
     _run_refresh(app)
     assert app._table.clear_calls == 1
+
+
+def test_render_signature_ignores_busy_frame_when_no_rows_refreshing() -> None:
+    app = _FakeApp([_row(Path("/tmp/a"), "a")])
+    _run_refresh(app)
+    sig_quiet = app._table_render_signature_by_view["active"]
+
+    app._busy_frame_index = (app._busy_frame_index + 1) % len(app._busy_frames)
+    _run_refresh(app)
+    assert app._table_render_signature_by_view["active"] == sig_quiet
+
+    app.git_refresh_paths = {Path("/tmp/a")}
+    _run_refresh(app)
+    sig_refreshing = app._table_render_signature_by_view["active"]
+    assert sig_refreshing != sig_quiet
+
+    app._busy_frame_index = (app._busy_frame_index + 1) % len(app._busy_frames)
+    _run_refresh(app)
+    assert app._table_render_signature_by_view["active"] != sig_refreshing
 
 
 def test_property_cell_cache_persists_across_renders_and_clears_on_sig_change() -> None:

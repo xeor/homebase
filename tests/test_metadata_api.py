@@ -20,11 +20,12 @@ def test_property_tokens_memoizes_repeated_calls(monkeypatch) -> None:
 
     monkeypatch.setattr(metadata_api.property_utils, "property_tokens", counting_tokens)
 
-    a = property_tokens(["act"])
-    b = property_tokens(["act"])
-    assert a == b
+    property_tokens(["act"])
+    property_tokens(["act"])
     assert calls["count"] == 1
 
-    c = property_tokens(["doc"])
-    assert c != a or calls["count"] == 2  # different key forces recompute
+    property_tokens(["doc"])
+    assert calls["count"] == 2
+
+    property_tokens(["act"])
     assert calls["count"] == 2

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import os
 import subprocess
+from datetime import datetime
 from pathlib import Path
 
 from homebase.workspace import projects
@@ -73,6 +75,25 @@ def test_build_row_haystack_lower_lowercases_and_joins() -> None:
         assert needle in hay
 
 
+def test_refresh_row_caches_picks_up_field_mutations(tmp_path: Path) -> None:
+    target = tmp_path / "demo"
+    target.mkdir()
+    row = projects.project_row(target, include_git_dirty=False)
+    assert "demo" in row.haystack_lower
+    assert "feature-x" not in row.haystack_lower
+    assert row.tags_lower == frozenset()
+
+    row.tags = ["NewTag"]
+    row.branch = "feature-x"
+    row.name = "renamed"
+    projects.refresh_row_caches(row)
+
+    assert "newtag" in row.haystack_lower
+    assert "feature-x" in row.haystack_lower
+    assert "renamed" in row.haystack_lower
+    assert row.tags_lower == frozenset({"newtag"})
+
+
 def test_project_row_populates_haystack_lower(tmp_path: Path) -> None:
     target = tmp_path / "demo-project"
     target.mkdir()
@@ -119,6 +140,38 @@ def test_git_info_caches_branch_and_ts_until_index_changes(tmp_path: Path) -> No
     branch4, dirty4, ts4 = projects.git_info(repo)
     assert dirty4 == ""
     assert ts4 >= ts1
+
+
+def test_git_info_cache_keeps_staged_dirty_under_working_tree_check(tmp_path: Path) -> None:
+    repo = tmp_path / "repo_staged"
+    _init_git_repo(repo)
+    projects._git_clear_cache()
+
+    (repo / "f.txt").write_text("staged-change\n", encoding="utf-8")
+    subprocess.run(["git", "add", "f.txt"], cwd=repo, check=True)
+
+    _, dirty1, _ = projects.git_info(repo)
+    assert dirty1 == "*"
+
+    _, dirty2, _ = projects.git_info(repo)
+    assert dirty2 == "*"
+
+
+def test_git_info_cache_invalidates_on_soft_reset_head(tmp_path: Path) -> None:
+    repo = tmp_path / "repo_soft"
+    _init_git_repo(repo)
+    env = {**os.environ, "GIT_AUTHOR_DATE": "2024-06-15T12:00:00", "GIT_COMMITTER_DATE": "2024-06-15T12:00:00"}
+    (repo / "f.txt").write_text("v2\n", encoding="utf-8")
+    subprocess.run(["git", "add", "f.txt"], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "v2"], cwd=repo, check=True, env=env)
+    projects._git_clear_cache()
+
+    _, _, ts_v2 = projects.git_info(repo)
+    assert ts_v2 == int(datetime(2024, 6, 15, 12, 0, 0).timestamp())
+
+    subprocess.run(["git", "reset", "--soft", "HEAD^"], cwd=repo, check=True)
+    _, _, ts_after = projects.git_info(repo)
+    assert ts_after != ts_v2
 
 
 def test_git_info_returns_unverified_when_dirty_skipped(tmp_path: Path) -> None:
