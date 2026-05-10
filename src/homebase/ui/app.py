@@ -52,7 +52,7 @@ from ..config.prefs import (
     _merge_table_columns_for_view,
     load_table_behavior_config,
     load_table_columns_config,
-    load_table_date_color_ranges,
+    load_table_date_column_styles,
     load_ui_state,
     resolve_filter_expression,
     save_hotbar,
@@ -581,7 +581,7 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
         self.table_columns_by_view = load_table_columns_config(self.base_dir)
         self.table_settings_index = 0
         self.table_behavior = load_table_behavior_config(self.base_dir)
-        self.table_date_color_ranges = load_table_date_color_ranges(self.base_dir)
+        self.table_date_color_ranges = load_table_date_column_styles(self.base_dir)
         self.table_config_index = 0
         self.open_mode = dict(self.ctx.open_mode_config)
         self.notes_config = dict(self.ctx.notes_config)

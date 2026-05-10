@@ -68,11 +68,6 @@ def cheat_columns(
     *,
     all_property_defs: Callable[[], list[Any]],
 ) -> tuple[str, str]:
-    rows = app._current_rows()
-    active_total = len(app.active_rows)
-    archived_total = len(app.archived_rows)
-    untagged_total = sum(1 for r in app.active_rows if not r.tags)
-
     left: list[str] = []
     left.append("- ctrl+n           create new project")
     left.append("- enter            open selected row")
@@ -158,32 +153,37 @@ def cheat_columns(
     left.append(
         f"  [{COLOR_DYNAMIC_STATE_HEX}]dynamic state violet[/] ({COLOR_DYNAMIC_STATE_HEX}): state/health dynamic properties"
     )
+    left.append("")
+    left.append("- date column styles (table.columns_style.date):")
+    date_styles = getattr(app, "table_date_color_ranges", {})
+    for view in ("all", "active", "archive"):
+        view_rules = date_styles.get(view, {}) if isinstance(date_styles, dict) else {}
+        if not isinstance(view_rules, dict) or not view_rules:
+            continue
+        for col in ("created", "last_modified", "last_opened", "archived_at"):
+            rule = view_rules.get(col, {})
+            if not isinstance(rule, dict):
+                continue
+            stops = rule.get("stops", [])
+            if not isinstance(stops, list) or not stops:
+                continue
+            parts: list[str] = []
+            for stop in stops:
+                if not isinstance(stop, dict):
+                    continue
+                try:
+                    days = float(stop.get("days", 0.0))
+                except (TypeError, ValueError):
+                    continue
+                color = str(stop.get("color", "")).strip()
+                if not color:
+                    continue
+                day_text = str(int(days)) if days.is_integer() else f"{days:g}"
+                parts.append(f"[{color}]{day_text}[/]")
+            if parts:
+                left.append(f"  {view}.{col}: {' > '.join(parts)}")
 
-    right: list[str] = []
-    right.append(f"- active total:   {active_total}")
-    right.append(f"- archive total:  {archived_total}")
-    right.append(f"- visible now:    {len(rows)}")
-    right.append(f"- active untagged:{untagged_total}")
-    right.append("")
-    prop_counts = property_count_map(app, all_property_defs=all_property_defs)
-    for pdef in all_property_defs():
-        style = str(getattr(pdef, "color", "") or "").strip()
-        token = f"[{style}]{pdef.token}[/]" if style else pdef.token
-        right.append(f"- {token:<14} {pdef.key:<8} {prop_counts.get(pdef.key, 0)}")
-    right.append("")
-    top_tags = tag_count_map(app)
-    if top_tags:
-        for tag, count in top_tags:
-            right.append(f"- {tag}: {count}")
-    else:
-        right.append("- (none)")
-    right.append("")
-
-    right.append("Actions in Current View")
-    for key, label in app.view_config[app.view_mode]["actions"]:
-        right.append(f"- {key}: {label}")
-
-    return "\n".join(left), "\n".join(right)
+    return "\n".join(left), ""
 
 
 def preview_entries(path: Path, *, limit: int = 8) -> list[str]:
@@ -584,5 +584,20 @@ def stats_and_context_lines(app: Any, *, base_dir: Path) -> list[str]:
     lines: list[str] = ["[bold]Stats and context[/]"]
     lines.extend(global_info_lines(app))
     lines.append("[dim]----------------------------------------[/]")
+    lines.extend(stats_summary_lines(app))
+    lines.append("[dim]----------------------------------------[/]")
     lines.extend(action_context_lines(app, base_dir=base_dir))
     return lines
+
+
+def stats_summary_lines(app: Any) -> list[str]:
+    rows = app._current_rows()
+    active_total = len(app.active_rows)
+    archived_total = len(app.archived_rows)
+    untagged_total = sum(1 for r in app.active_rows if not r.tags)
+    out: list[str] = []
+    out.append(f"active total: {active_total}")
+    out.append(f"archive total: {archived_total}")
+    out.append(f"visible now: {len(rows)}")
+    out.append(f"active untagged: {untagged_total}")
+    return out

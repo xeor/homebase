@@ -522,11 +522,18 @@ def save_table_behavior_config(base_dir: Path, conf: dict[str, object]) -> None:
     save_global_config_dict(base_dir, data)
 
 
-def load_table_date_color_ranges(base_dir: Path) -> dict[str, dict[str, dict[str, object]]]:
+def load_table_date_column_styles(base_dir: Path) -> dict[str, dict[str, dict[str, object]]]:
     data = load_global_config_dict(base_dir)
     raw = data.get("table", {}) if isinstance(data, dict) else {}
     table_raw = raw if isinstance(raw, dict) else {}
-    ranges_raw = table_raw.get("date_color_ranges", {})
+    columns_style_raw = table_raw.get("columns_style", {})
+    if isinstance(columns_style_raw, dict):
+        ranges_raw = columns_style_raw.get(
+            "date",
+            table_raw.get("date_columns", table_raw.get("date_color_ranges", {})),
+        )
+    else:
+        ranges_raw = table_raw.get("date_columns", table_raw.get("date_color_ranges", {}))
     if not isinstance(ranges_raw, dict):
         return {"all": {}, "active": {}, "archive": {}}
 
@@ -539,6 +546,38 @@ def load_table_date_color_ranges(base_dir: Path) -> dict[str, dict[str, dict[str
             row = view_raw.get(cid, {})
             if not isinstance(row, dict):
                 continue
+            numeric_scale = True
+            stops: list[dict[str, object]] = []
+            for key, value in row.items():
+                try:
+                    days = max(0.0, float(key))
+                except (TypeError, ValueError):
+                    numeric_scale = False
+                    break
+                color = str(value).strip()
+                if not re.fullmatch(r"#[0-9A-Fa-f]{6}", color):
+                    numeric_scale = False
+                    break
+                stops.append({"days": days, "color": color})
+            if numeric_scale and stops:
+                out[view][cid] = {"stops": sorted(stops, key=lambda item: float(item.get("days", 0.0)))}
+                continue
+            scale_raw = row.get("scale")
+            if isinstance(scale_raw, dict):
+                stops = []
+                for key, value in scale_raw.items():
+                    try:
+                        days = max(0.0, float(key))
+                    except (TypeError, ValueError):
+                        continue
+                    color = str(value).strip()
+                    if not re.fullmatch(r"#[0-9A-Fa-f]{6}", color):
+                        continue
+                    stops.append({"days": days, "color": color})
+                stops = sorted(stops, key=lambda item: float(item.get("days", 0.0)))
+                if stops:
+                    out[view][cid] = {"stops": stops}
+                    continue
             from_color = str(
                 row.get("from_color", row.get("newer_color", row.get("new_color", "")))
             ).strip()
@@ -554,9 +593,10 @@ def load_table_date_color_ranges(base_dir: Path) -> dict[str, dict[str, dict[str
             if not re.fullmatch(r"#[0-9A-Fa-f]{6}", to_color):
                 continue
             out[view][cid] = {
-                "from_color": from_color,
-                "to_color": to_color,
-                "range_days": range_days,
+                "stops": [
+                    {"days": 0.0, "color": from_color},
+                    {"days": range_days, "color": to_color},
+                ],
             }
     return out
 

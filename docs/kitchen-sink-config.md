@@ -114,30 +114,52 @@ table:
         width: 40
         enabled: true
 
-  # Newest date -> from_color, older date -> to_color by range_days.
-  # Older than range_days stays at to_color.
-  date_color_ranges:
-    all:
-      # Shared baseline for both views.
-      last_modified:
-        from_color: "#ffffff"
-        to_color: "#555555"
-        range_days: 365
-    active:
-      # Opened usually needs shorter recency emphasis.
-      last_opened:
-        from_color: "#e8f7ff"
-        to_color: "#5a6a72"
-        range_days: 30
-      created:
-        from_color: "#fff6df"
-        to_color: "#766f60"
-        range_days: 120
-    archive:
-      archived_at:
-        from_color: "#f7f0ff"
-        to_color: "#5e586e"
-        range_days: 180
+  columns_style:
+    date:
+      all:
+        # Shared baseline for both views.
+        # Same meaning everywhere:
+        # blue = new, green = fresh, yellow = aging, orange = old, red = very old
+        last_modified:
+          0: "#38bdf8"
+          10: "#22c55e"
+          100: "#facc15"
+          250: "#f97316"
+          365: "#ef4444"
+
+      active:
+        # Short recency emphasis.
+        last_opened:
+          0: "#38bdf8"
+          3: "#22c55e"
+          14: "#facc15"
+          30: "#f97316"
+          90: "#ef4444"
+
+        # Slower aging than opened, but same color meaning.
+        created:
+          0: "#38bdf8"
+          30: "#22c55e"
+          120: "#facc15"
+          365: "#f97316"
+          730: "#ef4444"
+
+        # Main age heatmap.
+        last_modified:
+          0: "#38bdf8"
+          10: "#22c55e"
+          100: "#facc15"
+          250: "#f97316"
+          365: "#ef4444"
+
+      archive:
+        # Same scale meaning as the others, just stretched for archive age.
+        archived_at:
+          0: "#38bdf8"
+          30: "#22c55e"
+          180: "#facc15"
+          365: "#f97316"
+          730: "#ef4444"
 
 # Optional suffix menu and file-view excludes.
 suffixes: [tmp, fork, old]

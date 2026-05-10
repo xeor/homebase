@@ -203,19 +203,37 @@ def refresh_table(
             rule = all_table.get(col_id, {})
         if not isinstance(rule, dict):
             return ""
-        from_color = str(rule.get("from_color", "")).strip()
-        to_color = str(rule.get("to_color", "")).strip()
-        try:
-            range_days = max(1.0, float(rule.get("range_days", 365)))
-        except (TypeError, ValueError):
+        stops_raw = rule.get("stops", [])
+        if not isinstance(stops_raw, list) or not stops_raw:
             return ""
-        from_rgb = _hex_rgb(from_color)
-        to_rgb = _hex_rgb(to_color)
-        if from_rgb is None or to_rgb is None:
+        stops: list[tuple[float, tuple[int, int, int]]] = []
+        for stop in stops_raw:
+            if not isinstance(stop, dict):
+                continue
+            try:
+                days = max(0.0, float(stop.get("days", 0.0)))
+            except (TypeError, ValueError):
+                continue
+            color = _hex_rgb(str(stop.get("color", "")).strip())
+            if color is None:
+                continue
+            stops.append((days, color))
+        if not stops:
             return ""
+        stops.sort(key=lambda item: item[0])
         age_days = max(0.0, (now_ts - int(ts)) / 86400.0)
-        t = min(1.0, age_days / range_days)
-        return _rgb_hex(_mix_rgb(from_rgb, to_rgb, t))
+        if age_days <= stops[0][0]:
+            return _rgb_hex(stops[0][1])
+        if age_days >= stops[-1][0]:
+            return _rgb_hex(stops[-1][1])
+        for idx in range(1, len(stops)):
+            left_days, left_color = stops[idx - 1]
+            right_days, right_color = stops[idx]
+            if age_days <= right_days:
+                span = max(0.0001, right_days - left_days)
+                t = (age_days - left_days) / span
+                return _rgb_hex(_mix_rgb(left_color, right_color, t))
+        return _rgb_hex(stops[-1][1])
 
     def _tag_cell(tags: list[str], width: int) -> Text:
         if not tags:
