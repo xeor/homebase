@@ -3,6 +3,7 @@ from __future__ import annotations
 import colorsys
 import functools
 import hashlib
+import time
 from pathlib import Path
 from typing import Any, Callable
 
@@ -40,6 +41,7 @@ def refresh_table(
     fmt_size_human: Callable[[int], str],
     property_tokens_text: Callable[[list[str]], str],
     property_defs_signature: int = -1,
+    table_date_color_ranges: dict[str, dict[str, dict[str, object]]] | None = None,
 ) -> None:
     table = app.query_one(widget_projects, DataTable)
     rows = app._current_rows()
@@ -167,6 +169,53 @@ def refresh_table(
         if width <= 3:
             return text[:width]
         return text[: width - 3] + "..."
+
+    def _hex_rgb(value: str) -> tuple[int, int, int] | None:
+        text = str(value).strip()
+        if len(text) != 7 or not text.startswith("#"):
+            return None
+        try:
+            return (int(text[1:3], 16), int(text[3:5], 16), int(text[5:7], 16))
+        except ValueError:
+            return None
+
+    def _mix_rgb(a: tuple[int, int, int], b: tuple[int, int, int], t: float) -> tuple[int, int, int]:
+        p = max(0.0, min(1.0, float(t)))
+        return (
+            int(round(a[0] + (b[0] - a[0]) * p)),
+            int(round(a[1] + (b[1] - a[1]) * p)),
+            int(round(a[2] + (b[2] - a[2]) * p)),
+        )
+
+    def _rgb_hex(rgb: tuple[int, int, int]) -> str:
+        return f"#{rgb[0]:02X}{rgb[1]:02X}{rgb[2]:02X}"
+
+    now_ts = int(time.time())
+
+    def _date_color_for(col_id: str, ts: int) -> str:
+        if ts <= 0:
+            return ""
+        ranges = table_date_color_ranges or {}
+        view_table = ranges.get(app.view_mode, {}) if isinstance(ranges, dict) else {}
+        all_table = ranges.get("all", {}) if isinstance(ranges, dict) else {}
+        rule = view_table.get(col_id, {}) if isinstance(view_table, dict) else {}
+        if not rule and isinstance(all_table, dict):
+            rule = all_table.get(col_id, {})
+        if not isinstance(rule, dict):
+            return ""
+        from_color = str(rule.get("from_color", "")).strip()
+        to_color = str(rule.get("to_color", "")).strip()
+        try:
+            range_days = max(1.0, float(rule.get("range_days", 365)))
+        except (TypeError, ValueError):
+            return ""
+        from_rgb = _hex_rgb(from_color)
+        to_rgb = _hex_rgb(to_color)
+        if from_rgb is None or to_rgb is None:
+            return ""
+        age_days = max(0.0, (now_ts - int(ts)) / 86400.0)
+        t = min(1.0, age_days / range_days)
+        return _rgb_hex(_mix_rgb(from_rgb, to_rgb, t))
 
     def _tag_cell(tags: list[str], width: int) -> Text:
         if not tags:
@@ -300,6 +349,17 @@ def refresh_table(
             "archived_at": archived_at,
             "restore_to": restore_short,
         }
+
+        date_styles = {
+            "created": _date_color_for("created", int(row.created_ts)),
+            "last_modified": _date_color_for("last_modified", int(row.last_ts)),
+            "last_opened": _date_color_for("last_opened", int(row.opened_ts)),
+            "archived_at": _date_color_for("archived_at", int(row.archived_ts)),
+        }
+        for cid, style in date_styles.items():
+            if not style or cid not in row_cells:
+                continue
+            row_cells[cid] = Text(str(row_cells[cid]), style=style)
 
         if row.packed and row.archived:
             for cid, cell in list(row_cells.items()):

@@ -99,20 +99,45 @@ reconcile:
   archive:
     update_batch_size: 8
 
-# Table behavior knobs.
-table_behavior:
-  pin_wip_top: false
-  side_width_pct: 33
+# Table behavior, columns, and date-color gradients.
+table:
+  behavior:
+    pin_wip_top: false
+    side_width_pct: 33
 
-# Optional explicit column layout overrides.
-table_columns:
-  active:
-    - id: name
-      width: 28
-      enabled: true
-    - id: description
-      width: 40
-      enabled: true
+  columns:
+    active:
+      - id: name
+        width: 28
+        enabled: true
+      - id: description
+        width: 40
+        enabled: true
+
+  # Newest date -> from_color, older date -> to_color by range_days.
+  # Older than range_days stays at to_color.
+  date_color_ranges:
+    all:
+      # Shared baseline for both views.
+      last_modified:
+        from_color: "#ffffff"
+        to_color: "#555555"
+        range_days: 365
+    active:
+      # Opened usually needs shorter recency emphasis.
+      last_opened:
+        from_color: "#e8f7ff"
+        to_color: "#5a6a72"
+        range_days: 30
+      created:
+        from_color: "#fff6df"
+        to_color: "#766f60"
+        range_days: 120
+    archive:
+      archived_at:
+        from_color: "#f7f0ff"
+        to_color: "#5e586e"
+        range_days: 180
 
 # Optional suffix menu and file-view excludes.
 suffixes: [tmp, fork, old]

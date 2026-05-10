@@ -27,6 +27,7 @@ from ..core.constants import (
     TABLE_BEHAVIOR_CONFIG,
     TABLE_COLUMN_CATALOG,
     TABLE_COLUMN_VIEWS,
+    TABLE_DATE_COLOR_COLUMNS,
     TABLE_SIDE_WIDTH_PRESETS,
     WIP_OPEN_SYMBOL_MAP,
 )
@@ -519,6 +520,45 @@ def save_table_behavior_config(base_dir: Path, conf: dict[str, object]) -> None:
     table["behavior"] = behavior
     data["table"] = table
     save_global_config_dict(base_dir, data)
+
+
+def load_table_date_color_ranges(base_dir: Path) -> dict[str, dict[str, dict[str, object]]]:
+    data = load_global_config_dict(base_dir)
+    raw = data.get("table", {}) if isinstance(data, dict) else {}
+    table_raw = raw if isinstance(raw, dict) else {}
+    ranges_raw = table_raw.get("date_color_ranges", {})
+    if not isinstance(ranges_raw, dict):
+        return {"all": {}, "active": {}, "archive": {}}
+
+    out: dict[str, dict[str, dict[str, object]]] = {"all": {}, "active": {}, "archive": {}}
+    for view in ("all", "active", "archive"):
+        view_raw = ranges_raw.get(view, {})
+        if not isinstance(view_raw, dict):
+            continue
+        for cid in TABLE_DATE_COLOR_COLUMNS:
+            row = view_raw.get(cid, {})
+            if not isinstance(row, dict):
+                continue
+            from_color = str(
+                row.get("from_color", row.get("newer_color", row.get("new_color", "")))
+            ).strip()
+            to_color = str(
+                row.get("to_color", row.get("older_color", row.get("old_color", "")))
+            ).strip()
+            try:
+                range_days = max(1.0, float(row.get("range_days", 365)))
+            except (TypeError, ValueError):
+                continue
+            if not re.fullmatch(r"#[0-9A-Fa-f]{6}", from_color):
+                continue
+            if not re.fullmatch(r"#[0-9A-Fa-f]{6}", to_color):
+                continue
+            out[view][cid] = {
+                "from_color": from_color,
+                "to_color": to_color,
+                "range_days": range_days,
+            }
+    return out
 
 
 def _sort_mode_ids() -> set[str]:

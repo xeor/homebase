@@ -371,6 +371,12 @@ TABLE_BEHAVIOR_CONFIG: dict[str, object] = {
     "pin_wip_top": False,
     "side_width_pct": 33,
 }
+TABLE_DATE_COLOR_COLUMNS: tuple[str, ...] = (
+    "created",
+    "last_modified",
+    "last_opened",
+    "archived_at",
+)
 TABLE_SIDE_WIDTH_PRESETS = [20, 25, 30, 33, 35, 40, 45, 50]
 NEW_PROJECT_DEFAULTS: dict[str, object] = {
     "name_options": [],

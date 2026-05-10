@@ -131,6 +131,7 @@ class AppDisplayMixin:
             fmt_size_human=fmt_size_human,
             property_tokens_text=property_tokens_text,
             property_defs_signature=property_defs_signature(),
+            table_date_color_ranges=self.table_date_color_ranges,
         )
 
     def _refresh_side(self) -> None:
