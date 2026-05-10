@@ -6,6 +6,7 @@ from homebase.ui.app import _VIEW_CONFIG_DEFAULT
 
 def test_builtin_actions_include_all_legacy_ids() -> None:
     expected_ids = {
+        "open_selected",
         "readme_create",
         "readme_edit",
         "notes_create",

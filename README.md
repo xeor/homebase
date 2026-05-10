@@ -203,6 +203,10 @@ Query types currently supported:
 
 `<base>/.homebase/config.yaml` example with all supported top-level areas:
 
+For a maintained kitchen-sink version you can copy from:
+
+- `docs/kitchen-sink-config.md`
+
 ```yaml
 # Archive behavior
 archive:
@@ -505,6 +509,7 @@ Behavior notes:
 Technical reference (full schema, variable matrix, dispatch rules):
 
 - `docs/actions.md`
+- `docs/kitchen-sink-config.md`
 
 ## Packaging
 

@@ -82,7 +82,17 @@ def resolve_notes_path_for_row(app: Any, row: ProjectRow, *, base_dir: Path) -> 
     if not template:
         raise ValueError("notes.path_template is empty")
     context = app._notes_template_context(row)
-    rendered = render_notes_template(template, context).strip()
+    path_context = dict(context)
+    for key, value in context.items():
+        if not key.endswith("_Q"):
+            continue
+        raw_key = key[:-2]
+        raw_value = context.get(raw_key)
+        if raw_value is not None:
+            path_context[key] = raw_value
+        else:
+            path_context[key] = value
+    rendered = render_notes_template(template, path_context).strip()
     if not rendered:
         raise ValueError("notes.path_template rendered to empty path")
     expanded = os.path.expandvars(rendered)

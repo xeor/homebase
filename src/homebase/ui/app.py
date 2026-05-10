@@ -92,6 +92,7 @@ from ..core.constants import (
     PROFILE_PANE_PROBE_ARCHIVE,
     SIDE_CHILD_TABS,
     SIDE_TOP_TABS,
+    STATE_KEY_HOTBAR_SELECTED_INDEX,
     STATE_KEY_SIDE_INFO,
     STATE_KEY_SIDE_MAIN,
     STATE_KEY_SIDE_SELECTED,
@@ -387,13 +388,28 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
         info_default = SIDE_CHILD_TABS.get("info", [("events", "Events")])[0][0]
         settings_default = SIDE_CHILD_TABS.get("settings", [("table", "Table")])[0][0]
         self.side_main_tab = str(persisted.get(STATE_KEY_SIDE_MAIN, top_default))
-        self.side_selected_tab = str(
-            persisted.get(STATE_KEY_SIDE_SELECTED, selected_default)
-        )
+        self.side_selected_tab = str(persisted.get(STATE_KEY_SIDE_SELECTED, selected_default))
         self.side_info_tab = str(persisted.get(STATE_KEY_SIDE_INFO, info_default))
-        self.side_settings_tab = str(
-            persisted.get(STATE_KEY_SIDE_SETTINGS, settings_default)
-        )
+        self.side_settings_tab = str(persisted.get(STATE_KEY_SIDE_SETTINGS, settings_default))
+        valid_top = {key for key, _label in SIDE_TOP_TABS}
+        valid_selected = {key for key, _label in SIDE_CHILD_TABS.get("selected", [])}
+        valid_info = {key for key, _label in SIDE_CHILD_TABS.get("info", [])}
+        valid_settings = {key for key, _label in SIDE_CHILD_TABS.get("settings", [])}
+        if self.side_main_tab not in valid_top:
+            self.side_main_tab = top_default
+        if self.side_selected_tab not in valid_selected:
+            self.side_selected_tab = selected_default
+        if self.side_info_tab == "processes":
+            self.side_info_tab = "cache"
+        if self.side_info_tab not in valid_info:
+            self.side_info_tab = info_default
+        if self.side_settings_tab not in valid_settings:
+            self.side_settings_tab = settings_default
+        try:
+            hotbar_idx = int(persisted.get(STATE_KEY_HOTBAR_SELECTED_INDEX, 0) or 0)
+        except (TypeError, ValueError):
+            hotbar_idx = 0
+        self.hotbar_selected_index = max(0, hotbar_idx)
         self.side_detail_row: Path | None = None
         self.side_git_text = ""
         self.side_files_text = ""
@@ -549,7 +565,8 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
         self.completion_counts_token = -1
         self.completion_tag_counts: list[tuple[str, int]] = []
         self.completion_prop_counts: list[tuple[str, int]] = []
-        self.hotbar_selected_index = 0
+        if not hasattr(self, "hotbar_selected_index"):
+            self.hotbar_selected_index = 0
         self._resize_refresh_token = 0
 
     def _init_busy_state(self) -> None:
@@ -647,6 +664,7 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
             state_key_side_selected=STATE_KEY_SIDE_SELECTED,
             state_key_side_info=STATE_KEY_SIDE_INFO,
             state_key_side_settings=STATE_KEY_SIDE_SETTINGS,
+            state_key_hotbar_selected_index=STATE_KEY_HOTBAR_SELECTED_INDEX,
         )
 
     def _restore_table_position(self) -> None:
@@ -1166,6 +1184,7 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
             return False
         self._normalize_hotbar_index()
         self.hotbar_selected_index = (self.hotbar_selected_index + delta) % len(targets)
+        self._mark_state_dirty()
         self._refresh_search_display()
         return True
 
@@ -1199,6 +1218,7 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
                         self._save_bindings(bindings)
                         self.custom_hotkeys = bindings
                         self._normalize_hotbar_index()
+                        self._mark_state_dirty()
                         self._refresh_search_display()
                         return True
                     except (OSError, TypeError, ValueError) as exc:
@@ -1220,6 +1240,7 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
             self._show_runtime_error("save bindings", exc)
             return False
         self._normalize_hotbar_index()
+        self._mark_state_dirty()
         self._refresh_search_display()
         return True
 
@@ -1313,6 +1334,9 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
 
     def _action_context_lines(self) -> list[str]:
         return textual_ui_side_content.action_context_lines(self, base_dir=self.base_dir)
+
+    def _stats_and_context_lines(self) -> list[str]:
+        return textual_ui_side_content.stats_and_context_lines(self, base_dir=self.base_dir)
 
     def _preview_entries(self, path: Path, limit: int = 8) -> list[str]:
         return textual_ui_side_content.preview_entries(path, limit=limit)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import fnmatch
+import json
 import os
 import subprocess
 from pathlib import Path
@@ -538,17 +539,25 @@ def action_context_lines(app: Any, *, base_dir: Path) -> list[str]:
     selected = app._selected_row()
     lines: list[str] = ["[bold]Action Template Context[/]"]
 
+    def _display_value(key: str, value: str, ctx: dict[str, str]) -> str:
+        if key.endswith("_q"):
+            raw_key = key[:-2]
+            raw_value = ctx.get(raw_key)
+            if raw_value is not None:
+                return json.dumps(raw_value)
+        return value
+
     always = action_template.build_always_context(app, base_dir)
     lines.append("[cyan]always[/]:")
     for key in sorted(always):
-        lines.append(f"  {key}: {app._esc(always[key])}")
+        lines.append(f"  {key}: {app._esc(_display_value(key, always[key], always))}")
 
     if selected is not None:
         per_row = action_template.build_per_row_context(app, selected, base_dir)
         lines.append("")
         lines.append("[cyan]per_row[/]:")
         for key in sorted(per_row):
-            lines.append(f"  {key}: {app._esc(per_row[key])}")
+            lines.append(f"  {key}: {app._esc(_display_value(key, per_row[key], per_row))}")
     else:
         lines.append("")
         lines.append("[cyan]per_row[/]: [dim](no selected row)[/]")
@@ -558,7 +567,7 @@ def action_context_lines(app: Any, *, base_dir: Path) -> list[str]:
         lines.append("")
         lines.append("[cyan]joined[/]:")
         for key in sorted(listed):
-            lines.append(f"  {key}: {app._esc(listed[key])}")
+            lines.append(f"  {key}: {app._esc(_display_value(key, listed[key], listed))}")
     else:
         lines.append("")
         lines.append("[cyan]joined[/]: [dim](no selected rows)[/]")
@@ -567,5 +576,13 @@ def action_context_lines(app: Any, *, base_dir: Path) -> list[str]:
     lines.append("")
     lines.append("[cyan]filepicker[/]:")
     for key in sorted(picker):
-        lines.append(f"  {key}: {app._esc(picker[key])}")
+        lines.append(f"  {key}: {app._esc(_display_value(key, picker[key], picker))}")
+    return lines
+
+
+def stats_and_context_lines(app: Any, *, base_dir: Path) -> list[str]:
+    lines: list[str] = ["[bold]Stats and context[/]"]
+    lines.extend(global_info_lines(app))
+    lines.append("[dim]----------------------------------------[/]")
+    lines.extend(action_context_lines(app, base_dir=base_dir))
     return lines

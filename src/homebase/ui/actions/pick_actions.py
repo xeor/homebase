@@ -15,7 +15,7 @@ def on_pick_actions(app: Any, value: str | None) -> None:
     ctx = getattr(app, "ctx", None)
     actions = getattr(ctx, "actions", {}) if ctx is not None else {}
     action = actions.get(value) if isinstance(actions, dict) else None
-    if action is not None and action.source != "builtin":
+    if action is not None and action.kind != "builtin":
         dispatch_action(app, value)
         return
 

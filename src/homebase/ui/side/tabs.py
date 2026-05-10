@@ -69,13 +69,14 @@ def refresh_side(app: Any, *, base_dir: Path, color_accent_hex: str, level_warn:
         if app.side_info_tab == "global":
             lines.extend(app._global_info_lines())
         elif app.side_info_tab == "stats":
-            lines.extend(app._action_context_lines())
+            lines.extend(app._stats_and_context_lines())
         elif app.side_info_tab == "cheat":
             cheat, _right = app._cheat_columns()
             lines.append(cheat)
         elif app.side_info_tab == "cache":
             lines.extend(app._cache_info_lines())
-        elif app.side_info_tab == "processes":
+            lines.append("[dim]----------------------------------------[/]")
+            lines.append("[cyan]managed processes[/]:")
             lines.extend(app._managed_process_info_lines())
         else:
             if app.messages:

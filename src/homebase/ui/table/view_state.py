@@ -101,6 +101,7 @@ def state_snapshot(
     state_key_side_selected: str,
     state_key_side_info: str,
     state_key_side_settings: str,
+    state_key_hotbar_selected_index: str,
 ) -> dict[str, object]:
     app._capture_table_position()
     active_selected = app._view_selected_path.get("active")
@@ -113,6 +114,7 @@ def state_snapshot(
         state_key_side_selected: app.side_selected_tab,
         state_key_side_info: app.side_info_tab,
         state_key_side_settings: app.side_settings_tab,
+        state_key_hotbar_selected_index: int(max(0, app.hotbar_selected_index)),
         "selected_path": str(app.selected_path) if app.selected_path is not None else "",
         "cursor_row": app._state_cursor_row,
         "scroll_y": app._state_scroll_y,

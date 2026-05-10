@@ -77,6 +77,14 @@ COLLISION_RED_RAMP = (
 )
 
 BUILTIN_ACTIONS: dict[str, BuiltinActionMeta] = {
+    "open_selected": BuiltinActionMeta(
+        id="open_selected",
+        default_label="Open selected (default)",
+        help_text="Open selected target using current open mode",
+        scope="target",
+        view_scope=("active", "archive"),
+        default_confirm_prompt=None,
+    ),
     "readme_create": BuiltinActionMeta(
         id="readme_create",
         default_label="Create README.md in $EDITOR",
@@ -323,6 +331,7 @@ STATE_KEY_SIDE_MAIN = "side_main"
 STATE_KEY_SIDE_SELECTED = "side_selected"
 STATE_KEY_SIDE_INFO = "side_info"
 STATE_KEY_SIDE_SETTINGS = "side_settings"
+STATE_KEY_HOTBAR_SELECTED_INDEX = "hotbar_selected_index"
 
 SIDE_TAB_SELECTED_DEFAULT = "selected"
 SIDE_TAB_OVERVIEW_DEFAULT = "overview"
@@ -541,10 +550,9 @@ SIDE_CHILD_TABS: dict[str, list[tuple[str, str]]] = {
     "info": [
         ("global", "Global"),
         ("events", "Events"),
-        ("processes", "Processes"),
-        ("stats", "Stats"),
+        ("stats", "Stats and context"),
         ("cheat", "Cheat-sheet"),
-        ("cache", "Cache and workers"),
+        ("cache", "Runtime"),
     ],
     "settings": [
         ("table", "Table"),
