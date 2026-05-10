@@ -18,7 +18,7 @@ class RuntimeConfig:
     hotbar: list[Any]
     keys: dict[str, Any]
     open_mode_config: dict[str, str]
-    notes_config: dict[str, str]
+    notes_config: dict[str, object]
     reconcile_config: dict[str, dict[str, object]]
     cache_profile_table: dict[str, dict[str, dict[str, object]]]
     archive_tz_name: str
@@ -38,7 +38,7 @@ def load_runtime_config(
     load_hotbar: Callable[[Path, dict[str, Any]], list[Any]],
     load_keys: Callable[[Path, dict[str, Any]], dict[str, Any]],
     load_open_mode_config: Callable[[Path], dict[str, str]],
-    load_notes_config: Callable[[Path], dict[str, str]],
+    load_notes_config: Callable[[Path], dict[str, object]],
     load_reconcile_config: Callable[[Path], dict[str, dict[str, object]]],
     load_cache_profile_table: Callable[[Path], dict[str, dict[str, dict[str, object]]]],
     load_archive_timezone_name: Callable[[Path], str],

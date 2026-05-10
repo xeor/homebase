@@ -544,8 +544,12 @@ def _render_filepicker_label(
     return f"[white]{app._esc(fallback_label)}[/]"
 
 
-def _local_iso_timestamp() -> str:
-    return datetime.now().astimezone().isoformat(timespec="seconds")
+def _format_log_timestamp(timestamp_format: str) -> str:
+    fmt = str(timestamp_format or "").strip()
+    now = datetime.now().astimezone()
+    if not fmt or fmt == "iso-seconds":
+        return now.isoformat(timespec="seconds")
+    return now.strftime(fmt)
 
 
 def _notify_skip(app: Any, row: ProjectRow, reason: str) -> None:
@@ -553,6 +557,108 @@ def _notify_skip(app: Any, row: ProjectRow, reason: str) -> None:
     notifier = getattr(app, "notify", None)
     if callable(notifier):
         notifier(f"Skipped {row.name}: {reason}", severity="warning")
+
+
+def _heading_text(level: int, title: str) -> str:
+    return f"{'#' * max(1, min(6, int(level)))} {title}"
+
+
+def _extract_log_preview(content: str, *, section_title: str, section_level: int) -> tuple[str, list[str]]:
+    lines = content.splitlines()
+    section_heading = _heading_text(section_level, section_title)
+    section_idx = -1
+    for i, line in enumerate(lines):
+        if line.strip() == section_heading:
+            section_idx = i
+            break
+    if section_idx < 0:
+        return "(no log section yet)", []
+    end_idx = len(lines)
+    for i in range(section_idx + 1, len(lines)):
+        ls = lines[i].lstrip()
+        if not ls.startswith("#"):
+            continue
+        level = 0
+        for ch in ls:
+            if ch == "#":
+                level += 1
+            else:
+                break
+        if level > 0 and len(ls) > level and ls[level] == " " and level <= section_level:
+            end_idx = i
+            break
+    entry_level = min(6, section_level + 1)
+    entries: list[tuple[str, list[str]]] = []
+    i = section_idx + 1
+    while i < end_idx:
+        ls = lines[i].lstrip()
+        if ls.startswith("#"):
+            level = 0
+            for ch in ls:
+                if ch == "#":
+                    level += 1
+                else:
+                    break
+            if level == entry_level and len(ls) > level and ls[level] == " ":
+                heading = ls[level + 1 :].strip()
+                body: list[str] = []
+                i += 1
+                while i < end_idx:
+                    nxt = lines[i].lstrip()
+                    if nxt.startswith("#"):
+                        lvl2 = 0
+                        for ch in nxt:
+                            if ch == "#":
+                                lvl2 += 1
+                            else:
+                                break
+                        if lvl2 == entry_level and len(nxt) > lvl2 and nxt[lvl2] == " ":
+                            break
+                    body.append(lines[i])
+                    i += 1
+                entries.append((heading, body))
+                continue
+        i += 1
+    if not entries:
+        return "(log section exists, no entries)", []
+    last_heading, last_body = entries[-1]
+    body_preview = " ".join(line.strip() for line in last_body if line.strip())
+    body_preview = body_preview[:180] + ("..." if len(body_preview) > 180 else "")
+    latest = f"{last_heading} - {body_preview or '(empty)'}"
+    older = [h for h, _ in entries[:-1]]
+    return latest, older
+
+
+def _build_log_dialog_side_info(
+    valid: list[tuple[ProjectRow, Path, str | None]],
+    *,
+    section_title: str,
+    section_level: int,
+    timestamp_format: str,
+) -> str:
+    section_heading = _heading_text(section_level, section_title)
+    entry_heading = _heading_text(min(6, section_level + 1), "<timestamp>")
+    lines: list[str] = [
+        f"section: {section_heading}",
+        f"entry: {entry_heading}",
+        f"timestamp: {timestamp_format}",
+        f"targets: {len(valid)}",
+        "",
+    ]
+    row, path, existing = valid[0]
+    lines.append(f"preview file: {path.name}")
+    latest, older = _extract_log_preview(existing or "", section_title=section_title, section_level=section_level)
+    lines.append(f"latest: {latest}")
+    if older:
+        lines.append("older:")
+        for heading in older[-6:]:
+            lines.append(f"- {heading}")
+    else:
+        lines.append("older: (none)")
+    if len(valid) > 1:
+        lines.append("")
+        lines.append(f"+{len(valid) - 1} more target(s)")
+    return "\n".join(lines)
 
 
 def _run_custom_note_action(
@@ -619,8 +725,29 @@ def _run_custom_note_action(
         if len(valid) == 1
         else f"Add log to {len(valid)} notes"
     )
+    log_conf = app.notes_config.get("log", {}) if isinstance(app.notes_config, dict) else {}
+    section_conf = log_conf.get("section", {}) if isinstance(log_conf, dict) else {}
+    entry_conf = log_conf.get("entry", {}) if isinstance(log_conf, dict) else {}
+    section_title = str(section_conf.get("title", "Log") or "").strip() or "Log"
+    try:
+        section_level = int(section_conf.get("level", 2) or 2)
+    except (TypeError, ValueError):
+        section_level = 2
+    section_level = max(1, min(6, section_level))
+    timestamp_format = str(entry_conf.get("timestamp_format", "iso-seconds") or "iso-seconds")
+    side_info = _build_log_dialog_side_info(
+        valid,
+        section_title=section_title,
+        section_level=section_level,
+        timestamp_format=timestamp_format,
+    )
     app.push_screen(
-        MultilineInputScreen(title, placeholder="log text"),
+        MultilineInputScreen(
+            title,
+            placeholder="log text",
+            side_info=side_info,
+            heading_level=min(6, section_level + 1),
+        ),
         lambda text: _on_add_log_submit(app, text, valid, action_id),
     )
 
@@ -640,7 +767,18 @@ def _on_add_log_submit(
         app._log(f"custom note action skipped: empty text ({action_id})", "warn")
         app._refresh_side()
         return
-    timestamp = _local_iso_timestamp()
+    log_conf = app.notes_config.get("log", {}) if isinstance(app.notes_config, dict) else {}
+    section_conf = log_conf.get("section", {}) if isinstance(log_conf, dict) else {}
+    entry_conf = log_conf.get("entry", {}) if isinstance(log_conf, dict) else {}
+    section_title = str(section_conf.get("title", "Log") or "").strip() or "Log"
+    try:
+        section_level = int(section_conf.get("level", 2) or 2)
+    except (TypeError, ValueError):
+        section_level = 2
+    section_level = max(1, min(6, section_level))
+    timestamp_format = str(entry_conf.get("timestamp_format", "iso-seconds") or "iso-seconds")
+    timestamp = _format_log_timestamp(timestamp_format)
+    log_conf = app.notes_config.get("log", {}) if isinstance(app.notes_config, dict) else {}
     written = 0
     failed = 0
     for row, note_path, existing in valid:
@@ -650,6 +788,8 @@ def _on_add_log_submit(
                 project_name=row.name,
                 timestamp=timestamp,
                 text=body,
+                section_title=section_title,
+                section_level=section_level,
             )
         except NoteValidationError as exc:
             _notify_skip(app, row, f"validation failed: {exc}")

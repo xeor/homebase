@@ -14,7 +14,7 @@ def detect_line_ending(content: str) -> str:
 
 
 def validate_note(content: str) -> None:
-    log_lines = _find_log_heading_indices(content.splitlines())
+    log_lines = _find_log_heading_indices(content.splitlines(), log_heading=LOG_HEADING)
     if len(log_lines) > 1:
         nums = ", ".join(str(n + 1) for n in log_lines)
         raise NoteValidationError(
@@ -28,19 +28,25 @@ def insert_log_entry(
     project_name: str,
     timestamp: str,
     text: str,
+    section_title: str = "Log",
+    section_level: int = 2,
 ) -> str:
+    level = max(1, min(6, int(section_level)))
+    log_heading = f"{'#' * level} {section_title}".strip()
+    entry_heading = f"{'#' * min(6, level + 1)} {timestamp}"
     if content is None:
         return _create_new_note(
             project_name=project_name,
-            timestamp=timestamp,
+            log_heading=log_heading,
+            entry_heading=entry_heading,
             text=text,
         )
 
     validate_note(content)
     line_ending = detect_line_ending(content)
     lines = content.splitlines()
-    log_indices = _find_log_heading_indices(lines)
-    entry_lines = _build_entry_lines(timestamp=timestamp, text=text)
+    log_indices = _find_log_heading_indices(lines, log_heading=log_heading)
+    entry_lines = _build_entry_lines(entry_heading=entry_heading, text=text)
 
     if not log_indices:
         new_lines = list(lines)
@@ -48,11 +54,11 @@ def insert_log_entry(
             new_lines.pop()
         if new_lines:
             new_lines.append("")
-        new_lines.append(LOG_HEADING)
+        new_lines.append(log_heading)
         new_lines.extend(entry_lines)
     else:
         log_idx = log_indices[0]
-        end_idx = _find_section_end_index(lines, log_idx)
+        end_idx = _find_section_end_index(lines, log_idx, section_level=level)
         section_end = end_idx
         while section_end > log_idx + 1 and lines[section_end - 1].strip() == "":
             section_end -= 1
@@ -64,18 +70,24 @@ def insert_log_entry(
     return result
 
 
-def _create_new_note(*, project_name: str, timestamp: str, text: str) -> str:
-    lines = [f"# {project_name}", "", LOG_HEADING]
-    lines.extend(_build_entry_lines(timestamp=timestamp, text=text))
+def _create_new_note(
+    *,
+    project_name: str,
+    log_heading: str,
+    entry_heading: str,
+    text: str,
+) -> str:
+    lines = [f"# {project_name}", "", log_heading]
+    lines.extend(_build_entry_lines(entry_heading=entry_heading, text=text))
     return "\n".join(lines) + "\n"
 
 
-def _build_entry_lines(*, timestamp: str, text: str) -> list[str]:
+def _build_entry_lines(*, entry_heading: str, text: str) -> list[str]:
     text_lines = text.splitlines() if text else [""]
-    return ["", f"### {timestamp}", "", *text_lines, ""]
+    return ["", entry_heading, "", *text_lines, ""]
 
 
-def _find_log_heading_indices(lines: list[str]) -> list[int]:
+def _find_log_heading_indices(lines: list[str], *, log_heading: str) -> list[int]:
     out: list[int] = []
     in_fence = False
     fence_marker: str | None = None
@@ -94,12 +106,12 @@ def _find_log_heading_indices(lines: list[str]) -> list[int]:
             fence_marker = "~~~"
             in_fence = True
             continue
-        if raw.strip() == LOG_HEADING:
+        if raw.strip() == log_heading:
             out.append(i)
     return out
 
 
-def _find_section_end_index(lines: list[str], log_idx: int) -> int:
+def _find_section_end_index(lines: list[str], log_idx: int, *, section_level: int) -> int:
     in_fence = False
     fence_marker: str | None = None
     for i in range(log_idx + 1, len(lines)):
@@ -117,6 +129,13 @@ def _find_section_end_index(lines: list[str], log_idx: int) -> int:
             fence_marker = "~~~"
             in_fence = True
             continue
-        if ls.startswith("# ") or ls.startswith("## "):
-            return i
+        if ls.startswith("#"):
+            hashes = 0
+            for ch in ls:
+                if ch == "#":
+                    hashes += 1
+                else:
+                    break
+            if hashes > 0 and len(ls) > hashes and ls[hashes] == " " and hashes <= section_level:
+                return i
     return len(lines)

@@ -91,6 +91,16 @@ notes:
   path_template: "{{ PROJECT_PATH }}/NOTES.md"
   open_command: "${EDITOR:-vi} {{ NOTE_PATH_Q }}"
   create_command: "mkdir -p \"$(dirname {{ NOTE_PATH_Q }})\" && touch {{ NOTE_PATH_Q }} && ${EDITOR:-vi} {{ NOTE_PATH_Q }}"
+  log:
+    section:
+      # Section heading where log entries are inserted.
+      title: Log
+      # Heading level for section (entry heading is level+1).
+      level: 2
+    entry:
+      # Default preserves current behavior.
+      # You can set e.g. "%Y-%m-%d" for date-only headings.
+      timestamp_format: iso-seconds
 
 # Reconcile pacing settings.
 reconcile:

@@ -325,6 +325,7 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
         ),
         ("ctrl+a", "pick_actions", "Actions"),
         ("ctrl+o", "toggle_select_mode", "Select mode"),
+        ("ctrl+shift+n", "open_notes_app", "Open notes"),
         Binding("ctrl+@", "cycle_hotbar", "Next hotbar", show=False, priority=True),
         ("enter", "open_selected", "Open"),
         ("ctrl+g", "open_existing_pane", "Goto tmux-tab"),
@@ -3132,6 +3133,9 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
         self._persist_state_now()
         self.fast_exit_requested = True
         self.exit(("open", row.path, []))
+
+    def action_open_notes_app(self) -> None:
+        textual_ui_action_dispatch.dispatch_action(self, "notes_create")
 
     def action_cycle_hotbar(self) -> None:
         if not self._table_is_active_focus():

@@ -498,7 +498,7 @@ def load_create_templates(data: object) -> list[dict[str, object]]:
     return out
 
 
-def load_notes_config(data: object, *, defaults: dict[str, str]) -> dict[str, str]:
+def load_notes_config(data: object, *, defaults: dict[str, object]) -> dict[str, object]:
     out = dict(defaults)
     raw = data.get("notes", {}) if isinstance(data, dict) else {}
     if not isinstance(raw, dict):
@@ -513,6 +513,44 @@ def load_notes_config(data: object, *, defaults: dict[str, str]) -> dict[str, st
         out["open_command"] = open_command
     if create_command:
         out["create_command"] = create_command
+
+    raw_log = raw.get("log", {})
+    default_log = out.get("log", {}) if isinstance(out.get("log", {}), dict) else {}
+    log_out = dict(default_log) if isinstance(default_log, dict) else {}
+    if isinstance(raw_log, dict):
+        raw_section = raw_log.get("section", {})
+        default_section = (
+            log_out.get("section", {}) if isinstance(log_out.get("section", {}), dict) else {}
+        )
+        section_out = dict(default_section) if isinstance(default_section, dict) else {}
+        if isinstance(raw_section, dict):
+            title = str(raw_section.get("title", section_out.get("title", "Log")) or "").strip()
+            if title:
+                section_out["title"] = title
+            try:
+                level = int(raw_section.get("level", section_out.get("level", 2)) or 2)
+            except (TypeError, ValueError):
+                level = int(section_out.get("level", 2) or 2)
+            section_out["level"] = max(1, min(6, level))
+        if section_out:
+            log_out["section"] = section_out
+
+        raw_entry = raw_log.get("entry", {})
+        default_entry = (
+            log_out.get("entry", {}) if isinstance(log_out.get("entry", {}), dict) else {}
+        )
+        entry_out = dict(default_entry) if isinstance(default_entry, dict) else {}
+        if isinstance(raw_entry, dict):
+            timestamp_format = str(
+                raw_entry.get("timestamp_format", entry_out.get("timestamp_format", "iso-seconds"))
+                or ""
+            ).strip()
+            if timestamp_format:
+                entry_out["timestamp_format"] = timestamp_format
+        if entry_out:
+            log_out["entry"] = entry_out
+    if log_out:
+        out["log"] = log_out
     return out
 
 

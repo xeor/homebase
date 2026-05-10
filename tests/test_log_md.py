@@ -231,3 +231,16 @@ def test_insert_log_entry_round_trip_writes_two_entries() -> None:
     assert f"### {TS}\n" in out2
     assert f"### {TS2}\n" in out2
     assert out2.index(f"### {TS}") < out2.index(f"### {TS2}")
+
+
+def test_insert_log_entry_supports_custom_section_heading() -> None:
+    out = insert_log_entry(
+        None,
+        project_name="Demo",
+        timestamp=TS,
+        text="hello",
+        section_title="Journal",
+        section_level=3,
+    )
+    assert "### Journal\n" in out
+    assert f"#### {TS}\n" in out

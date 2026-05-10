@@ -28,7 +28,7 @@ class UIContext:
     hotbar: list[dict[str, object]] = field(default_factory=list)
     keys: dict[str, dict[str, str]] = field(default_factory=dict)
     open_mode_config: dict[str, str] = field(default_factory=dict)
-    notes_config: dict[str, str] = field(default_factory=dict)
+    notes_config: dict[str, object] = field(default_factory=dict)
     reconcile_config: dict[str, dict[str, object]] = field(default_factory=dict)
     cache_profile_table: dict[str, dict[str, dict[str, object]]] = field(
         default_factory=dict

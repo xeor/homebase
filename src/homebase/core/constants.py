@@ -300,6 +300,7 @@ CUSTOM_ACTION_RESERVED_HOTKEYS: set[str] = {
     "ctrl+w",
     "ctrl+a",
     "ctrl+o",
+    "ctrl+shift+n",
     "ctrl+g",
     "ctrl+q",
     "enter",
@@ -361,10 +362,19 @@ CUSTOM_HOTKEYS: list[dict[str, str]] = []
 OPEN_MODE_CONFIG: dict[str, str] = {
     "profile": "shell_cd",
 }
-NOTES_CONFIG: dict[str, str] = {
+NOTES_CONFIG: dict[str, object] = {
     "path_template": "{{ PROJECT_PATH }}/NOTES.md",
     "open_command": "${EDITOR:-vi} {{ NOTE_PATH_Q }}",
     "create_command": "mkdir -p \"$(dirname {{ NOTE_PATH_Q }})\" && touch {{ NOTE_PATH_Q }} && ${EDITOR:-vi} {{ NOTE_PATH_Q }}",
+    "log": {
+        "section": {
+            "title": "Log",
+            "level": 2,
+        },
+        "entry": {
+            "timestamp_format": "iso-seconds",
+        },
+    },
 }
 VALID_NOTE_COMMANDS: frozenset[str] = frozenset({"add_log"})
 TABLE_BEHAVIOR_CONFIG: dict[str, object] = {

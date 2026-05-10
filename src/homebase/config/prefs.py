@@ -249,7 +249,7 @@ def load_open_mode_config(base_dir: Path) -> dict[str, str]:
     )
 
 
-def load_notes_config(base_dir: Path) -> dict[str, str]:
+def load_notes_config(base_dir: Path) -> dict[str, object]:
     return workspace_settings.load_notes_config(
         load_global_config_dict(base_dir),
         defaults=NOTES_CONFIG,
