@@ -97,6 +97,48 @@ def hotbar_target_custom_label_map(app: Any) -> dict[str, str]:
     return out
 
 
+def hotbar_target_style_rules_map(app: Any) -> dict[str, list[dict[str, str]]]:
+    out: dict[str, list[dict[str, str]]] = {}
+    for binding in app.custom_hotkeys:
+        if not bool(binding.get("hotbar", False)):
+            continue
+        target = str(binding.get("target", "")).strip()
+        if not target or target in out:
+            continue
+        raw_style = binding.get("style", [])
+        if not isinstance(raw_style, list):
+            continue
+        style_rows: list[dict[str, str]] = []
+        for raw_rule in raw_style:
+            if not isinstance(raw_rule, dict):
+                continue
+            bg_color = str(raw_rule.get("bg_color", "")).strip()
+            fg_color = str(raw_rule.get("fg_color", "")).strip()
+            when = str(raw_rule.get("when", "")).strip()
+            bold = bool(raw_rule.get("bold", False))
+            underline = bool(raw_rule.get("underline", False))
+            italic = bool(raw_rule.get("italic", False))
+            if not when:
+                continue
+            if not bg_color and not fg_color and not (bold or underline or italic):
+                continue
+            style_rule: dict[str, str] = {"when": when}
+            if bg_color:
+                style_rule["bg_color"] = bg_color
+            if fg_color:
+                style_rule["fg_color"] = fg_color
+            if bold:
+                style_rule["bold"] = "1"
+            if underline:
+                style_rule["underline"] = "1"
+            if italic:
+                style_rule["italic"] = "1"
+            style_rows.append(style_rule)
+        if style_rows:
+            out[target] = style_rows
+    return out
+
+
 def valid_action_items(
     app: Any,
     *,

@@ -13,6 +13,32 @@ _HOTBAR_ROW_STYLE_EVEN = "white on #2A2A2A"
 _HOTBAR_ROW_STYLE_ODD = "white on #353535"
 
 
+def _is_truthy_style_flag(value: str) -> bool:
+    text = str(value).strip().lower()
+    return text in {"1", "true", "yes", "on"}
+
+
+def _hotbar_style_text(style: dict[str, str], fallback: str) -> str:
+    parts: list[str] = []
+    if _is_truthy_style_flag(str(style.get("bold", ""))):
+        parts.append("bold")
+    if _is_truthy_style_flag(str(style.get("underline", ""))):
+        parts.append("underline")
+    if _is_truthy_style_flag(str(style.get("italic", ""))):
+        parts.append("italic")
+    fg_color = str(style.get("fg_color", "")).strip()
+    bg_color = str(style.get("bg_color", "")).strip()
+    if fg_color and bg_color:
+        parts.append(f"{fg_color} on {bg_color}")
+    elif fg_color:
+        parts.append(fg_color)
+    elif bg_color:
+        parts.append(f"white on {bg_color}")
+    if not parts:
+        return fallback
+    return " ".join(parts)
+
+
 def named_filters_sig(named_filters: dict[str, str]) -> str:
     if not named_filters:
         return ""
@@ -171,9 +197,11 @@ def refresh_search_display(
         if app.select_mode and target in {"open_selected", "action:open_selected"}:
             rendered_label = f"{rendered_label} [1]"
         cell = f" {rendered_label} "
+        style = app._resolve_hotbar_target_style(target)
         if i == app.hotbar_selected_index:
             parts.append(f"[{_CURSOR_STYLE}]{cell}[/]")
         else:
-            row_style = _HOTBAR_ROW_STYLE_EVEN if i % 2 == 0 else _HOTBAR_ROW_STYLE_ODD
+            fallback = _HOTBAR_ROW_STYLE_EVEN if i % 2 == 0 else _HOTBAR_ROW_STYLE_ODD
+            row_style = _hotbar_style_text(style, fallback)
             parts.append(f"[{row_style}]{cell}[/]")
     disp_right.update("  ".join(parts))

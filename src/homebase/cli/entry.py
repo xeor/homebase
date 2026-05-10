@@ -172,7 +172,14 @@ def main(argv: list[str]) -> int:
         suffixes=list(runtime_cfg.suffixes),
         file_view_exclude_patterns=list(runtime_cfg.file_view_exclude_patterns),
         actions=dict(runtime_cfg.actions),
-        hotbar=[{"action": str(item.action), "label": str(item.label)} for item in runtime_cfg.hotbar],
+        hotbar=[
+            {
+                "action": str(item.action),
+                "label": str(item.label),
+                "style": [dict(rule) for rule in item.style],
+            }
+            for item in runtime_cfg.hotbar
+        ],
         keys={
             str(key): {"action": str(entry.action), "label": str(entry.label)}
             for key, entry in runtime_cfg.keys.items()

@@ -6,6 +6,7 @@ from ..core.models import Action, BuiltinActionMeta, HotbarEntry, KeyEntry
 from . import cache_profile as cache_profile_config
 
 _VAR_RE = re.compile(r"\{\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}\}")
+_HEX_COLOR_RE = re.compile(r"^#[0-9A-Fa-f]{6}$")
 
 
 def _allowed_vars_for_action(*, scope: str, multi: str, kind: str) -> set[str]:
@@ -237,6 +238,7 @@ def load_hotbar(data: object, *, actions: dict[str, Action]) -> list[HotbarEntry
     for item in raw:
         action_id = ""
         label = ""
+        style_rules: list[dict[str, str]] = []
         if isinstance(item, str):
             action_id = item.strip()
         elif isinstance(item, dict):
@@ -244,6 +246,45 @@ def load_hotbar(data: object, *, actions: dict[str, Action]) -> list[HotbarEntry
             label = str(item.get("label", "")).strip()
             if "key" in item:
                 raise ValueError("hotbar entries cannot contain `key` field")
+            raw_style = item.get("style", [])
+            if raw_style not in (None, ""):
+                if not isinstance(raw_style, list):
+                    raise ValueError("hotbar style must be a list")
+                for idx, raw_rule in enumerate(raw_style, start=1):
+                    if not isinstance(raw_rule, dict):
+                        raise ValueError(f"hotbar style rule #{idx} must be a map")
+                    bg_color = str(raw_rule.get("bg_color", "")).strip()
+                    fg_color = str(raw_rule.get("fg_color", "")).strip()
+                    when = str(raw_rule.get("when", "")).strip()
+                    bold = bool(raw_rule.get("bold", False))
+                    underline = bool(raw_rule.get("underline", False))
+                    italic = bool(raw_rule.get("italic", False))
+                    if not bg_color and not fg_color and not (bold or underline or italic):
+                        raise ValueError(
+                            f"hotbar style rule #{idx} must set at least one style field"
+                        )
+                    if bg_color and not _HEX_COLOR_RE.fullmatch(bg_color):
+                        raise ValueError(
+                            f"hotbar style rule #{idx} bg_color must be #RRGGBB"
+                        )
+                    if fg_color and not _HEX_COLOR_RE.fullmatch(fg_color):
+                        raise ValueError(
+                            f"hotbar style rule #{idx} fg_color must be #RRGGBB"
+                        )
+                    if not when:
+                        raise ValueError(f"hotbar style rule #{idx} missing when")
+                    style_rule: dict[str, str] = {"when": when}
+                    if bg_color:
+                        style_rule["bg_color"] = bg_color
+                    if fg_color:
+                        style_rule["fg_color"] = fg_color
+                    if bold:
+                        style_rule["bold"] = "1"
+                    if underline:
+                        style_rule["underline"] = "1"
+                    if italic:
+                        style_rule["italic"] = "1"
+                    style_rules.append(style_rule)
         if not action_id:
             continue
         action = actions.get(action_id)
@@ -253,7 +294,7 @@ def load_hotbar(data: object, *, actions: dict[str, Action]) -> list[HotbarEntry
             raise ValueError(
                 f"{action_id!r} cannot be on the hotbar — only target-scope actions are eligible. Bind it via `keys:` instead."
             )
-        out.append(HotbarEntry(action=action_id, label=label))
+        out.append(HotbarEntry(action=action_id, label=label, style=tuple(style_rules)))
     return out
 
 

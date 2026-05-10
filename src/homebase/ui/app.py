@@ -165,6 +165,7 @@ from .app_actions import AppActionsMixin
 from .app_display import AppDisplayMixin
 from .app_events import AppEventsMixin
 from .context import UIContext, build_ui_context
+from .query import context_rules as textual_ui_query_context_rules
 from .query import edit as textual_ui_query_edit
 from .query import notes_paths as textual_ui_notes_paths
 from .query import runtime as textual_ui_query_runtime
@@ -1126,6 +1127,36 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
             label = str(item.get("label", "")).strip()
             if label:
                 row["label"] = label
+            raw_style = item.get("style", [])
+            if isinstance(raw_style, list) and raw_style:
+                style_rows: list[dict[str, str]] = []
+                for raw_rule in raw_style:
+                    if not isinstance(raw_rule, dict):
+                        continue
+                    bg_color = str(raw_rule.get("bg_color", "")).strip()
+                    fg_color = str(raw_rule.get("fg_color", "")).strip()
+                    when = str(raw_rule.get("when", "")).strip()
+                    bold = bool(raw_rule.get("bold", False))
+                    underline = bool(raw_rule.get("underline", False))
+                    italic = bool(raw_rule.get("italic", False))
+                    if not when:
+                        continue
+                    if not bg_color and not fg_color and not (bold or underline or italic):
+                        continue
+                    style_rule: dict[str, object] = {"when": when}
+                    if bg_color:
+                        style_rule["bg_color"] = bg_color
+                    if fg_color:
+                        style_rule["fg_color"] = fg_color
+                    if bold:
+                        style_rule["bold"] = True
+                    if underline:
+                        style_rule["underline"] = True
+                    if italic:
+                        style_rule["italic"] = True
+                    style_rows.append(style_rule)
+                if style_rows:
+                    row["style"] = style_rows
             bindings.append(row)
         for idx, (hotkey, entry) in enumerate(self.ctx.keys.items(), start=1):
             action_id = str(entry.get("action", "")).strip()
@@ -1151,7 +1182,41 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
                 continue
             label = str(row.get("label", "")).strip()
             if bool(row.get("hotbar", False)):
-                hotbar_payload.append({"action": target, **({"label": label} if label else {})})
+                payload: dict[str, object] = {
+                    "action": target,
+                    **({"label": label} if label else {}),
+                }
+                raw_style = row.get("style", [])
+                if isinstance(raw_style, list) and raw_style:
+                    style_rows: list[dict[str, str]] = []
+                    for raw_rule in raw_style:
+                        if not isinstance(raw_rule, dict):
+                            continue
+                        bg_color = str(raw_rule.get("bg_color", "")).strip()
+                        fg_color = str(raw_rule.get("fg_color", "")).strip()
+                        when = str(raw_rule.get("when", "")).strip()
+                        bold = bool(raw_rule.get("bold", False))
+                        underline = bool(raw_rule.get("underline", False))
+                        italic = bool(raw_rule.get("italic", False))
+                        if not when:
+                            continue
+                        if not bg_color and not fg_color and not (bold or underline or italic):
+                            continue
+                        style_rule: dict[str, object] = {"when": when}
+                        if bg_color:
+                            style_rule["bg_color"] = bg_color
+                        if fg_color:
+                            style_rule["fg_color"] = fg_color
+                        if bold:
+                            style_rule["bold"] = True
+                        if underline:
+                            style_rule["underline"] = True
+                        if italic:
+                            style_rule["italic"] = True
+                        style_rows.append(style_rule)
+                    if style_rows:
+                        payload["style"] = style_rows
+                hotbar_payload.append(payload)
             hotkey = str(row.get("hotkey", "")).strip().lower()
             if hotkey:
                 keys_payload[hotkey] = {"action": target, **({"label": label} if label else {})}
@@ -2484,6 +2549,18 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
 
     def _hotbar_target_custom_label_map(self) -> dict[str, str]:
         return textual_ui_action_items.hotbar_target_custom_label_map(self)
+
+    def _hotbar_target_style_rules_map(self) -> dict[str, list[dict[str, str]]]:
+        return textual_ui_action_items.hotbar_target_style_rules_map(self)
+
+    def _resolve_hotbar_target_style(self, target: str) -> dict[str, str]:
+        rules = self._hotbar_target_style_rules_map().get(str(target), [])
+        if not rules:
+            return {}
+        return textual_ui_query_context_rules.resolve_style_rules(
+            rules,
+            row=self._selected_row(),
+        )
 
     def _valid_action_items(self) -> list[tuple[str, str]]:
         return textual_ui_action_items.valid_action_items(

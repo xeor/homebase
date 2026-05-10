@@ -36,6 +36,7 @@ class Action:
 class HotbarEntry:
     action: str
     label: str = ""
+    style: tuple[dict[str, str], ...] = ()
 
 
 @dataclass(frozen=True)

@@ -6,6 +6,8 @@ This is a copy/paste-oriented, heavily commented example for
 - Keep only the sections you need.
 - Prefer this file over stale snippets.
 - Validate with `uv run b help actions` and by starting `uv run b`.
+- Hotbar `style.when` reuses the same query language as the query bar.
+- Hotbar styles are evaluated per hotbar item against the selected row.
 
 ```yaml
 # homebase kitchen-sink config
@@ -164,9 +166,45 @@ actions:
 
 # Target-scope actions shown in hotbar.
 hotbar:
+  # String shorthand still works.
   - open_selected
-  - notes_create
-  - { action: add_log_to_note, label: Log }
+
+  # Rich style example: green if tmux pane exists.
+  - action: open_selected
+    label: open (tmux)
+    style:
+      - bg_color: "#bff4d3"
+        fg_color: "#123b25"
+        bold: true
+        when: "!tmx"
+
+  # Notes action styled when notes file marker/property exists.
+  - action: notes_create
+    label: Notes
+    style:
+      - bg_color: "#d8e9ff"
+        fg_color: "#1b3558"
+        underline: true
+        when: "!n"
+
+  # Log action can react to multiple conditions.
+  - action: add_log_to_note
+    label: Log
+    style:
+      # Same query syntax as the query bar. Evaluated on selected row.
+      - bg_color: "#ffaaaa"
+        fg_color: "#3f1010"
+        bold: true
+        when: "!rm"
+      # Later rule overrides earlier fields when both match.
+      - bg_color: "#ffe9b8"
+        fg_color: "#5a4200"
+        italic: true
+        when: "#wip"
+      # Suffix-based rule.
+      - bg_color: "#ece7ff"
+        fg_color: "#34296b"
+        when: ".tmp"
 
 # Key chords mapped to actions.
 keys:

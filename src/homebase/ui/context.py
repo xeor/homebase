@@ -25,7 +25,7 @@ class UIContext:
     custom_actions: list[dict[str, object]] = field(default_factory=list)
     custom_hotkeys: list[dict[str, object]] = field(default_factory=list)
     actions: dict[str, Action] = field(default_factory=dict)
-    hotbar: list[dict[str, str]] = field(default_factory=list)
+    hotbar: list[dict[str, object]] = field(default_factory=list)
     keys: dict[str, dict[str, str]] = field(default_factory=dict)
     open_mode_config: dict[str, str] = field(default_factory=dict)
     notes_config: dict[str, str] = field(default_factory=dict)

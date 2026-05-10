@@ -151,6 +151,69 @@ Hotbar:
 - Entries: `"action_id"` or `{ action: ..., label: ... }`
 - Only `scope: target` actions allowed.
 - Optional per-slot `label` override.
+- Optional per-slot `style` rules:
+
+```yaml
+hotbar:
+  - action: add_log_to_note
+    label: Log
+    style:
+      - bg_color: "#ffaaaa"
+        when: "!rm"
+```
+
+- `when` uses the same query/filter language as the main query input.
+- Rules are evaluated against the currently selected row.
+- `bg_color` must be `#RRGGBB`.
+- `fg_color` must be `#RRGGBB`.
+- `bold`, `underline`, `italic` are supported.
+- If multiple rules match, the last matching rule wins.
+
+Use-cases:
+
+```yaml
+hotbar:
+  - action: add_log_to_note
+    label: Log
+    style:
+      - bg_color: "#ffaaaa"
+        fg_color: "#2d0a0a"
+        bold: true
+        when: "!rm"
+
+  - action: open_selected
+    label: open (tmux)
+    style:
+      - bg_color: "#c8f7db"
+        fg_color: "#10331f"
+        when: "!tmx"
+
+  - action: review_meta
+    label: review meta
+    style:
+      - bg_color: "#ffe2e2"
+        fg_color: "#6b1111"
+        bold: true
+        underline: true
+        when: "!e"
+
+  - action: archive
+    style:
+      - bg_color: "#fff2cf"
+        fg_color: "#5e4300"
+        when: "#wip"
+      - bg_color: "#ece7ff"
+        fg_color: "#322a6d"
+        italic: true
+        when: ".tmp"
+```
+
+`when` reminders:
+
+- `!rm` means property `rm` is present (not negation).
+- `#tag` matches tag.
+- `.tmp` matches suffix.
+- full expressions are valid (`#wip OR !e`, `(!rm AND #docs)`).
 
 Keys:
 

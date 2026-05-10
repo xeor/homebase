@@ -171,8 +171,41 @@ def save_hotbar(base_dir: Path, hotbar: list[dict[str, object] | object]) -> Non
         if not action_id:
             continue
         label = str(item.get("label", "")).strip()
-        if label:
-            out.append({"action": action_id, "label": label})
+        style = item.get("style", [])
+        style_out: list[dict[str, str]] = []
+        if isinstance(style, list):
+            for raw_rule in style:
+                if not isinstance(raw_rule, dict):
+                    continue
+                bg_color = str(raw_rule.get("bg_color", "")).strip()
+                fg_color = str(raw_rule.get("fg_color", "")).strip()
+                when = str(raw_rule.get("when", "")).strip()
+                bold = bool(raw_rule.get("bold", False))
+                underline = bool(raw_rule.get("underline", False))
+                italic = bool(raw_rule.get("italic", False))
+                if not when:
+                    continue
+                if not bg_color and not fg_color and not (bold or underline or italic):
+                    continue
+                rule: dict[str, str] = {"when": when}
+                if bg_color:
+                    rule["bg_color"] = bg_color
+                if fg_color:
+                    rule["fg_color"] = fg_color
+                if bold:
+                    rule["bold"] = "1"
+                if underline:
+                    rule["underline"] = "1"
+                if italic:
+                    rule["italic"] = "1"
+                style_out.append(rule)
+        if label or style_out:
+            payload: dict[str, object] = {"action": action_id}
+            if label:
+                payload["label"] = label
+            if style_out:
+                payload["style"] = style_out
+            out.append(payload)
         else:
             out.append(action_id)
     data["hotbar"] = out
