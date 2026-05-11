@@ -5,11 +5,7 @@ from typing import Callable
 
 
 def _packed_target_exists_for_dir(path: Path) -> bool:
-    pattern = f"*_{path.name}.tgz"
-    for hit in path.parent.glob(pattern):
-        if hit.is_file():
-            return True
-    return False
+    return path.with_name(f"{path.name}.tgz").is_file()
 
 
 def preflight_bulk_action(

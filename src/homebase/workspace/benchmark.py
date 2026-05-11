@@ -162,7 +162,9 @@ def _benchmark_seed_dataset(base_dir: Path) -> dict[str, int]:
     archive_root.mkdir(parents=True, exist_ok=True)
     for i in range(archived_dir_count):
         archived_ts = 1700100000 + i
-        p = archive_root / f"arch-{i:04d}.{archive_iso_from_ts(archived_ts)}"
+        date_prefix = archive_iso_from_ts(archived_ts)[:10]
+        year = date_prefix[:4]
+        p = archive_root / year / f"{date_prefix}_arch-{i:04d}"
         p.mkdir(parents=True, exist_ok=True)
         save_base_data(
             p,
@@ -178,9 +180,8 @@ def _benchmark_seed_dataset(base_dir: Path) -> dict[str, int]:
 
     packed = 0
     for i in range(min(archived_pack_count, archived_dir_count)):
-        # locate latest dir for this prefix, stable and deterministic
         matches = sorted(
-            [x for x in archive_root.glob(f"arch-{i:04d}.*") if x.is_dir()],
+            [x for x in archive_root.glob(f"*/*_arch-{i:04d}") if x.is_dir()],
             key=lambda x: x.name,
         )
         if not matches:

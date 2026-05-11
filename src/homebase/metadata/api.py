@@ -257,7 +257,21 @@ def _property_template_context(path: Path, *, archived: bool) -> dict[str, str]:
         rel_path = path.relative_to(base_path)
     except ValueError:
         pass
-    archive_prefix = "_archive/" if archived else ""
+    archive_prefix = ""
+    if archived:
+        year_part = ""
+        try:
+            rel_parts = path.relative_to(base_path).parts
+        except ValueError:
+            rel_parts = path.parts
+        if (
+            len(rel_parts) >= 3
+            and rel_parts[0] == "_archive"
+            and len(rel_parts[1]) == 4
+            and rel_parts[1].isdigit()
+        ):
+            year_part = f"{rel_parts[1]}/"
+        archive_prefix = f"_archive/{year_part}"
     archive_prefixed_name = f"{archive_prefix}{path.name}"
     out = {
         "NAME": path.name,

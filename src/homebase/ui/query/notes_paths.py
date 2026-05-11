@@ -42,11 +42,16 @@ def notes_template_context(
     except ValueError:
         pass
     restore_to = str(row.restore_target) if row.restore_target is not None else ""
-    archive_prefix = "_archive/" if row.archived else ""
+    archive_prefix = ""
     archive_name = row.name
     if row.archived:
         if row.archived_ts > 0:
-            archive_name = f"{fmt_ymd(row.archived_ts)}_{row.name}"
+            date_prefix = fmt_ymd(row.archived_ts)
+            year = date_prefix[:4]
+            archive_name = f"{date_prefix}_{row.name}"
+            archive_prefix = f"_archive/{year}/"
+        else:
+            archive_prefix = "_archive/"
     archive_prefixed_name = f"{archive_prefix}{archive_name}"
     out = {
         "NAME": row.name,

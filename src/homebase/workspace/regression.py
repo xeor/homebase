@@ -126,7 +126,7 @@ def _regtest_rm_symlink_escape_blocked(root: Path) -> tuple[bool, str]:
 
 def _regtest_archive_pack_atomic_failure(root: Path) -> tuple[bool, str]:
     base = root / "base"
-    src = base / ARCHIVE_DIR_NAME / "p.2026-01-01T00:00:00+0000"
+    src = base / ARCHIVE_DIR_NAME / "2026" / "2026-01-01_p"
     _regtest_write_marker(src)
     (src / "data.txt").write_text("payload\n")
     target = src.with_name(f"{src.name}{PACKED_ARCHIVE_SUFFIX}")
@@ -159,9 +159,9 @@ def _regtest_archive_pack_atomic_failure(root: Path) -> tuple[bool, str]:
 
 def _regtest_tar_unpack_rejects_traversal(root: Path) -> tuple[bool, str]:
     base = root / "base"
-    arc = base / ARCHIVE_DIR_NAME
+    arc = base / ARCHIVE_DIR_NAME / "2026"
     arc.mkdir(parents=True, exist_ok=True)
-    packed = arc / f"mal.2026-01-01T00:00:00+0000{PACKED_ARCHIVE_SUFFIX}"
+    packed = arc / f"2026-01-01_mal{PACKED_ARCHIVE_SUFFIX}"
     with tarfile.open(packed, "w:gz") as tf:
         ti = tarfile.TarInfo("../evil.txt")
         payload = b"x\n"
@@ -181,7 +181,7 @@ def _regtest_tar_unpack_rejects_traversal(root: Path) -> tuple[bool, str]:
 
 def _regtest_restore_outside_opt_in(root: Path) -> tuple[bool, str]:
     base = root / "base"
-    src = base / ARCHIVE_DIR_NAME / "p.2026-01-01T00:00:00+0000"
+    src = base / ARCHIVE_DIR_NAME / "2026" / "2026-01-01_p"
     _regtest_write_marker(src)
     (src / "data.txt").write_text("payload\n")
     outside_target = root / "outside" / "restored"
@@ -254,34 +254,35 @@ def _regtest_nested_discovery_parity(root: Path) -> tuple[bool, str]:
     _regtest_write_marker(base / "parent")
     _regtest_write_marker(base / "parent" / "child")
 
-    _regtest_write_marker(base / ARCHIVE_DIR_NAME / "a.2026-01-01T00:00:00+0000")
+    _regtest_write_marker(base / ARCHIVE_DIR_NAME / "2026" / "2026-01-01_a")
     _regtest_write_marker(
-        base / ARCHIVE_DIR_NAME / "grp" / "b.2026-01-01T00:00:00+0000"
+        base / ARCHIVE_DIR_NAME / "2026" / "grp" / "2026-01-01_b"
     )
-    _regtest_write_marker(base / ARCHIVE_DIR_NAME / "p.2026-01-01T00:00:00+0000")
+    _regtest_write_marker(base / ARCHIVE_DIR_NAME / "2026" / "2026-01-01_p")
     _regtest_write_marker(
         base
         / ARCHIVE_DIR_NAME
-        / "p.2026-01-01T00:00:00+0000"
-        / "c.2026-01-01T00:00:00+0000"
+        / "2026"
+        / "2026-01-01_p"
+        / "2026-01-01_c"
     )
 
     active_false = {r.path.name for r in collect_projects(base, include_nested=False)}
     archive_false = {r.path.name for r in collect_archived(base, include_nested=False)}
     if "sub" in active_false:
         return False, "active nested marker leaked with include_nested=false"
-    if "b.2026-01-01T00:00:00+0000" in archive_false:
+    if "2026-01-01_b" in archive_false:
         return False, "archive nested marker leaked with include_nested=false"
 
     active_true = {r.path.name for r in collect_projects(base, include_nested=True)}
     archive_true = {r.path.name for r in collect_archived(base, include_nested=True)}
     if "sub" not in active_true:
         return False, "active nested marker missing with include_nested=true"
-    if "b.2026-01-01T00:00:00+0000" not in archive_true:
+    if "2026-01-01_b" not in archive_true:
         return False, "archive nested marker missing with include_nested=true"
     if "child" in active_true:
         return False, "active child-of-marker should be excluded"
-    if "c.2026-01-01T00:00:00+0000" in archive_true:
+    if "2026-01-01_c" in archive_true:
         return False, "archive child-of-marker should be excluded"
     return True, "active/archive nested discovery parity holds"
 

@@ -12,7 +12,7 @@ class _App:
 
 def test_notes_template_context_archived_name_is_date_prefixed() -> None:
     row = ProjectRow(
-        path=Path("/tmp/base/_archive/2026-05-11_demo.tgz"),
+        path=Path("/tmp/base/_archive/2026/2026-05-11_demo.tgz"),
         name="demo",
         branch="main",
         dirty="",
@@ -42,4 +42,4 @@ def test_notes_template_context_archived_name_is_date_prefixed() -> None:
         fmt_ymd=lambda ts: "2025-05-08" if ts > 0 else "",
     )
 
-    assert context["NAME_WITH_ARCHIVE_PREFIX"] == "_archive/2025-05-08_demo"
+    assert context["NAME_WITH_ARCHIVE_PREFIX"] == "_archive/2025/2025-05-08_demo"
