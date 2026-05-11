@@ -28,10 +28,8 @@ class Row:
     description: str = ""
 
 
-def test_build_project_info_text_contains_name_and_description(tmp_path: Path) -> None:
-    row = Row(name="proj", path=tmp_path / "proj", description="desc")
-    text = project_info.build_project_info_text(
-        row,
+def _build(row: Row, **overrides):
+    kwargs = dict(
         base_marker_file=".base.yaml",
         legacy_base_marker_file=".base.yml",
         color_age_unit_hex="#7CFC7C",
@@ -44,5 +42,55 @@ def test_build_project_info_text_contains_name_and_description(tmp_path: Path) -
         load_base_data=lambda _path: {},
         run_out=lambda *_args: "",
     )
+    kwargs.update(overrides)
+    return project_info.build_project_info_text(row, **kwargs)
+
+
+def test_build_project_info_text_contains_name_and_description(tmp_path: Path) -> None:
+    row = Row(name="proj", path=tmp_path / "proj", description="desc")
+    text = _build(row)
     assert "proj" in text
     assert "desc" in text
+
+
+def test_build_project_info_renders_cached_meta_health_warning(tmp_path: Path) -> None:
+    row = Row(
+        name="ghost",
+        path=tmp_path / "ghost",
+        archived=True,
+        properties=["warn"],
+    )
+    text = _build(
+        row,
+        cached_meta_health=("warning", "missing .base.yaml; tags must be a list"),
+    )
+    assert "WARNING" in text
+    assert "missing .base.yaml" in text
+    assert "tags must be a list" in text
+    assert "deferred" not in text
+
+
+def test_build_project_info_renders_cached_meta_health_error(tmp_path: Path) -> None:
+    row = Row(
+        name="ghost",
+        path=tmp_path / "ghost",
+        archived=True,
+        properties=["err"],
+    )
+    text = _build(
+        row,
+        cached_meta_health=("error", "invalid yaml: bad token"),
+    )
+    assert "ERROR" in text
+    assert "invalid yaml" in text
+
+
+def test_build_project_info_falls_back_when_no_cache(tmp_path: Path) -> None:
+    row = Row(
+        name="ghost",
+        path=tmp_path / "ghost",
+        archived=True,
+        properties=["warn"],
+    )
+    text = _build(row, cached_meta_health=None)
+    assert "loading" in text or "flagged" in text

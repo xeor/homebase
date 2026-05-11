@@ -102,7 +102,7 @@ def evaluate_query_match(app: Any, row: Any, query: dict[str, object]) -> bool:
         cached = app.metadata_health_cache.get(row.path)
         if cached is None:
             return False
-        if cache_due(float(cached[1])):
+        if cache_due(float(cached[2])):
             return False
         health_level = str(cached[0]).strip().lower()
         return health_level == level

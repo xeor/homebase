@@ -317,6 +317,7 @@ def build_project_info_text(
     row: ProjectRow,
     wip_hotkey: int | None = None,
     include_meta_checks: bool = True,
+    cached_meta_health: tuple[str, str] | None = None,
 ) -> str:
     return project_info.build_project_info_text(
         row,
@@ -331,6 +332,7 @@ def build_project_info_text(
         base_meta_issues=base_meta_issues,
         load_base_data=load_base_data,
         run_out=core_utils.run_out,
+        cached_meta_health=cached_meta_health,
     )
 
 

@@ -206,12 +206,17 @@ def refresh_side(app: Any, *, base_dir: Path, color_accent_hex: str, level_warn:
         else:
             readme_create_btn.display = False
             wip_slots = {row.path: i for i, row in enumerate(app._wip_rows_sorted()[:9], start=1)}
+            cached_health: tuple[str, str] | None = None
+            cached_entry = app.metadata_health_cache.get(selected.path)
+            if cached_entry is not None:
+                cached_health = (str(cached_entry[0]), str(cached_entry[1]))
             lines.append(
                 build_project_info_text(
                     base_dir,
                     selected,
                     wip_hotkey=wip_slots.get(selected.path),
                     include_meta_checks=not selected.archived,
+                    cached_meta_health=cached_health,
                 )
             )
             if selected.archived:

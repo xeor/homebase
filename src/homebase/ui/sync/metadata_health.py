@@ -33,7 +33,7 @@ def maybe_refresh_metadata_health(
     due_paths: list[Path] = []
     for row in rows[:scan_limit]:
         cached = app.metadata_health_cache.get(row.path)
-        if cached is None or now >= float(cached[1]):
+        if cached is None or now >= float(cached[2]):
             due_paths.append(row.path)
             if len(due_paths) >= batch_size:
                 break
@@ -46,13 +46,15 @@ def maybe_refresh_metadata_health(
     app.metadata_health_refresh_next_due_at = now + app._metadata_health_interval_s()
 
     def worker() -> None:
-        updated: list[tuple[Path, str, float]] = []
+        updated: list[tuple[Path, str, str, float]] = []
         now_local = time.time()
         expires_at = now_local + ttl_s
         for path in due_paths:
             try:
-                level, _msg = base_meta_health(path)
-                updated.append((path, str(level).strip().lower(), expires_at))
+                level, msg = base_meta_health(path)
+                updated.append(
+                    (path, str(level).strip().lower(), str(msg), expires_at)
+                )
             except (OSError, ValueError, TypeError):
                 continue
         app.call_from_thread(app._on_metadata_health_refresh_done, updated)
@@ -60,8 +62,10 @@ def maybe_refresh_metadata_health(
     threading.Thread(target=worker, daemon=True).start()
 
 
-def on_metadata_health_refresh_done(app: Any, updated: list[tuple[Path, str, float]]) -> None:
+def on_metadata_health_refresh_done(
+    app: Any, updated: list[tuple[Path, str, str, float]]
+) -> None:
     app.metadata_health_refresh_running = False
     app.metadata_health_refresh_last_ts = time.time()
-    for path, level, expires_at in updated:
-        app.metadata_health_cache[path] = (level, float(expires_at))
+    for path, level, msg, expires_at in updated:
+        app.metadata_health_cache[path] = (level, msg, float(expires_at))

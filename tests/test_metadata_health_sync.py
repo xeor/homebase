@@ -16,7 +16,7 @@ class _App:
         self.metadata_health_refresh_running = False
         self.metadata_health_refresh_last_ts = 0.0
         self.metadata_health_refresh_next_due_at = 0.0
-        self.metadata_health_cache: dict[Path, tuple[str, float]] = {}
+        self.metadata_health_cache: dict[Path, tuple[str, str, float]] = {}
         self.rows = [_Row(Path("/tmp/a")), _Row(Path("/tmp/b")), _Row(Path("/tmp/c"))]
         self.called = 0
 
@@ -60,16 +60,19 @@ def test_maybe_refresh_metadata_health_updates_batch(monkeypatch) -> None:
     monkeypatch.setattr(metadata_health.threading, "Thread", _ImmediateThread)
     metadata_health.maybe_refresh_metadata_health(
         app,
-        base_meta_health=lambda _path: ("warning", "w"),
+        base_meta_health=lambda _path: ("warning", "missing field"),
     )
     assert app.called == 2
     assert len(app.metadata_health_cache) == 2
+    cached = app.metadata_health_cache[app.rows[0].path]
+    assert cached[0] == "warning"
+    assert cached[1] == "missing field"
 
 
 def test_indicator_query_metadata_health_uses_cached_level(monkeypatch) -> None:
     row = _Row(Path("/tmp/a"))
     app = _App()
-    app.metadata_health_cache[row.path] = ("error", 100.0)
+    app.metadata_health_cache[row.path] = ("error", "broken yaml", 100.0)
     monkeypatch.setattr(indicator_queries.time, "time", lambda: 10.0)
     assert (
         indicator_queries.evaluate_query_match(

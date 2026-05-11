@@ -526,7 +526,7 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
         self.git_refresh_last_ts = 0.0
         self.git_refresh_next_due_at = 0.0
         self.git_refresh_reason = ""
-        self.metadata_health_cache: dict[Path, tuple[str, float]] = {}
+        self.metadata_health_cache: dict[Path, tuple[str, str, float]] = {}
         self.metadata_health_refresh_running = False
         self.metadata_health_refresh_last_ts = 0.0
         self.metadata_health_refresh_next_due_at = 0.0

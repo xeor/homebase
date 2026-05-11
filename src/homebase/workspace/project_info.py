@@ -20,6 +20,7 @@ def build_project_info_text(
     base_meta_issues: Callable[[Any], list[tuple[str, str, str]]],
     load_base_data: Callable[[Any], dict[str, object]],
     run_out: Callable[..., str],
+    cached_meta_health: tuple[str, str] | None = None,
 ) -> str:
     def esc(value: object) -> str:
         return str(value).replace("[", "\\[").replace("]", "\\]")
@@ -118,8 +119,21 @@ def build_project_info_text(
                     lines.append("    [magenta]auto-fix[/]: no")
                 else:
                     lines.append("    [magenta]auto-fix[/]: no")
-    elif "err" in row.properties or "warn" in row.properties:
-        lines.append("[cyan]health issues[/]: [dim]deferred in archive view for speed[/]")
+    else:
+        cached_level = ""
+        cached_msg = ""
+        if cached_meta_health is not None:
+            cached_level = str(cached_meta_health[0]).strip().lower()
+            cached_msg = str(cached_meta_health[1]).strip()
+        if cached_level in {"warning", "error"} and cached_msg:
+            label = "[red]ERROR[/]" if cached_level == "error" else "[yellow]WARNING[/]"
+            lines.append("[cyan]health issues[/]:")
+            for part in [p.strip() for p in cached_msg.split(";") if p.strip()]:
+                lines.append(f"  {label}: {esc(part)}")
+        elif "err" in row.properties or "warn" in row.properties:
+            lines.append(
+                "[cyan]health issues[/]: [dim]flagged; details loading...[/]"
+            )
 
     lines.append(f"[cyan]description[/]: {esc(row.description or '')}")
 
