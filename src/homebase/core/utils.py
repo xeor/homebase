@@ -163,13 +163,14 @@ def parse_archive_timestamp(value: str, archive_tz: tzinfo) -> int:
 
 
 def split_archive_name(name: str, parse_timestamp: Callable[[str], int]) -> tuple[str, int]:
-    if "." not in name:
-        return name, 0
-    stem, suffix = name.rsplit(".", 1)
-    ts = parse_timestamp(suffix)
-    if ts <= 0:
-        return name, 0
-    return stem, ts
+    if "_" in name:
+        prefix, rest = name.split("_", 1)
+        try:
+            dt = datetime.strptime(prefix, "%Y-%m-%d")
+            return rest, int(dt.timestamp())
+        except ValueError:
+            pass
+    return name, 0
 
 
 def is_packed_archive_path(path: Path, packed_archive_suffix: str) -> bool:

@@ -88,6 +88,8 @@ open_mode:
 # Notes integration for built-in notes actions.
 notes:
   # Variables are rendered through action/template engine.
+  # For archived rows, NAME_WITH_ARCHIVE_PREFIX resolves to
+  # _archive/YYYY-MM-DD_<project-name> (filesystem-safe, no colon).
   path_template: "{{ PROJECT_PATH }}/NOTES.md"
   open_command: "${EDITOR:-vi} {{ NOTE_PATH_Q }}"
   create_command: "mkdir -p \"$(dirname {{ NOTE_PATH_Q }})\" && touch {{ NOTE_PATH_Q }} && ${EDITOR:-vi} {{ NOTE_PATH_Q }}"
@@ -101,6 +103,17 @@ notes:
       # Default preserves current behavior.
       # You can set e.g. "%Y-%m-%d" for date-only headings.
       timestamp_format: iso-seconds
+  rename:
+    # Keep note file names in sync when project folder is renamed.
+    enabled: true
+    # Default if omitted: mv {{ OLD_NOTE_PATH_Q }} {{ NEW_NOTE_PATH_Q }}
+    # Override this for Obsidian/other apps.
+    # Variables: OLD_NOTE_PATH, OLD_NOTE_PATH_Q, NEW_NOTE_PATH, NEW_NOTE_PATH_Q,
+    #            OLD_NOTE_NAME, NEW_NOTE_NAME, OLD_NOTE_FILE, NEW_NOTE_FILE,
+    #            OLD_PROJECT_NAME, NEW_PROJECT_NAME
+    command: "mv {{ OLD_NOTE_PATH_Q }} {{ NEW_NOTE_PATH_Q }}"
+    # Example for Obsidian CLI (triggers refresh of linking to the renamed notes and so on):
+    # command: "obsidian rename path=\"notes/{{ OLD_NOTE_FILE }}\" name=\"{{ NEW_NOTE_NAME }}\""
 
 # Reconcile pacing settings.
 reconcile:

@@ -153,6 +153,35 @@ def _archive_sync_tags_if_needed(base_dir: Path, sync_tags: bool) -> None:
         _ = sync_tag_symlinks(base_dir)
 
 
+def _packed_archive_name(src: Path) -> str:
+    stem, ts = core_utils.split_archive_name(
+        src.name,
+        parse_timestamp=lambda value: core_utils.parse_archive_timestamp(
+            value,
+            ARCHIVE_TZ,
+        ),
+    )
+    if ts > 0:
+        date_prefix = core_utils.archive_iso_from_ts(ts, ARCHIVE_TZ)[:10]
+    else:
+        date_prefix = core_utils.archive_now_iso(ARCHIVE_TZ)[:10]
+    return f"{date_prefix}_{stem}{PACKED_ARCHIVE_SUFFIX}"
+
+
+def _archive_entry_ts_iso(path: Path) -> str:
+    _stem, ts = core_utils.split_archive_entry_name(
+        path,
+        packed_archive_suffix=PACKED_ARCHIVE_SUFFIX,
+        parse_timestamp=lambda value: core_utils.parse_archive_timestamp(
+            value,
+            ARCHIVE_TZ,
+        ),
+    )
+    if ts <= 0:
+        return ""
+    return core_utils.archive_iso_from_ts(ts, ARCHIVE_TZ)
+
+
 def archive_move_internal(base_dir: Path, src: Path, sync_tags: bool = True) -> Path:
     dst = archive_service.archive_move_internal(
         base_dir,
@@ -164,6 +193,16 @@ def archive_move_internal(base_dir: Path, src: Path, sync_tags: bool = True) -> 
         sync_tags=sync_tags,
     )
     cache_move_opened_ts(base_dir, src, dst)
+    append_base_log(
+        dst,
+        "archived",
+        {
+            "source_path": str(src),
+            "archive_path": str(dst),
+            "archive_entry": str(dst.name),
+            "archive_entry_ts": _archive_entry_ts_iso(dst),
+        },
+    )
     return dst
 
 
@@ -173,7 +212,7 @@ def archive_pack_internal(base_dir: Path, src: Path) -> Path:
         src,
         archive_require_dir=_archive_require_dir,
         base_marker_file=BASE_MARKER_FILE,
-        packed_archive_suffix=PACKED_ARCHIVE_SUFFIX,
+        packed_archive_name=_packed_archive_name,
         ensure_safe_cwd=_ensure_safe_cwd,
         invalidate_packed_cache_path=_packed_cache_invalidate_path,
     )
@@ -204,6 +243,7 @@ def archive_restore_internal(
     sync_tags: bool = True,
     allow_outside_base: bool = False,
 ) -> Path:
+    archive_entry_ts = _archive_entry_ts_iso(src)
     dst = archive_service.archive_restore_internal(
         base_dir,
         src,
@@ -228,6 +268,16 @@ def archive_restore_internal(
         allow_outside_base=allow_outside_base,
     )
     cache_move_opened_ts(base_dir, src, dst)
+    append_base_log(
+        dst,
+        "restored",
+        {
+            "archive_path": str(src),
+            "restored_path": str(dst),
+            "archive_entry": str(src.name),
+            "archive_entry_ts": archive_entry_ts,
+        },
+    )
     return dst
 
 

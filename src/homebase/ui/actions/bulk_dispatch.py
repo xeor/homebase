@@ -6,6 +6,114 @@ from pathlib import Path
 from typing import Any, Callable
 
 from ...core.models import ProjectRow
+from . import note_sync as note_sync_actions
+
+
+def _notify_warning(app: Any, message: str) -> None:
+    notifier = getattr(app, "notify", None)
+    if callable(notifier):
+        notifier(message, severity="warning")
+
+
+def _archive_note_sync_with_rollback(
+    app: Any,
+    *,
+    source_path: Path,
+    archived_path: Path,
+    archive_restore_internal: Callable[[Path, Path, bool], Path],
+) -> bool:
+    resolve_notes = getattr(app, "_resolve_notes_path_for_row", None)
+    if not callable(resolve_notes):
+        return True
+    enabled, command_template = note_sync_actions.note_sync_config(app, "archive")
+    if not enabled:
+        return True
+    source_hit = app._find_row(source_path)
+    if source_hit is None:
+        return True
+    source_rows, source_idx = source_hit
+    source_row = source_rows[source_idx]
+    try:
+        old_note_path = resolve_notes(source_row)
+    except (OSError, ValueError, RuntimeError):
+        return True
+    try:
+        if not old_note_path.is_file():
+            return True
+    except OSError as exc:
+        app._log(f"archive note sync failed for {source_path.name}: {exc}", "error")
+        _notify_warning(app, f"Archive note sync failed: {exc}")
+        return False
+
+    try:
+        archived_row = app._build_archived_row_from_entry(archived_path)
+        new_note_path = resolve_notes(archived_row)
+    except (OSError, ValueError, TypeError, RuntimeError, sqlite3.Error, subprocess.SubprocessError) as exc:
+        app._log(f"archive note sync failed for {source_path.name}: {exc}", "error")
+        _notify_warning(app, f"Archive note sync failed: {exc}")
+        try:
+            archive_restore_internal(app.base_dir, archived_path, sync_tags=False)
+        except ValueError as rollback_exc:
+            app._log(
+                f"archive rollback failed for {source_path.name}: {rollback_exc}",
+                "error",
+            )
+            _notify_warning(app, f"Archive rollback failed: {rollback_exc}")
+        return False
+
+    try:
+        if new_note_path.exists() and new_note_path != old_note_path:
+            msg = f"target note exists ({new_note_path})"
+            app._log(f"archive note sync aborted for {source_path.name}: {msg}", "warn")
+            _notify_warning(app, f"Archive note sync aborted: {msg}")
+            try:
+                archive_restore_internal(app.base_dir, archived_path, sync_tags=False)
+            except ValueError as rollback_exc:
+                app._log(
+                    f"archive rollback failed for {source_path.name}: {rollback_exc}",
+                    "error",
+                )
+                _notify_warning(app, f"Archive rollback failed: {rollback_exc}")
+            return False
+        if command_template:
+            cmd = note_sync_actions.build_note_sync_command(
+                app,
+                source_row=source_row,
+                target_row=archived_row,
+                old_note_path=old_note_path,
+                new_note_path=new_note_path,
+                command_template=command_template,
+            )
+            if not cmd:
+                raise OSError("archive note command rendered empty")
+            proc = subprocess.run(
+                ["sh", "-lc", cmd],
+                cwd=str(app.base_dir),
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                capture_output=True,
+                check=False,
+            )
+            if proc.returncode != 0:
+                err = (proc.stderr or "").strip() or f"exit={proc.returncode}"
+                raise OSError(err)
+        else:
+            new_note_path.parent.mkdir(parents=True, exist_ok=True)
+            old_note_path.rename(new_note_path)
+    except OSError as exc:
+        app._log(f"archive note sync failed for {source_path.name}: {exc}", "error")
+        _notify_warning(app, f"Archive note sync failed: {exc}")
+        try:
+            archive_restore_internal(app.base_dir, archived_path, sync_tags=False)
+        except ValueError as rollback_exc:
+            app._log(
+                f"archive rollback failed for {source_path.name}: {rollback_exc}",
+                "error",
+            )
+            _notify_warning(app, f"Archive rollback failed: {rollback_exc}")
+        return False
+    return True
 
 
 def on_confirm_bulk(
@@ -64,6 +172,15 @@ def on_confirm_bulk(
             try:
                 if action == "archive":
                     dest = archive_move_internal(app.base_dir, path, sync_tags=False)
+                    if not _archive_note_sync_with_rollback(
+                        app,
+                        source_path=path,
+                        archived_path=dest,
+                        archive_restore_internal=archive_restore_internal,
+                    ):
+                        failed += 1
+                        app.multi_selected.discard(path)
+                        continue
                     app._log(f"archived: {path.name} -> {dest}", "info")
                     removed_paths.append(path)
                     try:

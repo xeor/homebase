@@ -41,7 +41,7 @@ TEST_REPORT_FILE_NAME = "test.yaml"
 REGRESSION_TEST_REPORT_FILE_NAME = "regression-test.yaml"
 NESTED_DISCOVERY_REPORT_FILE_NAME = "nested-discovery.yaml"
 ARCHIVE_DIR_NAME = "_archive"
-PACKED_ARCHIVE_SUFFIX = ".base-pkg.tgz"
+PACKED_ARCHIVE_SUFFIX = ".tgz"
 TMUX_BIN_CANDIDATES = (
     "/opt/homebrew/bin/tmux",
     "/usr/local/bin/tmux",
@@ -159,8 +159,8 @@ BUILTIN_ACTIONS: dict[str, BuiltinActionMeta] = {
     ),
     "pack": BuiltinActionMeta(
         id="pack",
-        default_label="pack target (.base-pkg.tgz)",
-        help_text="Pack archived directories into .base-pkg.tgz",
+        default_label="pack target (.tgz)",
+        help_text="Pack archived directories into .tgz",
         scope="target",
         view_scope=("archive",),
         default_confirm_prompt="Confirm Pack",
@@ -168,7 +168,7 @@ BUILTIN_ACTIONS: dict[str, BuiltinActionMeta] = {
     "unpack": BuiltinActionMeta(
         id="unpack",
         default_label="unpack target",
-        help_text="Unpack .base-pkg.tgz archive files",
+        help_text="Unpack .tgz archive files",
         scope="target",
         view_scope=("archive",),
         default_confirm_prompt="Confirm Unpack",
@@ -374,6 +374,10 @@ NOTES_CONFIG: dict[str, object] = {
         "entry": {
             "timestamp_format": "iso-seconds",
         },
+    },
+    "rename": {
+        "enabled": True,
+        "command": "mv {{ OLD_NOTE_PATH_Q }} {{ NEW_NOTE_PATH_Q }}",
     },
 }
 VALID_NOTE_COMMANDS: frozenset[str] = frozenset({"add_log"})

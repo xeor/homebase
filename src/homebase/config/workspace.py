@@ -551,6 +551,31 @@ def load_notes_config(data: object, *, defaults: dict[str, object]) -> dict[str,
             log_out["entry"] = entry_out
     if log_out:
         out["log"] = log_out
+
+    raw_rename = raw.get("rename", {})
+    default_rename = out.get("rename", {}) if isinstance(out.get("rename", {}), dict) else {}
+    rename_out = dict(default_rename) if isinstance(default_rename, dict) else {}
+    if isinstance(raw_rename, dict):
+        if "enabled" in raw_rename:
+            rename_out["enabled"] = bool(raw_rename.get("enabled"))
+        command = str(raw_rename.get("command", rename_out.get("command", "")) or "").strip()
+        rename_out["command"] = command
+    if rename_out:
+        out["rename"] = rename_out
+
+    for key in ("archive", "restore"):
+        if key not in raw:
+            continue
+        raw_sync = raw.get(key, {})
+        default_sync = out.get(key, {}) if isinstance(out.get(key, {}), dict) else {}
+        sync_out = dict(default_sync) if isinstance(default_sync, dict) else {}
+        if isinstance(raw_sync, dict):
+            if "enabled" in raw_sync:
+                sync_out["enabled"] = bool(raw_sync.get("enabled"))
+            command = str(raw_sync.get("command", sync_out.get("command", "")) or "").strip()
+            sync_out["command"] = command
+        if sync_out:
+            out[key] = sync_out
     return out
 
 

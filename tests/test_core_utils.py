@@ -27,12 +27,20 @@ def test_parse_archive_timestamp_supports_zulu() -> None:
     assert ts > 0
 
 
-def test_split_archive_name_uses_parser() -> None:
+def test_split_archive_name_does_not_parse_legacy_dot_suffix() -> None:
     def parse_suffix(value: str) -> int:
         return 123 if value == "stamp" else 0
 
-    assert core_utils.split_archive_name("proj.stamp", parse_suffix) == ("proj", 123)
-    assert core_utils.split_archive_name("proj.invalid", parse_suffix) == ("proj.invalid", 0)
+    assert core_utils.split_archive_name("proj.stamp", parse_suffix) == ("proj.stamp", 0)
+
+
+def test_split_archive_name_supports_yyyy_mm_dd_prefix() -> None:
+    def parse_suffix(_value: str) -> int:
+        return 0
+
+    stem, ts = core_utils.split_archive_name("2026-05-11_demo", parse_suffix)
+    assert stem == "demo"
+    assert ts > 0
 
 
 def test_normalize_restore_target_rejects_outside_base(tmp_path: Path) -> None:

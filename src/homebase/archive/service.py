@@ -43,7 +43,7 @@ def archive_pack_internal(
     *,
     archive_require_dir: Callable[[Path, Path], None],
     base_marker_file: str,
-    packed_archive_suffix: str,
+    packed_archive_name: Callable[[Path], str],
     ensure_safe_cwd: Callable[[Path, Path], None],
     invalidate_packed_cache_path: Callable[[Path], None],
 ) -> Path:
@@ -51,11 +51,11 @@ def archive_pack_internal(
     if not (src / base_marker_file).is_file():
         raise ValueError(f"cannot pack: missing {base_marker_file}")
 
-    target = src.with_name(f"{src.name}{packed_archive_suffix}")
+    target = src.with_name(packed_archive_name(src))
     if target.exists():
         raise ValueError(f"target exists: {target.name}")
 
-    tmp_fd, tmp_name = tempfile.mkstemp(prefix=f".{src.name}.", suffix=packed_archive_suffix, dir=str(src.parent))
+    tmp_fd, tmp_name = tempfile.mkstemp(prefix=f".{src.name}.", suffix=".tgz", dir=str(src.parent))
     os.close(tmp_fd)
     tmp = Path(tmp_name)
     try:

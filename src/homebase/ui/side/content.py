@@ -408,7 +408,7 @@ def build_side_files_text(
     fmt_size_human: Callable[[int], str],
 ) -> str:
     if row.packed:
-        lines = ["[cyan]packed[/]: yes (.base-pkg.tgz)"]
+        lines = ["[cyan]packed[/]: yes (.tgz)"]
         lines.append(f"[cyan]file[/]: {app._esc(row.path.name)}")
         lines.append(
             f"[cyan]size[/]: {fmt_size_human(row.size_bytes)} [dim]({row.size_bytes} bytes, cached)[/]"

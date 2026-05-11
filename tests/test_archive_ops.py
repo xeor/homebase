@@ -19,7 +19,7 @@ def test_archive_destination_uses_prefix(tmp_path: Path) -> None:
         archive_iso_from_ts=lambda _ts: "ignored",
         archive_now_iso=lambda: "2025-01-01T00:00:00+00:00",
     )
-    assert out == base / "_archive" / "team" / "alpha" / "proj.2025-01-01T00:00:00+00:00"
+    assert out == base / "_archive" / "team" / "alpha" / "2025-01-01_proj"
 
 
 def test_remove_placeholder_target(tmp_path: Path) -> None:

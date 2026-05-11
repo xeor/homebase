@@ -55,11 +55,11 @@ def build_bulk_confirm_payload(
     elif action == "restore":
         lines.append("[cyan]effect[/]: move selected archive folders back to restore targets")
     elif action == "pack":
-        lines.append("[cyan]effect[/]: compress selected archive folders to .base-pkg.tgz")
+        lines.append("[cyan]effect[/]: compress selected archive folders to .tgz")
     elif action == "unpack":
-        lines.append("[cyan]effect[/]: expand selected .base-pkg.tgz files back to folders")
+        lines.append("[cyan]effect[/]: expand selected .tgz files back to folders")
     elif action == "toggle_pack":
-        lines.append("[cyan]effect[/]: pack folders and unpack .base-pkg.tgz entries in one pass")
+        lines.append("[cyan]effect[/]: pack folders and unpack .tgz entries in one pass")
     elif action == "delete":
         lines.append("[cyan]effect[/]: permanently remove selected folders from disk")
         lines.append("[bold red]warning[/]: this cannot be undone")

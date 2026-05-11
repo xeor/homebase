@@ -43,7 +43,11 @@ def notes_template_context(
         pass
     restore_to = str(row.restore_target) if row.restore_target is not None else ""
     archive_prefix = "_archive/" if row.archived else ""
-    archive_prefixed_name = f"{archive_prefix}{row.name}"
+    archive_name = row.name
+    if row.archived:
+        if row.archived_ts > 0:
+            archive_name = f"{fmt_ymd(row.archived_ts)}_{row.name}"
+    archive_prefixed_name = f"{archive_prefix}{archive_name}"
     out = {
         "NAME": row.name,
         "PROJECT_NAME": row.name,

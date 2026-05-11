@@ -158,6 +158,7 @@ from .actions import bulk_dispatch as textual_ui_bulk_dispatch
 from .actions import bulk_preflight as textual_ui_bulk_preflight
 from .actions import dispatch as textual_ui_action_dispatch
 from .actions import item_edits as textual_ui_item_edits
+from .actions import note_sync as textual_ui_note_sync
 from .actions import pick_actions as textual_ui_pick_actions
 from .actions import project_create as textual_ui_project_create
 from .actions import tag_actions as textual_ui_tag_actions
@@ -2834,6 +2835,123 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
             row_build_errors=_ROW_BUILD_ERRORS,
         )
 
+    def _restore_note_sync_precheck(
+        self,
+        archived_path: Path,
+        restore_target: Path,
+    ) -> tuple[bool, str, Path | None, Path | None, str]:
+        resolve_notes = getattr(self, "_resolve_notes_path_for_row", None)
+        enabled, command_template = textual_ui_note_sync.note_sync_config(self, "restore")
+        if not enabled:
+            return True, "", None, None, ""
+        if not callable(resolve_notes):
+            return True, "", None, None, ""
+        hit = self._find_row(archived_path)
+        if hit is None:
+            return True, "", None, None, ""
+        rows, idx = hit
+        archived_row = rows[idx]
+        try:
+            old_note_path = resolve_notes(archived_row)
+        except (OSError, ValueError, RuntimeError):
+            return True, "", None, None, ""
+        try:
+            if not old_note_path.is_file():
+                return True, "", None, None, ""
+        except OSError as exc:
+            return False, str(exc), None, None, ""
+
+        restored_row = ProjectRow(
+            path=restore_target,
+            name=restore_target.name,
+            branch=archived_row.branch,
+            dirty=archived_row.dirty,
+            last=archived_row.last,
+            src=archived_row.src,
+            created=archived_row.created,
+            tags=list(archived_row.tags),
+            properties=list(archived_row.properties),
+            description=archived_row.description,
+            created_ts=archived_row.created_ts,
+            last_ts=archived_row.last_ts,
+            git_ts=archived_row.git_ts,
+            opened_ts=archived_row.opened_ts,
+            is_fork=archived_row.is_fork,
+            is_tmp=archived_row.is_tmp,
+            archived=False,
+            restore_target=None,
+            archived_ts=0,
+            wip=archived_row.wip,
+            suffix=archived_row.suffix,
+            packed=False,
+        )
+        try:
+            new_note_path = resolve_notes(restored_row)
+        except (OSError, ValueError, RuntimeError) as exc:
+            return False, f"new note path resolution failed ({exc})", None, None, ""
+        if new_note_path != old_note_path and new_note_path.exists():
+            return False, f"target note exists ({new_note_path})", None, None, ""
+        try:
+            if not new_note_path.parent.is_dir() or not os.access(
+                new_note_path.parent, os.W_OK | os.X_OK
+            ):
+                return (
+                    False,
+                    f"no write permission for note destination ({new_note_path.parent})",
+                    None,
+                    None,
+                    "",
+                )
+        except OSError as exc:
+            return False, str(exc), None, None, ""
+        rendered = ""
+        if command_template:
+            try:
+                rendered = textual_ui_note_sync.build_note_sync_command(
+                    self,
+                    source_row=archived_row,
+                    target_row=restored_row,
+                    old_note_path=old_note_path,
+                    new_note_path=new_note_path,
+                    command_template=command_template,
+                )
+            except (TypeError, ValueError) as exc:
+                return False, f"restore note command render failed ({exc})", None, None, ""
+            if not rendered:
+                return False, "restore note command rendered empty", None, None, ""
+        return True, "", old_note_path, new_note_path, rendered
+
+    def _sync_note_after_restore(
+        self,
+        old_note_path: Path | None,
+        new_note_path: Path | None,
+        rendered_command: str,
+    ) -> tuple[bool, str]:
+        if old_note_path is None or new_note_path is None:
+            return True, ""
+        if old_note_path == new_note_path:
+            return True, ""
+        try:
+            if rendered_command:
+                proc = subprocess.run(
+                    ["sh", "-lc", rendered_command],
+                    cwd=str(self.base_dir),
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    capture_output=True,
+                    check=False,
+                )
+                if proc.returncode != 0:
+                    err = (proc.stderr or "").strip() or f"exit={proc.returncode}"
+                    return False, err
+            else:
+                new_note_path.parent.mkdir(parents=True, exist_ok=True)
+                old_note_path.rename(new_note_path)
+        except OSError as exc:
+            return False, str(exc)
+        return True, ""
+
     def _process_next_restore(self) -> None:
         if not self.pending_restore_queue:
             self._busy_stop()
@@ -2849,8 +2967,24 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
             return
 
         path = self.pending_restore_queue[0]
+        restore_target = archived_restore_target(self.base_dir, path)
+        ok_note, note_reason, old_note_path, new_note_path, rendered_note_cmd = self._restore_note_sync_precheck(
+            path,
+            restore_target,
+        )
+        if not ok_note:
+            self._log(f"restore skipped for {path.name}: {note_reason}", "warn")
+            self.notify(f"Restore skipped: {note_reason}", severity="warning")
+            self.pending_restore_failed += 1
+            self.multi_selected.discard(path)
+            self.pending_restore_queue.pop(0)
+            self._process_next_restore()
+            return
         try:
             restored = archive_restore_internal(self.base_dir, path, sync_tags=False)
+            note_ok, note_err = self._sync_note_after_restore(old_note_path, new_note_path, rendered_note_cmd)
+            if not note_ok:
+                raise ValueError(f"note sync failed ({note_err})")
             self._log(f"restored: {path.name} -> {restored}", "info")
             self.pending_restore_ok += 1
             self._remove_paths_local([path])
@@ -2927,6 +3061,20 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
             self._process_next_restore()
             return
 
+        ok_note, note_reason, old_note_path, new_note_path, rendered_note_cmd = self._restore_note_sync_precheck(
+            archived_path,
+            target,
+        )
+        if not ok_note:
+            self._log(f"restore skipped for {archived_path.name}: {note_reason}", "warn")
+            self.notify(f"Restore skipped: {note_reason}", severity="warning")
+            self.pending_restore_failed += 1
+            self.multi_selected.discard(archived_path)
+            self.pending_restore_queue.pop(0)
+            self._busy_start("restoring target items")
+            self._process_next_restore()
+            return
+
         try:
             self._busy_start("restoring target items")
             restored = archive_restore_internal(
@@ -2935,6 +3083,9 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
                 target_override=target,
                 sync_tags=False,
             )
+            note_ok, note_err = self._sync_note_after_restore(old_note_path, new_note_path, rendered_note_cmd)
+            if not note_ok:
+                raise ValueError(f"note sync failed ({note_err})")
             self._log(f"restored: {archived_path.name} -> {restored}", "info")
             self.pending_restore_ok += 1
             self._remove_paths_local([archived_path])

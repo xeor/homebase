@@ -244,6 +244,38 @@ def test_load_reconcile_config_default_profile_overrides_apply() -> None:
     assert out["active"]["batch_size"] == 7
 
 
+def test_load_notes_config_supports_log_and_rename_blocks() -> None:
+    out = workspace_settings.load_notes_config(
+        {
+            "notes": {
+                "path_template": "{{ PROJECT_PATH }}/NOTES.md",
+                "log": {
+                    "section": {"title": "Journal", "level": 3},
+                    "entry": {"timestamp_format": "%Y-%m-%d"},
+                },
+                "rename": {
+                    "enabled": True,
+                    "command": "obsidian-rename {{ OLD_NOTE_PATH_Q }} {{ NEW_NOTE_PATH_Q }}",
+                },
+            }
+        },
+        defaults={
+            "path_template": "{{ PROJECT_PATH }}/NOTES.md",
+            "open_command": "vi {{ NOTE_PATH_Q }}",
+            "create_command": "touch {{ NOTE_PATH_Q }}",
+            "log": {"section": {"title": "Log", "level": 2}, "entry": {"timestamp_format": "iso-seconds"}},
+            "rename": {"enabled": True, "command": ""},
+        },
+    )
+    assert out["log"]["section"]["title"] == "Journal"
+    assert out["log"]["section"]["level"] == 3
+    assert out["log"]["entry"]["timestamp_format"] == "%Y-%m-%d"
+    assert out["rename"]["enabled"] is True
+    assert out["rename"]["command"] == "obsidian-rename {{ OLD_NOTE_PATH_Q }} {{ NEW_NOTE_PATH_Q }}"
+    assert "archive" not in out
+    assert "restore" not in out
+
+
 def test_nested_discovery_set_and_get_roundtrip() -> None:
     updated = workspace_settings.set_nested_discovery_enabled({}, enabled=True)
     assert workspace_settings.nested_discovery_enabled(updated) is True

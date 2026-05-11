@@ -4,6 +4,14 @@ from pathlib import Path
 from typing import Callable
 
 
+def _packed_target_exists_for_dir(path: Path) -> bool:
+    pattern = f"*_{path.name}.tgz"
+    for hit in path.parent.glob(pattern):
+        if hit.is_file():
+            return True
+    return False
+
+
 def preflight_bulk_action(
     action: str,
     paths: list[Path],
@@ -49,7 +57,7 @@ def preflight_bulk_action(
                 reason = policy_reason_archived_dir(path, base_dir) or ""
             if not reason and not (path / base_marker_file).is_file():
                 reason = f"missing {base_marker_file}"
-            elif not reason and path.with_name(f"{path.name}.base-pkg.tgz").exists():
+            elif not reason and _packed_target_exists_for_dir(path):
                 reason = "packed target exists"
         elif action == "unpack":
             if not exists:
@@ -73,7 +81,7 @@ def preflight_bulk_action(
                     reason = policy_reason_archived_dir(path, base_dir) or ""
                 if not reason and not (path / base_marker_file).is_file():
                     reason = f"missing {base_marker_file}"
-                elif not reason and path.with_name(f"{path.name}.base-pkg.tgz").exists():
+                elif not reason and _packed_target_exists_for_dir(path):
                     reason = "packed target exists"
         elif action == "delete":
             if not exists:

@@ -35,14 +35,15 @@ def archive_destination(
     rel = src.relative_to(base_dir)
     prefix = resolve_archive_prefix(src, base_dir)
     stem, parsed_ts = split_archive_name(src.name)
-    ts = archive_iso_from_ts(parsed_ts) if parsed_ts > 0 else archive_now_iso()
+    ts_iso = archive_iso_from_ts(parsed_ts) if parsed_ts > 0 else archive_now_iso()
+    date_prefix = ts_iso[:10]
     if prefix and rel.parent != Path("."):
-        return archive_root / rel.parent / prefix / f"{stem}.{ts}"
+        return archive_root / rel.parent / prefix / f"{date_prefix}_{stem}"
     if prefix:
-        return archive_root / prefix / f"{stem}.{ts}"
+        return archive_root / prefix / f"{date_prefix}_{stem}"
     if rel.parent != Path("."):
-        return archive_root / rel.parent / f"{stem}.{ts}"
-    return archive_root / f"{stem}.{ts}"
+        return archive_root / rel.parent / f"{date_prefix}_{stem}"
+    return archive_root / f"{date_prefix}_{stem}"
 
 
 def archive_parent_for(src: Path, base_dir: Path, *, archive_dir_name: str) -> Path:

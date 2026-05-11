@@ -34,6 +34,7 @@ from ..core.constants import (
 from ..ui import run_textual_ui as _run_textual_ui
 from ..ui.context import UIContext
 from ..workspace.projects import run_post_commands
+from ..workspace.startup_validation import run_startup_validations
 from .completion import completion_candidates, completion_script
 from .dispatch import dispatch_command
 from .parser import build_cli_parser
@@ -137,6 +138,16 @@ def main(argv: list[str]) -> int:
     if ns.command == "help" and str(getattr(ns, "topic", "")).strip() != "actions":
         parser.print_help()
         return 0
+
+    startup_issues = run_startup_validations(base_dir)
+    if startup_issues:
+        print("startup validation failed:", file=sys.stderr)
+        for issue in startup_issues:
+            if issue.path is not None:
+                print(f"- {issue.message}: {issue.path}", file=sys.stderr)
+            else:
+                print(f"- {issue.message}", file=sys.stderr)
+        return 1
 
     try:
         runtime_builtins = dict(BUILTIN_ACTIONS)
