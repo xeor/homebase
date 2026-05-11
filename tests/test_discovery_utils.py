@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from homebase.workspace import discovery as discovery_utils
@@ -27,6 +28,24 @@ def test_discovery_should_skip_active_walk_path_for_archive(tmp_path: Path) -> N
         cur,
         is_under=lambda p, root: p.resolve().is_relative_to(root.resolve()),
     )
+
+
+def test_discovery_zone_depth_collapses_year_segment(tmp_path: Path) -> None:
+    base = tmp_path / "base"
+    arch = base / "_archive" / "2024"
+    entry = arch / "2024-05-01_foo"
+    entry.mkdir(parents=True)
+
+    mode, depth = discovery_utils.discovery_zone_depth(
+        base,
+        entry,
+        archive_dir_name="_archive",
+        mode_archive="archive",
+        mode_active="active",
+        archive_year_re=re.compile(r"^\d{4}$"),
+    )
+    assert mode == "archive"
+    assert depth == 1
 
 
 def test_collect_projects_discovers_top_level(tmp_path: Path) -> None:

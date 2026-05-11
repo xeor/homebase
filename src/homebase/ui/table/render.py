@@ -104,14 +104,13 @@ def refresh_table(
         tuple(sorted(str(path) for path in app.open_pane_overflow_projects)),
         busy_frame_sig,
     )
-    prev_sig = app._table_render_signature_by_view.get(app.view_mode)
     if (
-        prev_sig == render_sig
+        app._table_render_signature == render_sig
         and not app._restore_pending.get(app.view_mode, False)
         and not app._restore_apply_scroll.get(app.view_mode, False)
     ):
         return
-    app._table_render_signature_by_view[app.view_mode] = render_sig
+    app._table_render_signature = render_sig
 
     prev_scroll_x = 0
     prev_scroll_y = 0
@@ -365,7 +364,7 @@ def refresh_table(
             ),
             "size": fmt_size_human(row.size_bytes),
             "archived_at": archived_at,
-            "restore_to": restore_short,
+            "original_name": restore_short,
         }
 
         date_styles = {

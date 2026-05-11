@@ -46,3 +46,24 @@ def test_archived_restore_target_handles_new_packed_name() -> None:
     archived_entry = base_dir / ARCHIVE_DIR_NAME / "2026-05-11_demo.tgz"
     target = rows.archived_restore_target(base_dir, archived_entry)
     assert target == base_dir / "demo"
+
+
+def test_archived_restore_target_strips_year_subdir() -> None:
+    base_dir = Path("/tmp/base")
+    archived_entry = base_dir / ARCHIVE_DIR_NAME / "2024" / "2024-05-01_demo"
+    target = rows.archived_restore_target(base_dir, archived_entry)
+    assert target == base_dir / "demo"
+
+
+def test_archived_restore_target_strips_year_for_packed() -> None:
+    base_dir = Path("/tmp/base")
+    archived_entry = base_dir / ARCHIVE_DIR_NAME / "2024" / "2024-05-01_demo.tgz"
+    target = rows.archived_restore_target(base_dir, archived_entry)
+    assert target == base_dir / "demo"
+
+
+def test_archived_restore_target_strips_prefix_with_zero_segments() -> None:
+    base_dir = Path("/tmp/base")
+    archived_entry = base_dir / ARCHIVE_DIR_NAME / "2003" / "2003-00-00_ghost"
+    target = rows.archived_restore_target(base_dir, archived_entry)
+    assert target == base_dir / "ghost"

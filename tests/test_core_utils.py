@@ -43,6 +43,34 @@ def test_split_archive_name_supports_yyyy_mm_dd_prefix() -> None:
     assert ts > 0
 
 
+def test_split_archive_name_strips_prefix_with_zero_day() -> None:
+    stem, ts = core_utils.split_archive_name("2008-09-00_phpmylogin", lambda _v: 0)
+    assert stem == "phpmylogin"
+    assert ts == 0
+
+
+def test_split_archive_name_strips_prefix_with_zero_month_and_day() -> None:
+    stem, ts = core_utils.split_archive_name("2003-00-00_invisible", lambda _v: 0)
+    assert stem == "invisible"
+    assert ts == 0
+
+
+def test_normalize_date_prefix_replaces_zero_month_and_day() -> None:
+    assert core_utils.normalize_date_prefix("2003-00-00_x") == "2003-01-01_x"
+
+
+def test_normalize_date_prefix_replaces_zero_day_only() -> None:
+    assert core_utils.normalize_date_prefix("2008-09-00_phpmylogin.tgz") == "2008-09-01_phpmylogin.tgz"
+
+
+def test_normalize_date_prefix_noop_on_valid_date() -> None:
+    assert core_utils.normalize_date_prefix("2025-05-11_demo") == "2025-05-11_demo"
+
+
+def test_normalize_date_prefix_noop_without_prefix() -> None:
+    assert core_utils.normalize_date_prefix("weird-no-date") == "weird-no-date"
+
+
 def test_normalize_restore_target_rejects_outside_base(tmp_path: Path) -> None:
     base_dir = tmp_path / "base"
     base_dir.mkdir()

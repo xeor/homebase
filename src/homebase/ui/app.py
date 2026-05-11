@@ -486,8 +486,8 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
         self.error_counts: dict[str, int] = {}
         self.worker_debug_events: list[tuple[str, str]] = []
         self._main_table_was_locked = False
-        self._table_render_signature_by_view: dict[str, tuple[object, ...]] = {}
-        self._table_column_signature_by_view: dict[str, tuple[object, ...]] = {}
+        self._table_render_signature: tuple[object, ...] | None = None
+        self._table_column_signature: tuple[object, ...] | None = None
         self._property_cell_cache: dict[tuple[str, ...], object] = {}
         self._property_cell_cache_sig: int = -1
         self._state_dirty = False

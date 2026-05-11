@@ -14,7 +14,7 @@ def test_cmd_archive_ls_no_archives(capsys, tmp_path: Path) -> None:
         base,
         str(src),
         policy_reason_outside_base=lambda _p, _b: None,
-        archive_parent_for=lambda _s, _b: base / "_archive",
+        archive_root=lambda b: b / "_archive",
     )
     out = capsys.readouterr().out
     assert rc == 0

@@ -82,7 +82,7 @@ class _FakeApp:
     def __init__(self, rows: list[ProjectRow]) -> None:
         self._rows = rows
         self._table = _FakeDataTable()
-        self._table_render_signature_by_view: dict[str, tuple[object, ...]] = {}
+        self._table_render_signature: tuple[object, ...] | None = None
         self._property_cell_cache: dict[tuple[str, ...], object] = {}
         self._property_cell_cache_sig: int = -1
         self.view_mode = "active"
@@ -159,20 +159,20 @@ def test_refresh_table_skips_noop_rebuild() -> None:
 def test_render_signature_ignores_busy_frame_when_no_rows_refreshing() -> None:
     app = _FakeApp([_row(Path("/tmp/a"), "a")])
     _run_refresh(app)
-    sig_quiet = app._table_render_signature_by_view["active"]
+    sig_quiet = app._table_render_signature
 
     app._busy_frame_index = (app._busy_frame_index + 1) % len(app._busy_frames)
     _run_refresh(app)
-    assert app._table_render_signature_by_view["active"] == sig_quiet
+    assert app._table_render_signature == sig_quiet
 
     app.git_refresh_paths = {Path("/tmp/a")}
     _run_refresh(app)
-    sig_refreshing = app._table_render_signature_by_view["active"]
+    sig_refreshing = app._table_render_signature
     assert sig_refreshing != sig_quiet
 
     app._busy_frame_index = (app._busy_frame_index + 1) % len(app._busy_frames)
     _run_refresh(app)
-    assert app._table_render_signature_by_view["active"] != sig_refreshing
+    assert app._table_render_signature != sig_refreshing
 
 
 def test_property_cell_cache_persists_across_renders_and_clears_on_sig_change() -> None:
@@ -208,11 +208,11 @@ def test_property_cell_cache_persists_across_renders_and_clears_on_sig_change() 
     first_calls = len(calls)
     assert first_calls == 1
 
-    app._table_render_signature_by_view.clear()
+    app._table_render_signature = None
     _refresh(7)
     assert len(calls) == first_calls
 
-    app._table_render_signature_by_view.clear()
+    app._table_render_signature = None
     _refresh(8)
     assert len(calls) == first_calls + 1
 

@@ -8,6 +8,8 @@ from .models import BuiltinActionMeta, PropertyDef
 
 TS_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:Z|[+-]\d{2}:?\d{2})$")
 DATE_PREFIX_RE = re.compile(r"^\d{4}-\d{2}-\d{2}_")
+ARCHIVE_YEAR_DIR_RE = re.compile(r"^\d{4}$")
+ARCHIVE_YEAR_PREFIX_RE = re.compile(r"^\d{4}")
 
 DEFAULT_ARCHIVE_TZ_NAME = "Europe/Oslo"
 ARCHIVE_TZ_NAME = DEFAULT_ARCHIVE_TZ_NAME
@@ -655,8 +657,8 @@ TABLE_COLUMN_CATALOG: list[dict[str, object]] = [
         "views": ["archive"],
     },
     {
-        "id": "restore_to",
-        "label": "RESTORE_TO",
+        "id": "original_name",
+        "label": "ORIGINAL_NAME",
         "default": True,
         "width": 30,
         "views": ["archive"],
@@ -682,7 +684,7 @@ SORT_MODE_SPECS: list[dict[str, object]] = [
     },
     {"id": "size", "label": "size", "views": ["active", "archive"]},
     {"id": "archived", "label": "archived date", "views": ["archive"]},
-    {"id": "restore_to", "label": "restore target", "views": ["archive"]},
+    {"id": "original_name", "label": "original name", "views": ["archive"]},
 ]
 PROFILE_RECONCILE_ACTIVE = "reconcile-active"
 PROFILE_RECONCILE_ARCHIVE = "reconcile-archive"

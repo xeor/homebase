@@ -50,9 +50,10 @@ def print_help() -> None:
         ("b archive restore <archived-path>", "restore exact archived entry"),
         ("b rm [--force-outside-base] [path]", "delete directory recursively"),
         (
-            "b migrate [--archive] [--flat] <path> [path ...]",
+            "b migrate [--archive] <path> [path ...]",
             "move directories into ~/base or _archive",
         ),
+        ("b archive reorganize [--dry-run]", "move flat archive entries under year subdirs"),
         ("b fix [path]", "interactive repairs for a directory"),
         ("b a [path]", "alias for b archive mv [path]"),
     ]

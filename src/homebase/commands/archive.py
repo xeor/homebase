@@ -11,6 +11,7 @@ from ..core import utils as core_utils
 from ..core.constants import (
     ARCHIVE_DIR_NAME,
     ARCHIVE_TZ,
+    ARCHIVE_YEAR_DIR_RE,
     BASE_MARKER_FILE,
     ENV_BASE_DIR,
     PACKED_ARCHIVE_SUFFIX,
@@ -66,14 +67,6 @@ def _prompt_readline(
 
 def _prompt_yes_no(question: str, default: bool) -> bool:
     return prompting.prompt_yes_no(question, default=default, read=_prompt_readline)
-
-
-def archive_parent_for(src: Path, base_dir: Path) -> Path:
-    return archive_ops.archive_parent_for(
-        src,
-        base_dir,
-        archive_dir_name=ARCHIVE_DIR_NAME,
-    )
 
 
 def confirm() -> None:
@@ -308,7 +301,7 @@ def cmd_archive_ls(base_dir: Path, path: str = ".") -> int:
         base_dir,
         path,
         policy_reason_outside_base=_policy_reason_outside_base,
-        archive_parent_for=archive_parent_for,
+        archive_root=_archive_root,
     )
 
 
@@ -331,7 +324,7 @@ def cmd_archive_undo(base_dir: Path, path: str = ".") -> int:
         base_dir,
         path,
         policy_reason_outside_base=_policy_reason_outside_base,
-        archive_parent_for=archive_parent_for,
+        archive_root=_archive_root,
         cmd_archive_restore_entry=cmd_archive_restore_entry,
     )
 
@@ -347,9 +340,19 @@ def cmd_rm(path: str = ".", force_outside_base: bool = False) -> int:
     )
 
 
-def cmd_migrate(
-    paths: list[str], archive_mode: bool = False, flat_mode: bool = False
-) -> int:
+def cmd_archive_reorganize(base_dir: Path, dry_run: bool = False) -> int:
+    return commands_workspace.cmd_archive_reorganize(
+        base_dir,
+        archive_dir_name=ARCHIVE_DIR_NAME,
+        year_from_name=core_utils.archive_year_from_name,
+        is_year_dir=lambda name: bool(ARCHIVE_YEAR_DIR_RE.match(name)),
+        normalize_name=core_utils.normalize_date_prefix,
+        confirm=confirm,
+        dry_run=dry_run,
+    )
+
+
+def cmd_migrate(paths: list[str], archive_mode: bool = False) -> int:
     return commands_workspace.cmd_migrate(
         paths,
         archive_dir_name=ARCHIVE_DIR_NAME,
@@ -360,9 +363,6 @@ def cmd_migrate(
                 ARCHIVE_TZ,
             ),
         ),
-        archive_iso_from_ts=lambda ts: core_utils.archive_iso_from_ts(ts, ARCHIVE_TZ),
-        archive_now_iso=lambda: core_utils.archive_now_iso(ARCHIVE_TZ),
-        is_under=core_utils.is_under,
         archive_destination=archive_destination,
         ensure_safe_cwd=_ensure_safe_cwd,
         ensure_base_marker=ensure_base_marker,
@@ -370,7 +370,6 @@ def cmd_migrate(
         sync_tag_symlinks=sync_tag_symlinks,
         confirm=confirm,
         archive_mode=archive_mode,
-        flat_mode=flat_mode,
     )
 
 

@@ -28,11 +28,12 @@ def dispatch_command(
     cmd_utils: Callable[[Path, str], int],
     cmd_archive_mv: Callable[[Path, str], int],
     cmd_rm: Callable[[str, bool], int],
-    cmd_migrate: Callable[[list[str], bool, bool], int],
+    cmd_migrate: Callable[[list[str], bool], int],
     cmd_fix: Callable[[str], int],
     cmd_archive_ls: Callable[[Path, str], int],
     cmd_archive_undo: Callable[[Path, str], int],
     cmd_archive_restore_entry: Callable[[Path, str], int],
+    cmd_archive_reorganize: Callable[[Path, bool], int],
     cmd_tmux_load: Callable[[str], int],
     cmd_tmux_save: Callable[[Path, str, str, bool, bool, str, str], int],
     cmd_benchmark: Callable[[Path, Path, str, str, bool, set[str] | None], int],
@@ -84,7 +85,7 @@ def dispatch_command(
     if ns.command == "rm":
         return cmd_rm(str(ns.path), bool(ns.force_outside_base))
     if ns.command == "migrate":
-        return cmd_migrate([str(p) for p in ns.paths], bool(ns.archive), bool(ns.flat))
+        return cmd_migrate([str(p) for p in ns.paths], bool(ns.archive))
     if ns.command == "fix":
         return cmd_fix(str(ns.path))
     if ns.command == "archive":
@@ -96,6 +97,8 @@ def dispatch_command(
             return cmd_archive_undo(base_dir, str(ns.path))
         if ns.archive_subcommand == "restore":
             return cmd_archive_restore_entry(base_dir, str(ns.archived_path))
+        if ns.archive_subcommand == "reorganize":
+            return cmd_archive_reorganize(base_dir, bool(ns.dry_run))
         return 1
     if ns.command == "tmux":
         if ns.tmux_subcommand == "load":

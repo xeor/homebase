@@ -8,7 +8,7 @@ from homebase.archive import service as archive_service
 def test_archive_move_internal_moves_directory(tmp_path: Path) -> None:
     base = tmp_path / "base"
     src = base / "p"
-    dst = base / "_archive" / "p.2025"
+    dst = base / "_archive" / "2025" / "2025-01-15_p"
     src.mkdir(parents=True)
 
     out = archive_service.archive_move_internal(

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 from collections.abc import Callable
 from pathlib import Path
 
@@ -16,6 +17,10 @@ def resolve_include_nested(
     return bool(include_nested)
 
 
+def _is_archive_year_dir(name: str, year_re: re.Pattern[str] | None) -> bool:
+    return year_re is not None and bool(year_re.match(name))
+
+
 def discovery_zone_depth(
     base_dir: Path,
     path: Path,
@@ -23,10 +28,17 @@ def discovery_zone_depth(
     archive_dir_name: str,
     mode_archive: str,
     mode_active: str,
+    archive_year_re: re.Pattern[str] | None = None,
 ) -> tuple[str, int]:
     rel = path.resolve().relative_to(base_dir.resolve())
     if rel.parts and rel.parts[0] == archive_dir_name:
-        return mode_archive, max(0, len(rel.parts) - 1)
+        depth = max(0, len(rel.parts) - 1)
+        if (
+            len(rel.parts) >= 2
+            and _is_archive_year_dir(rel.parts[1], archive_year_re)
+        ):
+            depth = max(0, depth - 1)
+        return mode_archive, depth
     return mode_active, len(rel.parts)
 
 

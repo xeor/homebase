@@ -8,6 +8,82 @@ from pathlib import Path
 from typing import Callable
 
 
+def cmd_archive_reorganize(
+    base_dir: Path,
+    *,
+    archive_dir_name: str,
+    year_from_name: Callable[[str], str | None],
+    is_year_dir: Callable[[str], bool],
+    normalize_name: Callable[[str], str],
+    confirm: Callable[[], None],
+    dry_run: bool,
+) -> int:
+    root = base_dir / archive_dir_name
+    if not root.is_dir():
+        print(f"no archive dir: {root}")
+        return 0
+
+    moves: list[tuple[Path, Path, bool]] = []
+    skipped: list[tuple[Path, str]] = []
+
+    def _plan(entry: Path) -> None:
+        name = entry.name
+        year = year_from_name(name)
+        if year is None:
+            skipped.append((entry, "no year prefix"))
+            return
+        new_name = normalize_name(name)
+        renamed = new_name != name
+        dest = root / year / new_name
+        if dest == entry:
+            return
+        if dest.exists():
+            skipped.append((entry, f"destination exists: {dest}"))
+            return
+        moves.append((entry, dest, renamed))
+
+    for entry in sorted(root.iterdir()):
+        if is_year_dir(entry.name) and entry.is_dir():
+            for child in sorted(entry.iterdir()):
+                _plan(child)
+            continue
+        _plan(entry)
+
+    print(f"archive root: {root}")
+    print(f"moves: {len(moves)}")
+    for src, dest, renamed in moves:
+        tag = " [normalized 00→01]" if renamed else ""
+        print(f"  {src.name} -> {dest.relative_to(root)}{tag}")
+    if skipped:
+        print("")
+        print(f"skipped: {len(skipped)}")
+        for src, reason in skipped:
+            print(f"  {src.name}: {reason}")
+    if not moves:
+        return 0
+    if dry_run:
+        print("")
+        print("dry-run: no changes made")
+        return 0
+
+    print("")
+    confirm()
+    moved = 0
+    failed = 0
+    for src, dest, _renamed in moves:
+        try:
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(src), str(dest))
+            moved += 1
+            print(f"moved: {src.name} -> {dest.relative_to(root)}")
+        except (OSError, shutil.Error) as exc:
+            failed += 1
+            print(f"failed: {src} -> {dest}: {exc}", file=sys.stderr)
+    print("")
+    print(f"done: moved={moved} failed={failed}")
+    return 0 if failed == 0 else 1
+
+
 def cmd_archive_mv(
     base_dir: Path,
     path: str,
@@ -35,23 +111,27 @@ def cmd_archive_ls(
     path: str,
     *,
     policy_reason_outside_base: Callable[[Path, Path], str | None],
-    archive_parent_for: Callable[[Path, Path], Path],
+    archive_root: Callable[[Path], Path],
 ) -> int:
     src = Path(path).resolve()
     if policy_reason_outside_base(src, base_dir):
         print(f"path not under base: {src}", file=sys.stderr)
         return 1
-    parent = archive_parent_for(src, base_dir)
-    if not parent.is_dir():
+    root = archive_root(base_dir)
+    if not root.is_dir():
         print("no archives found")
         return 0
-    matches = sorted(parent.glob(f"{src.name}.*"))
+    name = src.name
+    matches = sorted(
+        list(root.glob(f"*/*_{name}"))
+        + list(root.glob(f"*/*_{name}.tgz"))
+    )
     if not matches:
         print("no archives found")
         return 0
-    print(f"{parent}/")
+    print(f"{root}/")
     for match in matches:
-        print(match.name)
+        print(match.relative_to(root))
     return 0
 
 
@@ -82,19 +162,24 @@ def cmd_archive_undo(
     path: str,
     *,
     policy_reason_outside_base: Callable[[Path, Path], str | None],
-    archive_parent_for: Callable[[Path, Path], Path],
+    archive_root: Callable[[Path], Path],
     cmd_archive_restore_entry: Callable[[Path, str], int],
 ) -> int:
     src = Path(path).resolve()
     if policy_reason_outside_base(src, base_dir):
         print(f"path not under base: {src}", file=sys.stderr)
         return 1
-    parent = archive_parent_for(src, base_dir)
-    latest = sorted(parent.glob(f"{src.name}.*"), reverse=True)
-    if not latest:
-        print(f"no archives found for: {src.name}", file=sys.stderr)
+    root = archive_root(base_dir)
+    name = src.name
+    candidates = sorted(
+        list(root.glob(f"*/*_{name}"))
+        + list(root.glob(f"*/*_{name}.tgz")),
+        reverse=True,
+    )
+    if not candidates:
+        print(f"no archives found for: {name}", file=sys.stderr)
         return 1
-    return cmd_archive_restore_entry(base_dir, str(latest[0]))
+    return cmd_archive_restore_entry(base_dir, str(candidates[0]))
 
 
 def cmd_rm(
@@ -130,9 +215,6 @@ def cmd_migrate(
     *,
     archive_dir_name: str,
     split_archive_name: Callable[[str], tuple[str, int]],
-    archive_iso_from_ts: Callable[[int], str],
-    archive_now_iso: Callable[[], str],
-    is_under: Callable[[Path, Path], bool],
     archive_destination: Callable[[Path, Path], Path],
     ensure_safe_cwd: Callable[[Path, Path], None],
     ensure_base_marker: Callable[[Path], None],
@@ -140,18 +222,13 @@ def cmd_migrate(
     sync_tag_symlinks: Callable[[Path], str | None],
     confirm: Callable[[], None],
     archive_mode: bool,
-    flat_mode: bool,
 ) -> int:
-    if flat_mode and not archive_mode:
-        print("--flat is only valid with --archive", file=sys.stderr)
-        return 1
     if not paths:
-        print("usage: b migrate [--archive] [--flat] <path> [path ...]", file=sys.stderr)
+        print("usage: b migrate [--archive] <path> [path ...]", file=sys.stderr)
         return 1
 
     target_root = (Path.home() / "base").resolve()
     archive_root = target_root / archive_dir_name
-    cwd = Path.cwd().resolve()
     plans: list[tuple[Path, Path, bool, list[tuple[str, str]]]] = []
     blocked: list[str] = []
 
@@ -197,30 +274,10 @@ def cmd_migrate(
             notes.append(("warn", "SOURCE_IS_FILE"))
 
         if archive_mode:
-            stem, parsed_ts = split_archive_name(src.name)
-            canonical_ts = archive_iso_from_ts(parsed_ts) if parsed_ts > 0 else archive_now_iso()
+            _stem, parsed_ts = split_archive_name(src.name)
             if parsed_ts > 0:
                 notes.append(("pos", "PARSED_EXISTING_TS"))
-            if flat_mode:
-                notes.append(("warn", "FLAT_MODE"))
-                if is_under(src, target_root):
-                    dest = archive_destination(src, target_root)
-                else:
-                    dest = archive_root / f"{stem}.{canonical_ts}"
-            else:
-                if not is_under(src, cwd):
-                    blocked.append(f"outside current dir (use --flat or run from parent): {src}")
-                    continue
-                rel = src.relative_to(cwd)
-                if not rel.parts:
-                    blocked.append(f"invalid relative destination for: {src}")
-                    continue
-                notes.append(("pos", "PRESERVE_REL_PATH"))
-                rel_stem, rel_parsed_ts = split_archive_name(rel.name)
-                rel_ts = archive_iso_from_ts(rel_parsed_ts) if rel_parsed_ts > 0 else canonical_ts
-                if rel_parsed_ts > 0:
-                    notes.append(("pos", "PARSED_REL_TS"))
-                dest = (archive_root / rel).with_name(f"{rel_stem}.{rel_ts}")
+            dest = archive_destination(src, target_root)
         else:
             dest = target_root / src.name
 
@@ -246,12 +303,7 @@ def cmd_migrate(
         return 1
 
     print("migration plan:")
-    if archive_mode:
-        print(f"mode: archive ({'flat' if flat_mode else 'preserve-from-cwd'})")
-        if not flat_mode:
-            print(f"cwd base: {cwd}")
-    else:
-        print("mode: active")
+    print(f"mode: {'archive' if archive_mode else 'active'}")
     print(f"migrate to: {archive_root if archive_mode else target_root}")
     print(f"items to move: {len(plans)}")
     print("")
@@ -282,7 +334,6 @@ def cmd_migrate(
                         "source": str(src),
                         "destination": str(dest),
                         "archive": archive_mode,
-                        "flat": flat_mode,
                         "source_type": "directory",
                         "signals": [label for _level, label in notes],
                     },

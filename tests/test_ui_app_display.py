@@ -29,7 +29,7 @@ class _FakeDisplay(AppDisplayMixin):
         self.view_mode = "active"
         self._table = _FakeDataTable()
         self._visible_column_effective_width_by_id: dict[str, int] = {}
-        self._table_column_signature_by_view: dict[str, tuple[object, ...]] = {}
+        self._table_column_signature: tuple[object, ...] | None = None
 
     def query_one(self, _selector: str, _typ: object = None) -> _FakeDataTable:
         return self._table
@@ -52,3 +52,28 @@ def test_configure_table_columns_skips_clear_when_signature_unchanged() -> None:
 
     app._configure_table_columns()
     assert app._table.clear_calls == first_clear_calls
+
+
+def test_configure_table_columns_reclears_on_view_switch() -> None:
+    class _ViewAwareDisplay(_FakeDisplay):
+        _archive_cols = [
+            {"id": "name", "label": "NAME", "enabled": True, "width": 20},
+            {"id": "original_name", "label": "ORIGINAL_NAME", "enabled": True, "width": 30},
+        ]
+        _active_cols = [
+            {"id": "name", "label": "NAME", "enabled": True, "width": 20},
+            {"id": "git", "label": "GIT", "enabled": True, "width": 14},
+        ]
+
+        def _table_visible_columns_for_view(
+            self, view: str
+        ) -> list[dict[str, object]]:
+            return self._archive_cols if view == "archive" else self._active_cols
+
+    app = _ViewAwareDisplay()
+    app._configure_table_columns()
+    app.view_mode = "archive"
+    app._configure_table_columns()
+    app.view_mode = "active"
+    app._configure_table_columns()
+    assert app._table.clear_calls == 3

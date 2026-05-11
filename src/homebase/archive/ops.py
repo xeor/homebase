@@ -9,19 +9,6 @@ from pathlib import Path
 from typing import Callable
 
 
-def resolve_archive_prefix(src: Path, base_dir: Path) -> str:
-    cur = src
-    while True:
-        marker = cur / ".archive_prefix"
-        if marker.is_file():
-            return marker.read_text().strip()
-        parent = cur.parent
-        if parent == base_dir or parent == cur:
-            break
-        cur = parent
-    return ""
-
-
 def archive_destination(
     src: Path,
     base_dir: Path,
@@ -32,31 +19,11 @@ def archive_destination(
     archive_now_iso: Callable[[], str],
 ) -> Path:
     archive_root = base_dir / archive_dir_name
-    rel = src.relative_to(base_dir)
-    prefix = resolve_archive_prefix(src, base_dir)
     stem, parsed_ts = split_archive_name(src.name)
     ts_iso = archive_iso_from_ts(parsed_ts) if parsed_ts > 0 else archive_now_iso()
     date_prefix = ts_iso[:10]
-    if prefix and rel.parent != Path("."):
-        return archive_root / rel.parent / prefix / f"{date_prefix}_{stem}"
-    if prefix:
-        return archive_root / prefix / f"{date_prefix}_{stem}"
-    if rel.parent != Path("."):
-        return archive_root / rel.parent / f"{date_prefix}_{stem}"
-    return archive_root / f"{date_prefix}_{stem}"
-
-
-def archive_parent_for(src: Path, base_dir: Path, *, archive_dir_name: str) -> Path:
-    rel = src.relative_to(base_dir)
-    prefix = resolve_archive_prefix(src, base_dir)
-    root = base_dir / archive_dir_name
-    if prefix and rel.parent != Path("."):
-        return root / rel.parent / prefix
-    if prefix:
-        return root / prefix
-    if rel.parent != Path("."):
-        return root / rel.parent
-    return root
+    year = date_prefix[:4]
+    return archive_root / year / f"{date_prefix}_{stem}"
 
 
 def ensure_safe_cwd(

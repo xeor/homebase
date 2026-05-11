@@ -4,7 +4,13 @@ from pathlib import Path
 
 from ..config.prefs import nested_discovery_enabled
 from ..core import utils as core_utils
-from ..core.constants import ARCHIVE_DIR_NAME, BASE_MARKER_FILE, MODE_ACTIVE, MODE_ARCHIVE
+from ..core.constants import (
+    ARCHIVE_DIR_NAME,
+    ARCHIVE_YEAR_DIR_RE,
+    BASE_MARKER_FILE,
+    MODE_ACTIVE,
+    MODE_ARCHIVE,
+)
 from . import discovery as discovery_utils
 
 DISCOVERY_PRUNE_DIR_NAMES = {
@@ -32,6 +38,7 @@ def discovery_zone_depth(base_dir: Path, path: Path) -> tuple[str, int]:
         archive_dir_name=ARCHIVE_DIR_NAME,
         mode_archive=MODE_ARCHIVE,
         mode_active=MODE_ACTIVE,
+        archive_year_re=ARCHIVE_YEAR_DIR_RE,
     )
 
 

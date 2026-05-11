@@ -53,7 +53,6 @@ def build_cli_parser() -> argparse.ArgumentParser:
 
     p_migrate = sub.add_parser("migrate")
     p_migrate.add_argument("--archive", action="store_true")
-    p_migrate.add_argument("--flat", action="store_true")
     p_migrate.add_argument("paths", nargs="+")
 
     p_fix = sub.add_parser("fix")
@@ -69,6 +68,8 @@ def build_cli_parser() -> argparse.ArgumentParser:
     p_archive_undo.add_argument("path", nargs="?", default=".")
     p_archive_restore = archive_sub.add_parser("restore")
     p_archive_restore.add_argument("archived_path")
+    p_archive_reorg = archive_sub.add_parser("reorganize")
+    p_archive_reorg.add_argument("--dry-run", action="store_true")
 
     p_tmux = sub.add_parser("tmux")
     tmux_sub = p_tmux.add_subparsers(dest="tmux_subcommand", required=True)

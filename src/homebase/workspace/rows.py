@@ -9,6 +9,7 @@ from ..core import utils as core_utils
 from ..core.constants import (
     ARCHIVE_DIR_NAME,
     ARCHIVE_TZ,
+    ARCHIVE_YEAR_DIR_RE,
     BASE_MARKER_FILE,
     PACKED_ARCHIVE_SUFFIX,
     SORT_MODE_SPECS,
@@ -144,16 +145,18 @@ def collect_projects(
 
 def archived_restore_target(base_dir: Path, archived_path: Path) -> Path:
     rel = archived_path.relative_to(base_dir / ARCHIVE_DIR_NAME)
+    if rel.parts and ARCHIVE_YEAR_DIR_RE.match(rel.parts[0]):
+        rel = Path(*rel.parts[1:]) if len(rel.parts) > 1 else Path()
     name = (
         core_utils.packed_archive_dir_name(rel, PACKED_ARCHIVE_SUFFIX)
         if str(rel).endswith(PACKED_ARCHIVE_SUFFIX)
         else rel.name
     )
-    stem, ts = core_utils.split_archive_name(
+    stem, _ts = core_utils.split_archive_name(
         name,
         parse_timestamp=lambda value: core_utils.parse_archive_timestamp(value, ARCHIVE_TZ),
     )
-    if ts > 0:
+    if stem != name:
         rel = rel.with_name(stem)
     elif str(rel).endswith(PACKED_ARCHIVE_SUFFIX):
         rel = rel.with_name(name)
@@ -213,7 +216,7 @@ def sort_rows(rows: list[ProjectRow], mode: str) -> list[ProjectRow]:
         return sorted(rows, key=lambda r: (r.created_ts, r.last_ts), reverse=True)
     if mode == "opened":
         return sorted(rows, key=lambda r: (r.opened_ts, r.last_ts), reverse=True)
-    if mode == "restore_to":
+    if mode == "original_name":
         return sorted(
             rows,
             key=lambda r: ((str(r.restore_target or "").lower()), r.name.lower()),
@@ -284,10 +287,6 @@ def normalize_filter_expression(expr: str) -> str:
 
 def pretty_filter_expression(expr: str) -> str:
     return filter_compile.pretty_filter_expression(expr)
-
-
-def resolve_archive_prefix(src: Path, base_dir: Path) -> str:
-    return archive_ops.resolve_archive_prefix(src, base_dir)
 
 
 def archive_destination(src: Path, base_dir: Path) -> Path:
