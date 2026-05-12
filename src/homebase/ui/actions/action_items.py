@@ -8,6 +8,7 @@ from typing import Any, Callable
 
 from ...core.constants import BUILTIN_ACTIONS
 from ...core.models import Action, ProjectRow
+from ...core.utils import existing_path_case_mismatch
 from ...notes.log_md import NoteValidationError, insert_log_entry, validate_note
 from ..screens.multiline_input import MultilineInputScreen
 from . import template as action_template
@@ -236,6 +237,14 @@ def valid_action_items(
         )
     )
 
+    if targets and any(_action_is_note_kind(app, aid) for aid, _ in out):
+        if _any_target_note_case_mismatch(app, targets):
+            out = [
+                (aid, lbl)
+                for aid, lbl in out
+                if not _action_is_note_kind(app, aid)
+            ]
+
     uniq: list[tuple[str, str]] = []
     seen: set[str] = set()
     for aid, label in out:
@@ -244,6 +253,27 @@ def valid_action_items(
         seen.add(aid)
         uniq.append((aid, label))
     return uniq
+
+
+def _action_is_note_kind(app: Any, action_id: str) -> bool:
+    action = app.ctx.actions.get(action_id)
+    return action is not None and getattr(action, "kind", "") == "note"
+
+
+def _any_target_note_case_mismatch(app: Any, targets: list[ProjectRow]) -> bool:
+    for row in targets:
+        try:
+            note_path = app._resolve_notes_path_for_row(row)
+        except (OSError, ValueError, RuntimeError):
+            continue
+        try:
+            if not note_path.is_file():
+                continue
+        except OSError:
+            continue
+        if existing_path_case_mismatch(note_path) is not None:
+            return True
+    return False
 
 
 def label_plain(label: str) -> str:
@@ -699,6 +729,15 @@ def _run_custom_note_action(
                     continue
             except OSError as exc:
                 _notify_skip(app, row, f"stat failed: {exc}")
+                continue
+            actual_name = existing_path_case_mismatch(note_path)
+            if actual_name is not None:
+                _notify_skip(
+                    app,
+                    row,
+                    f"note case mismatch: expected '{note_path.name}', "
+                    f"on-disk '{actual_name}'",
+                )
                 continue
             try:
                 existing = note_path.read_text(encoding="utf-8")

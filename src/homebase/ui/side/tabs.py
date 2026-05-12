@@ -9,7 +9,11 @@ from textual.widgets import Button, Static, Tab, Tabs
 
 from ...core.constants import COLOR_DYNAMIC_FILE_HEX
 from ...core.models import ProjectRow
-from ...core.utils import WIDGET_API_ERRORS, fmt_age_short_from_iso
+from ...core.utils import (
+    WIDGET_API_ERRORS,
+    existing_path_case_mismatch,
+    fmt_age_short_from_iso,
+)
 from ...metadata.api import build_project_info_text
 from ..query.notes_paths import render_notes_template
 from ..widgets import ReadmeMarkdownViewer
@@ -173,15 +177,41 @@ def refresh_side(app: Any, *, base_dir: Path, color_accent_hex: str, level_warn:
                         notes_exists = notes_path.is_file()
                     except OSError:
                         notes_exists = False
-                    notes_create_btn.display = not notes_exists
-                    notes_open_btn.display = notes_exists
-                    if not notes_exists:
+                    actual_name = (
+                        existing_path_case_mismatch(notes_path)
+                        if notes_exists
+                        else None
+                    )
+                    if actual_name is not None:
+                        notes_create_btn.display = False
+                        notes_open_btn.display = False
+                        app.side_notes_rendered_path = None
+                        error_text = (
+                            "# E — Notes case mismatch\n\n"
+                            "**ERROR**: the note exists on disk but the filename "
+                            "does not match the project name in case.\n\n"
+                            f"- Expected note file: `{notes_path.name}`\n"
+                            f"- On-disk file:       `{actual_name}`\n"
+                            f"- Parent directory:   `{notes_path.parent}`\n\n"
+                            "Opening this note would create a duplicate in case-"
+                            "insensitive editors (e.g. Obsidian). Rename either "
+                            "the project or the note so the case matches exactly, "
+                            "then reopen this view."
+                        )
+                        if app.side_notes_rendered_text != error_text:
+                            notes_view.document.update(error_text)
+                            app.side_notes_rendered_text = error_text
+                    elif not notes_exists:
+                        notes_create_btn.display = True
+                        notes_open_btn.display = False
                         app.side_notes_rendered_path = None
                         placeholder = "# Notes\n\nNotes file not found."
                         if app.side_notes_rendered_text != placeholder:
                             notes_view.document.update(placeholder)
                             app.side_notes_rendered_text = placeholder
                     else:
+                        notes_create_btn.display = False
+                        notes_open_btn.display = True
                         try:
                             notes_text = notes_path.read_text()
                         except (OSError, UnicodeDecodeError) as exc:
@@ -274,9 +304,29 @@ def run_notes_button_action(app: Any, action_id: str, *, level_warn: str) -> Non
             if not note_path.is_file():
                 app._set_runtime_status("Notes file not found for open", level_warn, ttl_s=6.0)
                 return
+            actual_name = existing_path_case_mismatch(note_path)
+            if actual_name is not None:
+                app._show_runtime_error(
+                    "open notes markdown",
+                    FileExistsError(
+                        f"case mismatch: expected '{note_path.name}', "
+                        f"on-disk '{actual_name}' in {note_path.parent}"
+                    ),
+                )
+                return
             app._mark_row_active(selected.path)
             app._run_notes_command(str(app.notes_config.get("open_command", "")), note_path, selected, "open")
         else:
+            actual_name = existing_path_case_mismatch(note_path)
+            if actual_name is not None:
+                app._show_runtime_error(
+                    "create notes markdown",
+                    FileExistsError(
+                        f"case mismatch: expected '{note_path.name}', "
+                        f"on-disk '{actual_name}' in {note_path.parent}"
+                    ),
+                )
+                return
             app._mark_row_active(selected.path)
             app._run_notes_command(str(app.notes_config.get("create_command", "")), note_path, selected, "create")
     except (OSError, ValueError, RuntimeError) as exc:

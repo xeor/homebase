@@ -6,6 +6,8 @@ import webbrowser
 from pathlib import Path
 from typing import Any, Callable
 
+from ...core.utils import existing_path_case_mismatch
+
 
 def open_editor_for_path(
     app: Any,
@@ -62,10 +64,13 @@ def notes_button_actions(
     except (OSError, ValueError, RuntimeError):
         return []
     try:
-        if note_path.is_file():
-            return [("notes_open", "[white]Open Notes markdown[/]")]
+        exists = note_path.is_file()
     except OSError:
         return []
+    if exists:
+        if existing_path_case_mismatch(note_path) is not None:
+            return []
+        return [("notes_open", "[white]Open Notes markdown[/]")]
     return [("notes_create", "[white]Create Notes markdown[/]")]
 
 

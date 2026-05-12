@@ -71,6 +71,27 @@ def test_normalize_date_prefix_noop_without_prefix() -> None:
     assert core_utils.normalize_date_prefix("weird-no-date") == "weird-no-date"
 
 
+def test_existing_path_case_mismatch_returns_none_for_missing(tmp_path: Path) -> None:
+    assert core_utils.existing_path_case_mismatch(tmp_path / "missing.md") is None
+
+
+def test_existing_path_case_mismatch_returns_none_for_exact(tmp_path: Path) -> None:
+    target = tmp_path / "AAA.md"
+    target.write_text("x")
+    assert core_utils.existing_path_case_mismatch(target) is None
+
+
+def test_existing_path_case_mismatch_detects_mismatch(tmp_path: Path) -> None:
+    on_disk = tmp_path / "aaa.md"
+    on_disk.write_text("x")
+    queried = tmp_path / "AAA.md"
+    if not queried.exists():
+        import pytest
+
+        pytest.skip("filesystem is case-sensitive; mismatch scenario unreachable")
+    assert core_utils.existing_path_case_mismatch(queried) == "aaa.md"
+
+
 def test_normalize_restore_target_rejects_outside_base(tmp_path: Path) -> None:
     base_dir = tmp_path / "base"
     base_dir.mkdir()

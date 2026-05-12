@@ -33,6 +33,37 @@ def resolve_base_dir(base_folder_arg: str | None, env_base_folder: str | None) -
     return (Path.home() / "base").resolve()
 
 
+_DIR_NAMES_CACHE: dict[Path, tuple[float, frozenset[str]]] = {}
+_DIR_NAMES_TTL_S = 5.0
+
+
+def _cached_dir_names(parent: Path) -> frozenset[str] | None:
+    now = time.time()
+    cached = _DIR_NAMES_CACHE.get(parent)
+    if cached is not None and now < cached[0]:
+        return cached[1]
+    try:
+        names = frozenset(entry.name for entry in parent.iterdir())
+    except OSError:
+        return None
+    _DIR_NAMES_CACHE[parent] = (now + _DIR_NAMES_TTL_S, names)
+    return names
+
+
+def existing_path_case_mismatch(path: Path) -> str | None:
+    parent = path.parent
+    names = _cached_dir_names(parent)
+    if names is None:
+        return None
+    if path.name in names:
+        return None
+    target_lower = path.name.lower()
+    for name in names:
+        if name.lower() == target_lower:
+            return name
+    return None
+
+
 def is_under(path: Path, root: Path) -> bool:
     try:
         path.resolve().relative_to(root.resolve())
