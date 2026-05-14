@@ -236,10 +236,6 @@ def save_keys(base_dir: Path, keys_map: dict[str, dict[str, object] | object]) -
     save_global_config_dict(base_dir, data)
 
 
-def load_create_templates(base_dir: Path) -> list[dict[str, object]]:
-    return workspace_settings.load_create_templates(load_global_config_dict(base_dir))
-
-
 def load_open_mode_config(base_dir: Path) -> dict[str, str]:
     data = load_global_config_dict(base_dir)
     return open_mode_config.load_open_mode_config(

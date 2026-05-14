@@ -16,24 +16,41 @@ def test_completion_candidates_include_top_level_commands() -> None:
     assert "status" in out
 
 
-def test_completion_candidates_support_dynamic_quick_create_keys(monkeypatch) -> None:
-    monkeypatch.setattr(
-        cli_completion,
-        "_quick_create_keys",
-        lambda _base_dir: ["tmp", "area51"],
-    )
-    out = cli_completion.completion_candidates(["c", "a"], 2, base_dir=Path("."))
-    assert out == ["area51"]
+def test_completion_candidates_new_mode_flags() -> None:
+    out = cli_completion.completion_candidates(["new", "--"], 2, base_dir=Path("."))
+    assert "--empty" in out
+    assert "--local" in out
+    assert "--git" in out
+    assert "--download" in out
+    assert "--downloaded" in out
 
 
-def test_completion_candidates_handles_trailing_space_for_quick_create(monkeypatch) -> None:
+def test_completion_candidates_new_as_uses_child_sources(monkeypatch) -> None:
     monkeypatch.setattr(
         cli_completion,
-        "_quick_create_keys",
-        lambda _base_dir: ["tmp", "area51"],
+        "_new_child_source_keys",
+        lambda _base_dir: ["scratch", "prj"],
     )
-    out = cli_completion.completion_candidates(["c"], 2, base_dir=Path("."))
-    assert out == ["area51", "tmp"]
+    out = cli_completion.completion_candidates(["new", "--as", "s"], 3, base_dir=Path("."))
+    assert out == ["scratch"]
+
+
+def test_completion_candidates_new_template(monkeypatch) -> None:
+    monkeypatch.setattr(
+        cli_completion,
+        "_new_template_keys",
+        lambda _base_dir: ["python-uv", "rust"],
+    )
+    out = cli_completion.completion_candidates(
+        ["new", "--template", "r"], 3, base_dir=Path(".")
+    )
+    assert out == ["rust"]
+
+
+def test_completion_includes_n_alias() -> None:
+    out = cli_completion.completion_candidates([""], 1, base_dir=Path("."))
+    assert "n" in out
+    assert "new" in out
 
 
 def test_completion_candidates_support_named_filters(monkeypatch) -> None:

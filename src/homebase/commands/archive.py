@@ -352,27 +352,6 @@ def cmd_archive_reorganize(base_dir: Path, dry_run: bool = False) -> int:
     )
 
 
-def cmd_migrate(paths: list[str], archive_mode: bool = False) -> int:
-    return commands_workspace.cmd_migrate(
-        paths,
-        archive_dir_name=ARCHIVE_DIR_NAME,
-        split_archive_name=lambda name: core_utils.split_archive_name(
-            name,
-            parse_timestamp=lambda value: core_utils.parse_archive_timestamp(
-                value,
-                ARCHIVE_TZ,
-            ),
-        ),
-        archive_destination=archive_destination,
-        ensure_safe_cwd=_ensure_safe_cwd,
-        ensure_base_marker=ensure_base_marker,
-        append_base_log=append_base_log,
-        sync_tag_symlinks=sync_tag_symlinks,
-        confirm=confirm,
-        archive_mode=archive_mode,
-    )
-
-
 def suggest_project_root(path: Path) -> Path:
     return commands_workspace.suggest_project_root(path)
 

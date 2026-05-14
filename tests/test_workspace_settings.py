@@ -21,32 +21,6 @@ def test_load_file_view_exclude_patterns_merges_legacy() -> None:
     assert out == [".git", "node_modules"]
 
 
-def test_load_create_templates_filters_and_normalizes() -> None:
-    out = workspace_settings.load_create_templates(
-        {
-            "create_templates": [
-                {
-                    "key": "tmp",
-                    "options": ["prefix-datetime", "changedir", ""],
-                    "template": "py",
-                    "tags": ["scratch", ""],
-                },
-                {"key": "tmp"},
-                {"options": ["x"]},
-            ]
-        }
-    )
-    assert out == [
-        {
-            "key": "tmp",
-            "name": "tmp",
-            "options": ["prefix-datetime", "changedir"],
-            "template": "py",
-            "tags": ["scratch"],
-        }
-    ]
-
-
 def test_load_reconcile_config_applies_bounds() -> None:
     out = workspace_settings.load_reconcile_config(
         {

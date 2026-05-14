@@ -5,7 +5,41 @@ import webbrowser
 from typing import Callable
 
 from textual.suggester import Suggester
-from textual.widgets import MarkdownViewer
+from textual.widgets import DataTable, MarkdownViewer
+
+
+class SafeDataTable(DataTable):
+    """DataTable that tolerates a stale ``fixed_rows`` count.
+
+    Textual's ``DataTable.render_line`` builds ``fixed_row_keys`` as
+    ``[self._row_locations.get_key(i) for i in range(self.fixed_rows)]``
+    and then calls ``self.get_row_height(row_key)`` on each. When
+    ``fixed_rows`` exceeds the current row count, ``get_key`` returns
+    ``None`` for the out-of-range indices, and ``get_row_height(None)``
+    crashes with ``KeyError(None)``. Every terminal resize triggers
+    ``render_line``, so the crash surfaces as an apparent
+    "resize-crashes-the-app" bug.
+
+    Belt and suspenders: validate ``fixed_rows`` on assignment so it
+    can never exceed ``row_count``, AND short-circuit
+    ``get_row_height`` for missing keys so a single transiently stale
+    render is survivable.
+    """
+
+    def validate_fixed_rows(self, value: int) -> int:  # noqa: D401 — Textual hook
+        try:
+            count = int(value or 0)
+        except (TypeError, ValueError):
+            count = 0
+        return max(0, min(count, self.row_count))
+
+    def get_row_height(self, row_key):  # type: ignore[override]
+        if row_key is None:
+            return 0
+        try:
+            return super().get_row_height(row_key)
+        except KeyError:
+            return 0
 
 
 def token_bounds(value: str) -> tuple[int, int, str]:

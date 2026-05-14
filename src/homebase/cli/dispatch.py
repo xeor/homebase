@@ -16,10 +16,9 @@ def dispatch_command(
     cwd: Path,
     no_arg_flow: Callable[[Path, Path, str], int],
     cmd_status: Callable[[Path], int],
-    cmd_new: Callable[[Path], int],
+    cmd_new: Callable[[Any, Path, Path], int],
     cmd_completion: Callable[[str], int],
     cmd_internal_complete: Callable[[str, int, list[str]], int],
-    cmd_create_quick: Callable[[Path, str, str | None, bool], int],
     cmd_recent: Callable[[Path], int],
     cmd_help_actions: Callable[[str, str, str, bool], int],
     cmd_setup: Callable[[Path, Path, bool], int],
@@ -28,7 +27,6 @@ def dispatch_command(
     cmd_utils: Callable[[Path, str], int],
     cmd_archive_mv: Callable[[Path, str], int],
     cmd_rm: Callable[[str, bool], int],
-    cmd_migrate: Callable[[list[str], bool], int],
     cmd_fix: Callable[[str], int],
     cmd_archive_ls: Callable[[Path, str], int],
     cmd_archive_undo: Callable[[Path, str], int],
@@ -55,8 +53,8 @@ def dispatch_command(
         return 0
     if ns.command == "status":
         return cmd_status(base_dir)
-    if ns.command == "new":
-        return cmd_new(base_dir)
+    if ns.command in {"new", "n"}:
+        return cmd_new(ns, base_dir, cwd)
     if ns.command == "completion":
         return cmd_completion(str(ns.shell))
     if ns.command == "__complete":
@@ -65,9 +63,6 @@ def dispatch_command(
             int(ns.cword),
             [str(x) for x in ns.words],
         )
-    if ns.command == "c":
-        raw_name = str(getattr(ns, "name", "") or "").strip()
-        return cmd_create_quick(base_dir, str(ns.key), raw_name or None, bool(ns.debug))
     if ns.command == "recent":
         return cmd_recent(base_dir)
     if ns.command == "setup":
@@ -84,8 +79,6 @@ def dispatch_command(
         return cmd_archive_mv(base_dir, str(ns.path))
     if ns.command == "rm":
         return cmd_rm(str(ns.path), bool(ns.force_outside_base))
-    if ns.command == "migrate":
-        return cmd_migrate([str(p) for p in ns.paths], bool(ns.archive))
     if ns.command == "fix":
         return cmd_fix(str(ns.path))
     if ns.command == "archive":

@@ -807,9 +807,352 @@ into `b new` too.
 
 ---
 
-## 14. Status
+## 14. Implementation status
 
-All CLAUDE_COMMENT items resolved:
+### Phase 1 — Foundation + EmptySource — **DONE**
+
+Code landed under `src/homebase/workspace/new/`:
+- `base.py` — `Source` ABC + `NewOptions`/`NewConfig`/`NewPlan`/
+  `NewResult`/`NewContext`.
+- `registry.py` — register/lookup, construct Sources with merged config.
+- `detect.py` — URL/path/bare shape classification.
+- `name.py` — name resolution wrapping existing helpers.
+- `options.py` — 3-layer resolver (defaults → config → CLI).
+- `cmd.py` — `cmd_new(ns, base_dir, cwd)` entry. Routes `b new` with
+  no args to legacy TUI; everything else into the new pipeline.
+- `sources/empty.py` — `EmptySource` with mkdir + marker + tags +
+  optional template (copier or scaffold) + rollback.
+
+CLI wired:
+- `cli/parser.py:_build_new_parser` — full surface (all flags exist,
+  even ones not yet honored by other Sources).
+- `cli/dispatch.py` + `cli/entry.py` — single branch into the new
+  `cmd_new`.
+
+Working invocations:
+- `b new` (no arg) → existing TUI flow.
+- `b new myproj` → empty project at `~/base/myproj/`.
+- `b new myproj --tmp --timestamp` → `YYYY-DD-MM_myproj.tmp`.
+- `b new myproj altname --tag a --tag b` → explicit name + tags.
+- `b new myproj --dry-run` → prints plan, no fs writes.
+- `b new ./path` / `b new https://…` → "source not implemented yet"
+  (exit 2, no side effects).
+
+Tests added (`tests/test_new_*.py`):
+- `test_new_detect.py` — 8 tests.
+- `test_new_options.py` — 5 tests.
+- `test_new_empty.py` — 9 tests (creation, tmp, tag, explicit name,
+  conflict, dry-run, not-yet-implemented for url/path, too-many-args).
+
+Full suite: 314 passed, ruff clean.
+
+`b migrate` and `b c` still untouched.
+
+### Phase 2 — LocalDirSource — **DONE**
+
+Code:
+- `sources/local.py` — `LocalDirSource` with absolute/relative path
+  resolution (relative paths resolve against `ctx.cwd`, not
+  `os.getcwd()`), refusal when source is already under base, atomic
+  move + marker + tags + log + tag-symlink sync + cache upsert,
+  rollback if marker/log fails.
+- `cmd.py` shape-to-source map includes `path → local`.
+
+Working invocations:
+- `b new ./path` → moves `cwd/path/` to `~/base/path/`.
+- `b new /abs/path myproj` → moves to `~/base/myproj/`.
+- `b new ./path --tmp` → moves to `~/base/path.tmp/`.
+- `b new ./path --dry-run` → prints plan, source untouched.
+- Refuses move when src is already under base; refuses if target
+  exists; rolls back if marker write fails.
+
+Tests:
+- `test_new_local.py` — 8 tests (move, explicit name, refusal under
+  base, missing source, target conflict, dry-run, tmp suffix,
+  relative `./` resolution against ctx.cwd).
+- Updated `test_new_empty.py::test_path_input_routes_to_local` —
+  path now goes through LocalDir (returns 1 for missing src), no
+  longer "not implemented".
+
+Full suite: 322 passed, ruff clean.
+### Phase 3 — GitSource + URL adapters — **DONE**
+
+Code:
+- `adapters/base.py` — `UrlAdapter` ABC + `ParsedUrl` + `parse_url`
+  (handles `scheme://host/path` and SSH `user@host:path`).
+- `adapters/{github,gitlab,bitbucket,gitea,sourcehut}.py` — clone +
+  blob→raw rewrites + project-name inference per forge.
+  - `gitea.py` also exports `CodebergAdapter` (canonical host
+    `codeberg.org`).
+- `adapters/__init__.py` — registry. `adapter_for_host(host,
+  user_hosts)` resolves via longest-prefix in `user_hosts` first,
+  then built-in canonical hosts.
+- `sources/git.py` — `GitSource` reads `config.hosts` (user
+  forge map), detects URL via `_detect_git_url(...)`, lays out
+  `~/base/<name>/repo/` with the actual clone, rolls back the project
+  dir if `git clone` fails.
+- `config_loader.py` — `load_new_sources(base_dir)` parses
+  `.homebase/config.yaml::new.sources`. Inherits options shallowly,
+  deep-merges `config:`. Built-ins reject `parent:`. Unknown keys
+  must have `parent:`. Cycle detection. Also has
+  `reject_legacy_create_templates(...)` for use later when `b c`
+  is removed.
+- `cmd.py` — `_pick_url_source(url, git_hosts)` decides url shape →
+  `git` vs `download` using adapters + `.git`/SSH fallback. Threads
+  resolved sources cfg into `construct_source` + `resolve_options`.
+  `--as <child>` walks parent chain to the built-in.
+
+Working invocations:
+- `b new https://github.com/foo/bar` → clones to
+  `~/base/bar/repo/` via the github adapter.
+- `b new https://github.com/foo/bar.git aprj` → clones to
+  `~/base/aprj/repo/`.
+- `b new git@github.com:foo/bar.git` → clones via SSH.
+- `b new file:///path/to/local.git` → clones a local bare repo.
+- `b new https://git.example.org/team/proj` → clones via user
+  config `git.config.hosts: {git.example.org: gitlab}`.
+- `b new --git ...` mode flag forces git source.
+- Failed clone rolls back the project dir before any marker is
+  written.
+- `--dry-run` prints the plan, no fetch.
+
+Tests:
+- `test_new_adapters.py` — 21 tests (parse, every forge's clone +
+  raw rewrites, user-host overrides + longest-prefix subpath, unknown
+  host).
+- `test_new_git.py` — 9 tests (local bare repo end-to-end clone with
+  layout assertions, explicit name, failed-clone rollback, dry-run,
+  tmp suffix, github adapter routing, `.git` suffix routing, SSH
+  routing, user-host config routing).
+
+Full suite: 352 passed, ruff clean.
+### Phase 4 — DownloadSource + DownloadedSource — **DONE**
+
+Code:
+- `sources/download.py` — fetches a URL via stdlib `urllib.request`
+  into `~/base/<name>/<filename>`. Filename from
+  `Content-Disposition`, then URL tail, then `download`. Adapter
+  blob→raw rewrites + `download.config.url_rewrites` regex fallback.
+  Rolls back the project dir on fetch / marker / log failures.
+- `sources/downloaded.py` — picks newest file from configured
+  `downloaded.config.folder` (default `~/Downloads`), moves it into
+  `~/base/<name>/`. Defaults: `{tmp, timestamp, open, confirm}`.
+  Doesn't auto-detect — only `--downloaded` triggers it.
+- Added `Source.accepts_input: ClassVar[bool] = True`. DownloadedSource
+  overrides to False; the dispatcher then treats the first positional
+  as `<name>` instead of `<input>`.
+- `cmd.py` injects GitSource's `hosts` map into DownloadSource's
+  config at construction time so adapter dispatch is consistent.
+
+Working invocations:
+- `b new https://example.com/file.iso` → fetches into
+  `~/base/file/file.iso`.
+- `b new https://github.com/foo/bar/blob/main/README.md` → adapter
+  rewrites to `raw.githubusercontent.com/.../refs/heads/main/...`,
+  fetches into `~/base/bar/README.md`.
+- `b new --downloaded` → confirm, move newest ~/Downloads file into
+  `~/base/<YYYY-DD-MM_basename>.tmp/`, default `--open` spawns shell.
+- `b new --downloaded myname --no-open --no-tmp --no-timestamp --yes`
+  → moves into `~/base/myname/<file>`.
+- `download.config.url_rewrites` regex rewrites take effect before
+  the fetch.
+
+Tests (`test_new_download.py`, `test_new_downloaded.py`):
+- 4 download tests using a `http.server` fixture on `127.0.0.1`:
+  fetch into project, missing-URL rolls back, dry-run, regex rewrite
+  via config.
+- 4 downloaded tests with fixture downloads folder: newest pick +
+  defaults, explicit name + `--no-tmp --no-timestamp`, empty-folder
+  fails cleanly, dry-run leaves source intact.
+
+Also updated:
+- `test_new_empty.py::test_url_input_without_git_signal_routes_to_download`
+  to assert dry-run rc=0 (no network).
+
+Full suite: 360 passed, ruff clean.
+### Phase 5 — `--archive` modifier — **DONE**
+
+Code:
+- `workspace/new/archive_mod.py` — `apply_archive_modifier(plan, ctx)`
+  rewrites `plan.target` via the existing
+  `workspace.rows.archive_destination()` (date-only prefix
+  `YYYY-MM-DD_<name>` under `_archive/<year>/`). Flips `log_kind` to
+  `"migration"`, marks `archive: True` in the log payload, appends
+  an `ARCHIVE` signal, and rewrites step strings that mentioned the
+  old target so dry-run output reads correctly.
+- `cmd.py` applies the modifier between `source.plan()` and
+  dry-run/confirm/apply. Works with every Source (Sources derive
+  sub-paths from `plan.target` at apply time, so they follow the
+  rewrite automatically).
+
+Working invocations:
+- `b new --archive myproj` → `~/base/_archive/<YYYY>/<YYYY-MM-DD>_myproj/`.
+- `b new --archive ./old-thing` → archive in place of base, source
+  dir moved away.
+- `b new --archive https://github.com/foo/bar` → clones into
+  `~/base/_archive/<YYYY>/<YYYY-MM-DD>_bar/repo/`.
+- `b new --archive --dry-run …` → prints rewritten plan, no fs.
+
+Tests (`test_new_archive.py`): 4 tests covering empty + local +
+dry-run + explicit-name archive targets, all asserting the
+`YYYY-MM-DD_<name>` shape under `<base>/_archive/<year>/`.
+
+Also: `tests/test_layering.py` now matches its exception list both
+exactly and with line numbers stripped, so future phases don't churn
+the exception list every time `cmd.py` line numbers shift.
+
+Full suite: 364 passed, ruff clean.
+### Phase 6 — `--multi`, `--ask-name`, `--ask-source`, `--confirm` — **DONE**
+
+Code:
+- `workspace/new/prompt.py` — `ask_name`, `ask_source`, `confirm`,
+  `PromptError`. All require `sys.stdin.isatty()` or raise. `ask_name`
+  honors a default; empty input picks the default. `ask_source`
+  validates the answer against the live registered-source list.
+- `cmd.py` refactored: per-item processing extracted into
+  `_process_item(ns, raw_input, explicit_name, sources_cfg, ctx)`.
+  Top-level `cmd_new` decides single vs multi:
+  - Single: parse 1 or 2 positionals (input + optional name).
+  - Multi: iterate every positional, auto-detect source per item,
+    accumulate worst-non-zero exit, print `item failed:` line on
+    each failure, never abort the batch.
+- `--ask-source` prompts when no mode/`--as` was passed. Result must
+  be a registered source key (built-in or child).
+- `--ask-name` prompts after source pick; conflicts with the
+  `<name>` positional. Other name options (`--tmp`, `--timestamp`,
+  `--ts-name`, `--alpha-name`) still decorate the answer because they
+  flow through `resolve_final_name`.
+- `--confirm` prints the resolved plan and asks `y/N`. `--yes`
+  unconditionally bypasses. `--ask-*` and `--confirm` fail non-TTY
+  with `requires an interactive terminal`.
+
+Working invocations:
+- `b new --multi a b c` → three EmptySource projects.
+- `b new --multi ./old https://github.com/x/y bare` → three items,
+  auto-detected mix (local + git + empty).
+- `b new --multi a exists b` → two succeed, one fails (target
+  exists), batch continues, rc≠0.
+- `b new --multi --empty ok bad/path` → `ok` created, path-shaped
+  positional rejected by validator (rc≠0).
+- `b new myproj --ask-name` → prompts for name, default = `myproj`.
+- `b new myproj --ask-source` → prompts with detected default,
+  user can override to a different registered source.
+- `b new myproj --confirm` / `--yes` → plan printout + y/N or skip.
+
+Tests:
+- `test_new_multi.py` (5 tests) — N empty, mixed sources,
+  per-item failure continuation, mode-flag-forces-all, dry-run.
+- `test_new_ask.py` (11 tests) — `--ask-name` with custom input,
+  default fallback, conflict with name positional, non-TTY error.
+  `--ask-source` with valid + invalid key, mode-flag skip. Multi
+  + `--ask-name` per-item prompt. Confirm yes/no/skip-via-`--yes`.
+
+Full suite: 380 passed, ruff clean.
+### Phase 7 — TUI rewrite (dynamic form) — **DONE**
+
+Code:
+- `workspace/new/cmd.py` split into:
+  - `plan_and_apply_one(ns, raw_input, explicit_name, sources_cfg, ctx)`
+    — pure single-item pipeline, returns `(rc, NewResult | None,
+    NewPlan | None)`. Never spawns shells.
+  - `_process_item(...)` — CLI wrapper that prints `created: …` and
+    runs `open_shell_in_dir` when the result asks for it.
+- `ui/screens/new_project.py` rewritten as a registry-driven form:
+  - Single input box for URL/path/bare-name + optional name box on
+    the same row.
+  - "source" row shows the auto-detected source and the cycle-able
+    override (`auto`, `empty`, `local`, `git`, `download`,
+    `downloaded`, plus any child sources from `new.sources`).
+  - Toggle row: `tmp`, `timestamp`, `cd`, `confirm`, `archive` (the
+    Boolean `NewOptions` fields with a CLI flag counterpart).
+  - Tags input (comma-separated) and template cycle.
+  - Live preview: resolved name, target path, existence marker,
+    similar-name suggestions reusing `COLLISION_RED_RAMP`.
+  - Submit dismisses with a dict; cancel returns None.
+- `ui/actions/project_create.py` rewritten:
+  - `_payload_to_namespace` translates the modal payload into the
+    same `Namespace` shape the CLI dispatcher produces.
+  - `on_new_project_submit` calls `plan_and_apply_one` to do all
+    creation work. On success it preserves the existing
+    `app.exit("open", target, [])` handoff (or stays in `b` when
+    `cd=False`). No duplicate `create_project` / `resolve_name`
+    path in the UI any more.
+- Old per-section navigation (post commands, behaviour radio,
+  tag-plan modal) replaced by a flatter form. `b` no longer needs
+  to load `create_templates` / `load_new_project_defaults` to drive
+  the modal.
+
+Tests:
+- `test_new_tui_bridge.py` (4 tests) — `_payload_to_namespace` →
+  `plan_and_apply_one` round-trips: empty creation, tmp+tags, local
+  source with explicit source override, archive modifier.
+
+Full suite: 387 passed, ruff clean.
+
+ctrl-n inside `b` and `b new` (no args) share the same modal +
+pipeline. Old `create_templates` config blocks still get rejected
+at startup with a pointer to `docs/kitchen-sink-config.md`.
+### Phase 8 — Remove `b migrate` and `b c`; kitchen-sink + completion — **DONE**
+
+Code:
+- Dropped the `c` and `migrate` subcommands from `cli/parser.py`,
+  `cli/dispatch.py`, `cli/entry.py`, and the error-suppression set.
+- Deleted `workspace/projects.py:cmd_create_quick`, plus
+  `commands/archive.py:cmd_migrate`, `commands/workspace.py:cmd_migrate`,
+  `config/prefs.py:load_create_templates`,
+  `config/workspace.py:load_create_templates`, and the corresponding
+  tests in `test_workspace_settings.py` and `test_projects.py`.
+- `n` alias landed: `b n …` mirrors `b new …` (shared argument set
+  in `_add_new_arguments(p)`; dispatcher matches `{new, n}`).
+- `cmd.py` calls `reject_legacy_create_templates()` before anything
+  else, so a stale `create_templates:` block aborts with a pointer
+  to `docs/kitchen-sink-config.md`.
+- `config_loader.py` now keeps `parent:` in resolved entries so the
+  dispatcher can walk `--as <child>` → parent built-in. Parent's
+  `parent` value isn't copied into the child during inheritance.
+- `options.py` normalizes YAML kebab-case keys (`ts-name`,
+  `alpha-name`, …) to the snake_case option names used by the CLI
+  resolver.
+- Switched `--ts-name`, `--alpha-name`, `--ask-name`, `--ask-source`,
+  `--yes`, `--dry-run`, `--archive`, `--multi` to `store_const` with
+  `default=None`, so "flag absent" doesn't override a truthy config
+  value.
+- `cmd.py` no longer bails with "cannot determine project name" when
+  `ts_name` or `alpha_name` is set — those generate a name inside
+  `resolve_final_name`.
+
+Completion:
+- `cli/completion.py:_TOP_LEVEL_COMMANDS` now lists `n` and no longer
+  lists `c` or `migrate`.
+- `_subcommand_candidates(cmd in {new, n}, …)` returns:
+  - all mode flags + common flags;
+  - registered child source keys after `--as` (via
+    `_new_child_source_keys`, which reads
+    `load_new_sources(base_dir)`);
+  - copier template names after `--template` (via
+    `_new_template_keys`, which reads `discover_copier_templates`).
+- Tests in `test_cli_completion.py` updated accordingly.
+
+Docs:
+- `docs/kitchen-sink-config.md` replaces the old `create_templates:`
+  block with a `new.sources:` block that demonstrates every option,
+  the `config:` sub-block for git/download/downloaded, and four
+  child sources (`tmp`, `feat`, `work`, `git-tmp`, `py`) covering
+  the same use cases the old `b c` templates served.
+
+Tests:
+- `test_new_legacy_config.py` (6 tests) — legacy block rejected,
+  `n` alias works, `--as <child>` flow with `ts-name` + `tmp`,
+  unknown / missing parent rejected, built-in key with `parent:`
+  rejected.
+
+Full suite: 383 passed, ruff clean.
+
+---
+
+## 15. CLAUDE_COMMENT items resolved
+
+
 
 - §4 deep-merge / shallow-merge → confirmed.
 - §4 `config:` not CLI-overridable → confirmed.

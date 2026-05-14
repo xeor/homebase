@@ -70,16 +70,79 @@ cache_profile:
       cache_mode: ttl
       cache_ttl_s: 30
 
-# Quick-create templates for `b c <key>`.
-create_templates:
-  - key: tmp
-    name: Quick tmp project
-    options: [prefix-datetime, suffix-tmp, generate-ts-name]
-    tags: [scratch]
-  - key: feat
-    name: feature worktree
-    options: [prefix-datetime]
-    tags: [feature]
+# `b new` defaults and child sources.
+# - top-level keys under each source are **options** (CLI-overridable).
+# - `config:` sub-block holds structural settings (not CLI-overridable).
+# - Built-in source keys: empty, local, git, download, downloaded.
+# - Unknown keys must declare `parent: <key>` (built-in or child).
+new:
+  sources:
+    # Built-in: override defaults for plain `b new myproj`.
+    empty:
+      cd: true                  # spawn shell on success
+    local:
+      cd: true
+
+    git:
+      cd: true
+      config:
+        # Host → forge-type. Forge types match the registered URL
+        # adapters: github, gitlab, bitbucket, gitea, codeberg,
+        # sourcehut. Self-hosted gitea/forgejo etc. must be declared
+        # here; b cannot sniff the forge from a bare URL.
+        hosts:
+          git.example.com:    gitlab
+          code.example.org:   gitea
+          # subpath routing: longest-prefix match wins
+          git.example.com/scm: bitbucket
+
+    download:
+      config:
+        # Regex fallback for non-forge URLs (internal wikis, CMS, ...).
+        # Forge adapters take precedence; this only fires when no
+        # adapter matched.
+        url_rewrites:
+          - match: "^https://internal\\.example\\.com/wiki/(.+)$"
+            rewrite: "https://internal.example.com/wiki/raw/\\1"
+
+    downloaded:
+      # Defaults to {tmp, timestamp, open, confirm} via the Source.
+      config:
+        folder: ~/Downloads
+
+    # ---------------- child sources (`b new --as <key>`) ----------------
+
+    # Reproduces today's `b c tmp` template: ts-based name + .tmp suffix.
+    tmp:
+      parent: empty
+      timestamp: true           # YYYY-DD-MM_ folder-name prefix
+      tmp: true                 # .tmp folder-name suffix
+      ts-name: true             # use YYYYMMDD-HHMMSS as the name
+      tags: [scratch]
+
+    # Reproduces today's `b c feat`: ts prefix + feature tag.
+    feat:
+      parent: empty
+      timestamp: true
+      tags: [feature]
+
+    # Pure-empty child with a project tag set.
+    work:
+      parent: empty
+      tags: [work]
+
+    # Git child that always uses --tmp (drafting a repo).
+    git-tmp:
+      parent: git
+      tmp: true
+      tags: [scratch]
+
+    # Empty child wired to a copier template under <base>/.copier/python-uv.
+    py:
+      parent: empty
+      template: python-uv
+      tags: [python]
+      cd: true
 
 # Default open behavior for UI open actions.
 open_mode:

@@ -3,6 +3,62 @@ from __future__ import annotations
 import argparse
 
 
+def _add_new_arguments(p: argparse.ArgumentParser) -> None:
+    p.add_argument("inputs", nargs="*", default=[])
+    mode = p.add_mutually_exclusive_group()
+    for key in ("empty", "local", "git", "download", "downloaded"):
+        mode.add_argument(f"--{key}", dest="mode", action="store_const", const=key)
+    p.add_argument("--as", dest="child_key", default=None)
+    p.add_argument("--tag", action="append", default=[])
+    p.add_argument("--template", default="")
+    p.add_argument("--tmp", action=argparse.BooleanOptionalAction, default=None)
+    p.add_argument("--timestamp", action=argparse.BooleanOptionalAction, default=None)
+    p.add_argument("--open", action=argparse.BooleanOptionalAction, default=None)
+    p.add_argument("--cd", action=argparse.BooleanOptionalAction, default=None)
+    p.add_argument("--confirm", action=argparse.BooleanOptionalAction, default=None)
+    # store_true flags default to None so the option resolver can tell
+    # "not set on the CLI" from "explicitly disabled". Config-side
+    # truthy values won't be wiped by an absent CLI flag.
+    p.add_argument(
+        "--ts-name", dest="ts_name", action="store_const", const=True, default=None,
+    )
+    p.add_argument(
+        "--alpha-name",
+        dest="alpha_name",
+        action="store_const",
+        const=True,
+        default=None,
+    )
+    p.add_argument(
+        "--ask-name",
+        dest="ask_name",
+        action="store_const",
+        const=True,
+        default=None,
+    )
+    p.add_argument(
+        "--ask-source",
+        dest="ask_source",
+        action="store_const",
+        const=True,
+        default=None,
+    )
+    p.add_argument("--post", action="append", default=[])
+    p.add_argument("--yes", action="store_const", const=True, default=None)
+    p.add_argument(
+        "--dry-run", dest="dry_run", action="store_const", const=True, default=None,
+    )
+    p.add_argument("--archive", action="store_const", const=True, default=None)
+    p.add_argument("--multi", action="store_const", const=True, default=None)
+
+
+def _build_new_parser(sub) -> None:
+    p_new = sub.add_parser("new", help="create a new project")
+    _add_new_arguments(p_new)
+    p_n = sub.add_parser("n", help="alias for `new`")
+    _add_new_arguments(p_n)
+
+
 def build_cli_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="b")
     parser.add_argument("--base-folder", dest="base_folder", default=None)
@@ -16,17 +72,13 @@ def build_cli_parser() -> argparse.ArgumentParser:
     p_help.add_argument("--view", choices=["active", "archive"], default="")
     p_help.add_argument("--show-defaults", action="store_true")
     sub.add_parser("status")
-    sub.add_parser("new")
+    _build_new_parser(sub)
     p_completion = sub.add_parser("completion")
     p_completion.add_argument("shell", choices=["fish", "zsh", "bash"])
     p_internal_complete = sub.add_parser("__complete")
     p_internal_complete.add_argument("shell", choices=["fish", "zsh", "bash"])
     p_internal_complete.add_argument("cword", type=int)
     p_internal_complete.add_argument("words", nargs="*")
-    p_c = sub.add_parser("c")
-    p_c.add_argument("key")
-    p_c.add_argument("--name", default="")
-    p_c.add_argument("--debug", action="store_true")
     sub.add_parser("recent")
     p_setup = sub.add_parser("setup")
     p_setup.add_argument("--dry-run", action="store_true")
@@ -50,10 +102,6 @@ def build_cli_parser() -> argparse.ArgumentParser:
     p_rm = sub.add_parser("rm")
     p_rm.add_argument("path", nargs="?", default=".")
     p_rm.add_argument("--force-outside-base", action="store_true")
-
-    p_migrate = sub.add_parser("migrate")
-    p_migrate.add_argument("--archive", action="store_true")
-    p_migrate.add_argument("paths", nargs="+")
 
     p_fix = sub.add_parser("fix")
     p_fix.add_argument("path", nargs="?", default=".")

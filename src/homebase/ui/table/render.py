@@ -129,11 +129,15 @@ def refresh_table(
 
     app._suspend_project_row_highlight = True
 
-    fixed_rows = 0
+    desired_fixed_rows = 0
     if app.view_mode == mode_active and app._table_pin_wip_top_enabled():
-        fixed_rows = sum(1 for row in rows if row.wip)
+        desired_fixed_rows = sum(1 for row in rows if row.wip)
+    # Reset to 0 before we (potentially) clear and rebuild rows. Leaving
+    # a stale ``fixed_rows`` count in place crashes Textual on the next
+    # resize: ``_data_table.get_row_height`` is called with a ``None``
+    # row key when ``fixed_rows`` is greater than the actual row count.
     try:
-        table.fixed_rows = max(0, fixed_rows)
+        table.fixed_rows = 0
     except WIDGET_API_ERRORS:
         pass
 
@@ -438,12 +442,25 @@ def refresh_table(
                 if same_keys:
                     row_paths = {row.path for row in rows}
                     app.multi_selected = {path for path in app.multi_selected if path in row_paths}
+                    try:
+                        table.fixed_rows = max(
+                            0, min(desired_fixed_rows, len(table_rows))
+                        )
+                    except WIDGET_API_ERRORS:
+                        pass
                     app.call_after_refresh(app._clear_project_row_highlight_suspend)
                     return
 
     table.clear(columns=False)
     for row_key, values in table_rows:
         table.add_row(*values, key=row_key)
+
+    # Apply fixed_rows AFTER rows exist, and clamp to actual row count so
+    # Textual never tries to look up a row index that doesn't exist.
+    try:
+        table.fixed_rows = max(0, min(desired_fixed_rows, len(table_rows)))
+    except WIDGET_API_ERRORS:
+        pass
 
     if rows:
         first = rows[0].path

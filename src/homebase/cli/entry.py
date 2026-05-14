@@ -13,7 +13,6 @@ from ..commands.archive import (
     cmd_archive_restore_entry,
     cmd_archive_undo,
     cmd_fix,
-    cmd_migrate,
     cmd_rm,
 )
 from ..commands.setup import (
@@ -109,7 +108,7 @@ def main(argv: list[str]) -> int:
     from ..config.property_defs import load_property_defs
     from ..tmux.flow import cmd_tmux_load, cmd_tmux_save
     from ..workspace.benchmark import cmd_benchmark, cmd_test
-    from ..workspace.projects import cmd_create_quick, cmd_new
+    from ..workspace.new import cmd_new
     from ..workspace.regression import cmd_test_regression
 
     parser = build_cli_parser()
@@ -234,12 +233,6 @@ def main(argv: list[str]) -> int:
                 words,
                 base_dir=base_dir,
             ),
-            cmd_create_quick=lambda bd, key, name, debug: cmd_create_quick(
-                bd,
-                key,
-                name,
-                debug=debug,
-            ),
             cmd_recent=cmd_recent,
             cmd_help_actions=lambda source, bound, view, show_defaults: cmd_help_actions_render(
                 actions=runtime_cfg.actions,
@@ -265,10 +258,6 @@ def main(argv: list[str]) -> int:
             cmd_utils=cmd_utils,
             cmd_archive_mv=cmd_archive_mv,
             cmd_rm=lambda path, force: cmd_rm(path, force_outside_base=force),
-            cmd_migrate=lambda paths, archive_mode: cmd_migrate(
-                paths,
-                archive_mode=archive_mode,
-            ),
             cmd_fix=cmd_fix,
             cmd_archive_ls=cmd_archive_ls,
             cmd_archive_undo=cmd_archive_undo,
@@ -321,13 +310,12 @@ def main(argv: list[str]) -> int:
         "help",
         "status",
         "new",
-        "c",
+        "n",
         "recent",
         "setup",
         "utils",
         "a",
         "rm",
-        "migrate",
         "fix",
     }:
         print("unknown command", file=sys.stderr)

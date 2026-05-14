@@ -6,6 +6,7 @@ import random
 import re
 import sqlite3
 import subprocess
+import sys
 import threading
 import time
 from pathlib import Path
@@ -215,7 +216,7 @@ from .table import rows_view as textual_ui_rows_view
 from .table import tabs_state as textual_ui_tabs_state
 from .table import view_actions as textual_ui_view_actions
 from .table import view_state as textual_ui_view_state
-from .widgets import ReadmeMarkdownViewer
+from .widgets import ReadmeMarkdownViewer, SafeDataTable
 
 # Catch-all for "row construction may legitimately fail; skip the upsert"
 # call sites in BApp action handlers.
@@ -728,7 +729,7 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
             yield Static("", id="global_meta_left")
             yield Static("", id="global_meta_right")
         with Horizontal(id="main"):
-            yield DataTable(id="projects", cursor_type="row")
+            yield SafeDataTable(id="projects", cursor_type="row")
             with Vertical(id="side"):
                 yield Tabs(
                     *[Tab(label, id=key) for key, label in SIDE_TOP_TABS],
@@ -3360,13 +3361,20 @@ def run_textual_ui(
 ) -> tuple[str, Path | None, list[str]]:
     set_filter_query_base_dir(base_dir)
     set_filter_manage_base_dir(base_dir)
-    return BApp(
+    app = BApp(
         base_dir,
         ctx=ctx,
         start_new_mode=start_new,
         initial_filter=initial_filter_expr,
-    ).run() or (
-        "quit",
-        None,
-        [],
     )
+    result = app.run() or ("quit", None, [])
+    # After the TUI returns the terminal is restored; flush any
+    # deferred summary or error captured by the new-project flow so
+    # the user actually sees what happened (success or failure).
+    summary = getattr(app, "last_new_summary", None)
+    if summary:
+        print(summary)
+    error = getattr(app, "last_new_error", None)
+    if error:
+        print(f"b new failed:\n{error}", file=sys.stderr)
+    return result

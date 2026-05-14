@@ -242,6 +242,13 @@ def cmd_tmux_save(
 
 
 def open_shell_in_dir(path: Path) -> int:
+    # No-op when stdout isn't an interactive terminal — under pytest,
+    # stdout is captured even when stdin is monkeypatched to a fake
+    # TTY, and ``os.execvp`` would replace the running test process
+    # with a login shell. Real CLI usage always has both, so the
+    # guarded path is the one that matters in production.
+    if not sys.stdout.isatty():
+        return 0
     shell = os.environ.get("SHELL", "/bin/sh")
     os.chdir(path)
     os.execvp(shell, [shell])
