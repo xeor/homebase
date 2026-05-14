@@ -78,7 +78,12 @@ def build_cli_parser() -> argparse.ArgumentParser:
     p_internal_complete = sub.add_parser("__complete")
     p_internal_complete.add_argument("shell", choices=["fish", "zsh", "bash"])
     p_internal_complete.add_argument("cword", type=int)
-    p_internal_complete.add_argument("words", nargs="*")
+    # REMAINDER so user words that look like options (e.g. ``--as``,
+    # ``--no-tmp``) don't get re-parsed at the parent level. Newer
+    # shell wrappers pass an explicit ``--`` separator (harmless and
+    # filtered in dispatch); older installs that don't have ``--``
+    # still work thanks to REMAINDER swallowing everything.
+    p_internal_complete.add_argument("words", nargs=argparse.REMAINDER)
     sub.add_parser("recent")
     p_setup = sub.add_parser("setup")
     p_setup.add_argument("--dry-run", action="store_true")

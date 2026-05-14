@@ -71,56 +71,128 @@ cache_profile:
       cache_ttl_s: 30
 
 # `b new` defaults and child sources.
-# - top-level keys under each source are **options** (CLI-overridable).
-# - `config:` sub-block holds structural settings (not CLI-overridable).
-# - Built-in source keys: empty, local, git, download, downloaded.
-# - Unknown keys must declare `parent: <key>` (built-in or child).
+#
+# Layering: source-class defaults  ←  parent child (if any)
+#                                   ←  this source's keys
+#                                   ←  CLI flags
+# So a child can flip any value its parent set, and the CLI flag
+# always wins last.
+#
+# Built-in source keys: empty, local, git, download, downloaded.
+# A custom child source uses any key it wants and MUST declare
+# `parent: <key>` (built-in or another child).
+#
+# ┌─── OPTIONS (top-level keys under a source, also overridable on
+# │    the CLI as `--<key>` / `--no-<key>` for booleans):
+# │
+# │  tmp:         bool   — append ".tmp" suffix to the folder name.
+# │  timestamp:   bool   — prepend "YYYY-MM-DD_" to the folder name.
+# │  ts-name:     bool   — when no name is given, use the current
+# │                        UTC timestamp (`YYYYMMDD-HHMMSS`) as the
+# │                        name. Combine with `tmp` / `timestamp`
+# │                        for further decoration.
+# │  alpha-name:  bool   — when no name is given, pick the next free
+# │                        single-/double-letter name (`a`, `b`, …,
+# │                        `aa`, `ab`, …). Use this for "unique
+# │                        throwaway names" that don't collide.
+# │  open:        bool   — spawn a shell in the new project on
+# │                        success. Default: true. `cd` is an alias.
+# │  cd:          bool   — alias for `open`. Same semantics.
+# │  confirm:     bool   — print a plan and ask before applying.
+# │                        Default: false (except `downloaded`).
+# │  archive:     bool   — land the project under
+# │                        `_archive/<year>/<date>_<name>/` instead
+# │                        of the active workspace.
+# │  tags:        [str]  — initial tags applied to the project.
+# │                        Child entries are merged with parent tags.
+# │  template:    str    — key of a copier template under
+# │                        `<base>/.copier/<key>/`. Empty = no
+# │                        template.
+# │  post:        [str]  — shell commands run inside the new project
+# │                        after creation, in order.
+# │
+# └─── STRUCTURAL CONFIG (`config:` sub-block, NOT CLI-overridable):
+#
+#      Per-source structural knobs. Inherited via deep merge from the
+#      parent. Only the keys a given source class understands are
+#      meaningful — the rest are silently ignored.
+#
+#      git.config.hosts          host → forge-adapter key
+#      download.config.url_rewrites  list of {match, rewrite} regex pairs
+#      downloaded.config.folder  override the source folder
+#      downloaded.config.list_count   how many recent files to list in
+#                                     the interactive picker (default 5)
+#
+#  --- CLI-only flags (no point putting these in config, they're
+#      decided per-invocation): --dry-run, --yes, --multi, --ask-name,
+#      --ask-source.
 new:
   sources:
-    # Built-in: override defaults for plain `b new myproj`.
+    # ============================================================
+    # BUILT-IN SOURCES — override their defaults.
+    # ============================================================
+
+    # `b new myproj` → empty project. Already defaults to opening a
+    # shell, so this block is just here as a hook for the example.
     empty:
-      cd: true                  # spawn shell on success
+      cd: true
+
+    # `b new ./some/path` → move a local directory into base.
     local:
       cd: true
 
+    # `b new https://github.com/...` → git clone.
     git:
       cd: true
       config:
-        # Host → forge-type. Forge types match the registered URL
-        # adapters: github, gitlab, bitbucket, gitea, codeberg,
-        # sourcehut. Self-hosted gitea/forgejo etc. must be declared
-        # here; b cannot sniff the forge from a bare URL.
+        # Map a host to the URL adapter that understands its layout.
+        # Built-in adapters: github, gitlab, bitbucket, gitea,
+        # codeberg, sourcehut. Self-hosted gitea / forgejo / gitlab
+        # MUST be declared here — b cannot sniff the forge from a
+        # bare URL.
         hosts:
           git.example.com:    gitlab
           code.example.org:   gitea
-          # subpath routing: longest-prefix match wins
+          # subpath routing — longest-prefix match wins
           git.example.com/scm: bitbucket
 
+    # `b new https://example.com/file.zip` → download a file.
     download:
       config:
-        # Regex fallback for non-forge URLs (internal wikis, CMS, ...).
+        # Regex fallback for non-forge URLs (internal wikis, CMS …).
         # Forge adapters take precedence; this only fires when no
         # adapter matched.
         url_rewrites:
           - match: "^https://internal\\.example\\.com/wiki/(.+)$"
             rewrite: "https://internal.example.com/wiki/raw/\\1"
 
+    # `b new --downloaded` → pick a recent file from ~/Downloads
+    # interactively. Class defaults: tmp+timestamp+confirm+open.
     downloaded:
-      # Defaults to {tmp, timestamp, open, confirm} via the Source.
       config:
         folder: ~/Downloads
+        list_count: 5           # how many recent files to show
 
-    # ---------------- child sources (`b new --as <key>`) ----------------
+    # ============================================================
+    # CUSTOM CHILD SOURCES — pick with `b new --as <key>`.
+    # ============================================================
 
-    # Reproduces today's `b c tmp` template: ts-based name + .tmp suffix.
+    # `b c tmp` replacement: ts-based name + .tmp suffix.
     tmp:
       parent: empty
-      timestamp: true           # YYYY-DD-MM_ folder-name prefix
+      timestamp: true           # YYYY-MM-DD_ folder-name prefix
       tmp: true                 # .tmp folder-name suffix
       ts-name: true             # use YYYYMMDD-HHMMSS as the name
       tags: [scratch]
 
-    # Reproduces today's `b c feat`: ts prefix + feature tag.
+    # Sequential throwaway names: `a`, `b`, `c`, …, `aa`, `ab`, ….
+    # No collisions because we pick the next FREE letter under base.
+    alpha:
+      parent: empty
+      alpha-name: true
+      tags: [scratch]
+
+    # ts prefix + feature tag (drafting a feature scratch project).
     feat:
       parent: empty
       timestamp: true
@@ -131,18 +203,36 @@ new:
       parent: empty
       tags: [work]
 
-    # Git child that always uses --tmp (drafting a repo).
+    # Archive a brand-new throwaway project straight into _archive/
+    # (useful for capturing snapshots you want kept but not active).
+    archived-scratch:
+      parent: empty
+      ts-name: true
+      archive: true
+      tags: [archived]
+
+    # Git child that always uses --tmp (drafting a clone).
     git-tmp:
       parent: git
       tmp: true
       tags: [scratch]
 
-    # Empty child wired to a copier template under <base>/.copier/python-uv.
+    # Empty child wired to a copier template under
+    # <base>/.copier/python-uv/.
     py:
       parent: empty
       template: python-uv
       tags: [python]
       cd: true
+
+    # Run `uv sync` after creating any project of this type. Repeat
+    # the key to run multiple commands in order.
+    py-uv:
+      parent: empty
+      template: python-uv
+      post:
+        - uv sync
+        - git init
 
 # Default open behavior for UI open actions.
 open_mode:

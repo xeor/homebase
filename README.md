@@ -269,17 +269,21 @@ cache_profile:
     pri-2:
       cache_ttl_s: 120
 
-# Quick-create templates used by `b c <key>`
-create_templates:
-  - key: tmp
-    name: Quick tmp project
-    options: [prefix-datetime, suffix-tmp, generate-ts-name]
-    tags: [scratch]
-  - key: py
-    name: Python starter
-    template: python
-    options: [prompt-name, changedir]
-    tags: [python]
+# `b new` defaults + custom child sources. See
+# docs/kitchen-sink-config.md for the full option reference.
+new:
+  sources:
+    tmp:
+      parent: empty
+      timestamp: true       # YYYY-MM-DD_ prefix
+      tmp: true             # .tmp suffix
+      ts-name: true         # auto-name as YYYYMMDD-HHMMSS
+      tags: [scratch]
+    py:
+      parent: empty
+      template: python
+      cd: true
+      tags: [python]
 
 # Open behavior profile
 open_mode:
@@ -368,80 +372,67 @@ state:
   side_settings: table
 ```
 
-## Advanced: Quick Create Templates
+## Advanced: `b new` and custom sources
 
-`b c <key>` reads `create_templates` from `.homebase/config.yaml`.
-
-CLI shape:
+Single entry point for creating projects. CLI:
 
 ```sh
-b c <key> [--name <folder-name>] [--debug]
+b new                                # interactive TUI
+b new <input>                        # bare-name / path / URL — auto-detected
+b new <input> <name>                 # explicit folder name override
+b new --as <child-key>               # use a configured child source
+b new --empty | --local | --git | --download | --downloaded
+                                     # force a built-in source
 ```
 
-```yaml
-create_templates:
-  - key: tmp
-    name: Quick tmp project
-    options: [prefix-datetime, suffix-tmp, changedir, generate-ts-name]
-    tags: [scratch, quick]
+Built-in sources (auto-detected from `<input>`):
 
-  - key: py
-    name: Python starter
-    template: python
-    options: [changedir, prompt-name]
-    tags: [python]
+| Source       | Detected from                       | Action                                              |
+|--------------|-------------------------------------|-----------------------------------------------------|
+| `empty`      | bare token (`myproj`)               | mkdir + marker                                      |
+| `local`      | path (`./x`, `/abs`, `~/x`)         | move existing dir into base                         |
+| `git`        | URL with `.git` / SSH / forge adapter says clone | `git clone` into `<name>/repo/`           |
+| `download`   | URL the forge adapter recognises as a file (github blob, gitlab/gitea raw, …) | fetch file into `<name>/`        |
+| `downloaded` | only via `--downloaded` flag        | interactively pick a recent file from `~/Downloads` |
 
-  - key: area51
-    name: Area51 copier starter
-    template: area51
-    options: [prompt-name, changedir]
-    tags: [experimental]
-```
+Full option reference (all of these can be set per-source under
+`new.sources.<key>` in the config **and** overridden on the CLI as
+`--<key>` / `--no-<key>`): see
+[`docs/kitchen-sink-config.md`](docs/kitchen-sink-config.md) — the
+`new:` block there documents every option inline with examples for
+ts-name, alpha-name, archive, post-commands, child inheritance, etc.
 
-Fields:
+Short option list (one line each):
 
-- `key`: command key used by `b c <key>`
-- `name`: optional human label (for config readability)
-- `template`: optional copier/template id under `.copier/<template>`
-- `options`: behavior toggles (see below)
-- `tags`: optional list of initial tags written to `.base.yaml`
-
-Supported `options`:
-
-- `prefix-datetime` -> prepend date prefix to folder name
-- `suffix-tmp` -> append `.tmp` suffix
-- `changedir` -> open shell in created directory (interactive only)
-- `prompt-name` -> ask for folder name when `--name` is omitted
-- `generate-ts-name` -> generate folder name from timestamp when `--name` is omitted
-- `generate-next-alpha-name` -> pick next free alpha name (`a`, `b`, ... `z`, `aa`, ...)
-
-Notes:
-
-- name resolution priority:
-  1) `--name`
-  2) `prompt-name`
-  3) `generate-ts-name`
-  4) `generate-next-alpha-name`
-  5) fallback to template `key`
-- `--debug` prints resolution steps and exits without creating files
-- `template` uses `.copier/<template>/` under base dir
-- if template dir contains `copier.yml`/`copier.yaml`, `copier copy --trust` is used
-- otherwise files are copied directly from the template directory
+- `tmp` / `--tmp` — append `.tmp` to folder name.
+- `timestamp` / `--timestamp` — prepend `YYYY-MM-DD_` to folder name.
+- `ts-name` / `--ts-name` — when no name is given, use `YYYYMMDD-HHMMSS`.
+- `alpha-name` / `--alpha-name` — when no name is given, pick the next
+  free `a`, `b`, …, `aa`, `ab`, …
+- `open` / `--open` (alias: `cd` / `--cd`) — spawn a shell in the new
+  project on success. Default: true. Pass `--no-open` to stay where
+  you were.
+- `confirm` / `--confirm` — print plan + ask before applying.
+- `archive` / `--archive` — land under `_archive/<year>/<date>_<name>/`.
+- `tags` / `--tag <t>` (repeatable) — initial tags written to `.base.yaml`.
+- `template` / `--template <key>` — copier template under
+  `<base>/.copier/<key>/`.
+- `post` / `--post <cmd>` (repeatable) — shell commands run in the
+  project dir after creation.
 
 Examples:
 
 ```sh
-# quick scratch project with generated timestamp name
-b c tmp
-
-# explicit name (overrides prompt/generate options)
-b c py --name cli-tools
-
-# copier template (interactive prompts are shown by copier)
-b c area51
-
-# preview without creating files
-b c area51 --name area51-demo --debug
+b new myproj                                  # empty project
+b new myproj --tmp --timestamp                # 2026-05-14_myproj.tmp
+b new --as tmp                                # ts-name based scratch
+b new --as alpha                              # next free a/b/c/…
+b new https://github.com/x/repo               # git clone
+b new https://github.com/x/repo/blob/main/README.md
+                                              # downloads the raw file
+b new ./existing                              # move into base
+b new --downloaded                            # picker over ~/Downloads
+b new myproj --archive                        # lands under _archive/…
 ```
 
 ## Advanced: Actions and Bindings

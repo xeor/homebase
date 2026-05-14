@@ -186,24 +186,29 @@ def completion_script(shell: str) -> str:
 
 
 def _bash_completion_script() -> str:
+    # The trailing `--` separates `__complete`'s own positionals from
+    # user-typed words. Without it, words that look like options
+    # (e.g. `--as`, `--no-tmp`) are parsed at the parent level and
+    # crash with "unrecognized arguments".
     return """# homebase completion for bash
 _b_completion() {
   local cword="${COMP_CWORD}"
   local words=("${COMP_WORDS[@]:1}")
-  COMPREPLY=( $(b __complete bash "$cword" "${words[@]}") )
+  COMPREPLY=( $(b __complete bash "$cword" -- "${words[@]}") )
 }
 complete -F _b_completion b
 """
 
 
 def _zsh_completion_script() -> str:
+    # See _bash_completion_script() for why `--` is required.
     return """#compdef b
 _b_completion() {
   local -a words
   words=("${words[@]:2}")
   local cword=$((CURRENT-1))
   local -a out
-  out=("${(@f)$(b __complete zsh "$cword" "${words[@]}")}")
+  out=("${(@f)$(b __complete zsh "$cword" -- "${words[@]}")}")
   compadd -a out
 }
 compdef _b_completion b
@@ -211,6 +216,10 @@ compdef _b_completion b
 
 
 def _fish_completion_script() -> str:
+    # `--` separates __complete's own positionals from the user's
+    # words. Otherwise option-shaped words (`--as`, `--no-tmp`, ...)
+    # get parsed at the parent level and `b` exits with
+    # "unrecognized arguments".
     return """# homebase completion for fish
 function __b_complete
     set -l tokens (commandline -opc)
@@ -221,7 +230,7 @@ function __b_complete
         set i (math $i + 1)
     end
     set -l cword (math (count $args) + 1)
-    b __complete fish $cword $args
+    b __complete fish $cword -- $args
 end
 
 complete -c b -f -a '(__b_complete)'

@@ -129,10 +129,15 @@ def main(argv: list[str]) -> int:
     if ns.command == "completion":
         return _cmd_completion(str(ns.shell))
     if ns.command == "__complete":
+        # Strip a leading ``--`` separator that newer shell wrappers
+        # use to keep argparse from eating option-shaped user words.
+        words = [str(x) for x in ns.words]
+        if words and words[0] == "--":
+            words = words[1:]
         return _cmd_internal_complete(
             str(ns.shell),
             int(ns.cword),
-            [str(x) for x in ns.words],
+            words,
             base_dir=base_dir,
         )
     if ns.command == "help" and str(getattr(ns, "topic", "")).strip() != "actions":

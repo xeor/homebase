@@ -72,7 +72,7 @@ Plus `--as <child-key>` to pick a registered child Source (see §5).
 - `--cd` / `--no-cd`               alias pair for `--open`/`--no-open`
                                    (matches today's `changedir`).
 - `--tmp` / `--no-tmp`             toggle `.tmp` suffix.
-- `--timestamp` / `--no-timestamp` toggle `YYYY-DD-MM_` date prefix.
+- `--timestamp` / `--no-timestamp` toggle `YYYY-MM-DD_` date prefix.
 - `--ts-name`                      use `YYYYMMDD-HHMMSS` as the name when
                                    none is provided.
 - `--alpha-name`                   use next free `a`, `b`, …, `aa`.
@@ -832,7 +832,7 @@ CLI wired:
 Working invocations:
 - `b new` (no arg) → existing TUI flow.
 - `b new myproj` → empty project at `~/base/myproj/`.
-- `b new myproj --tmp --timestamp` → `YYYY-DD-MM_myproj.tmp`.
+- `b new myproj --tmp --timestamp` → `YYYY-MM-DD_myproj.tmp`.
 - `b new myproj altname --tag a --tag b` → explicit name + tags.
 - `b new myproj --dry-run` → prints plan, no fs writes.
 - `b new ./path` / `b new https://…` → "source not implemented yet"
@@ -951,7 +951,7 @@ Working invocations:
   rewrites to `raw.githubusercontent.com/.../refs/heads/main/...`,
   fetches into `~/base/bar/README.md`.
 - `b new --downloaded` → confirm, move newest ~/Downloads file into
-  `~/base/<YYYY-DD-MM_basename>.tmp/`, default `--open` spawns shell.
+  `~/base/<YYYY-MM-DD_basename>.tmp/`, default `--open` spawns shell.
 - `b new --downloaded myname --no-open --no-tmp --no-timestamp --yes`
   → moves into `~/base/myname/<file>`.
 - `download.config.url_rewrites` regex rewrites take effect before

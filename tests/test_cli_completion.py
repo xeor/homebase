@@ -11,6 +11,47 @@ def test_completion_script_contains_shell_hooks() -> None:
     assert "complete -c b -f -a '(__b_complete)'" in cli_completion.completion_script("fish")
 
 
+def test_completion_script_passes_double_dash_separator() -> None:
+    """Every shell bridge must emit ``--`` between __complete's own
+    positionals and the user's typed words. Without it, an in-flight
+    option like ``--as`` (or ``--no-tmp``) ends up being parsed at the
+    parent level and ``b`` errors out with ``unrecognized arguments``.
+    """
+    for shell in ("bash", "zsh", "fish"):
+        script = cli_completion.completion_script(shell)
+        assert "$cword\" --" in script or "$cword --" in script, (
+            f"{shell} completion missing -- separator: {script!r}"
+        )
+
+
+def test_internal_complete_parses_option_shaped_words() -> None:
+    """Direct check at the parser level: ``b __complete fish 3 -- new --as``
+    must parse cleanly (the ``--`` stops parent option parsing) and
+    deliver ``--as`` through as a word so the completion machinery can
+    react to it."""
+    from homebase.cli.parser import build_cli_parser
+
+    parser = build_cli_parser()
+    ns = parser.parse_args(["__complete", "fish", "3", "--", "new", "--as"])
+    assert ns.command == "__complete"
+    # argparse.REMAINDER consumes the leading ``--`` on its own, so
+    # words contains only the user-typed tokens.
+    assert ns.words == ["new", "--as"]
+
+
+def test_internal_complete_handles_stale_wrapper_without_dash_dash() -> None:
+    """Older shell completion files generated before iter-14 don't
+    pass ``--``. Thanks to ``argparse.REMAINDER`` on ``words`` the
+    option-shaped tokens (``--as``) still flow through as data
+    instead of being re-parsed as parent flags."""
+    from homebase.cli.parser import build_cli_parser
+
+    parser = build_cli_parser()
+    ns = parser.parse_args(["__complete", "fish", "3", "new", "--as"])
+    assert ns.command == "__complete"
+    assert ns.words == ["new", "--as"]
+
+
 def test_completion_candidates_include_top_level_commands() -> None:
     out = cli_completion.completion_candidates(["st"], 1, base_dir=Path("."))
     assert "status" in out

@@ -90,7 +90,7 @@ def resolve_new_project_name(
     if add_tmp_suffix:
         final_name = f"{final_name}.tmp"
     if add_date_prefix:
-        final_name = f"{datetime.now().strftime('%Y-%d-%m_')}{final_name}"
+        final_name = f"{datetime.now().strftime('%Y-%m-%d_')}{final_name}"
     return final_name
 
 

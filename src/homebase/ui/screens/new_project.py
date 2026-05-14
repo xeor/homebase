@@ -51,8 +51,8 @@ _TOGGLES: tuple[_ToggleSpec, ...] = (
         "Append .tmp to the folder name (signals throwaway / WIP).",
     ),
     _ToggleSpec(
-        "timestamp", "YYYY-DD-MM_ prefix", False,
-        "Prefix the folder name with today's date (year-day-month).",
+        "timestamp", "YYYY-MM-DD_ prefix", False,
+        "Prefix the folder name with today's date (year-month-day, ISO).",
     ),
     _ToggleSpec(
         "cd", "open shell after create", True,
