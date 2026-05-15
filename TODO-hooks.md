@@ -38,6 +38,9 @@ then peel off discrete tickets.
     `rename/tag_change/new_project/delete`).
   - Added default bundled post specs in config loader to preserve existing behavior
     on workspaces without explicit `hooks_post` config yet.
+  - Added focused tests for bundled hook behavior:
+    `tests/test_hooks_bundled_notes_rename.py` and
+    `tests/test_hooks_bundled_tag_symlink_sync.py`.
 
 ## Goal
 
