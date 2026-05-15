@@ -7,6 +7,9 @@ from pathlib import Path
 from typing import Any, Callable
 
 from ...core.models import ProjectRow
+from ...hooks import runtime as hooks_runtime
+from ...hooks.snapshot import snapshot_target
+from ...metadata.api import load_base_data
 from . import note_sync as note_sync_actions
 
 
@@ -265,6 +268,18 @@ def on_rename_item(
         new_note_path=new_note_path,
         rendered_command=rendered_note_cmd,
         base_dir=getattr(app, "base_dir", target.parent),
+    )
+    hooks_runtime.dispatch_post(
+        app,
+        event="rename",
+        targets=[snapshot_target(updated, load_base_data(updated.path))],
+        change={
+            "old_path": current,
+            "new_path": target,
+            "old_name": current.name,
+            "new_name": target.name,
+        },
+        view=app.view_mode,
     )
     app._refresh_table()
     app._log(f"renamed: {current.name} -> {target.name}", "info")

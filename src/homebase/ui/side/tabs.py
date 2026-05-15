@@ -17,6 +17,7 @@ from ...core.utils import (
 from ...metadata.api import build_project_info_text
 from ..query.notes_paths import render_notes_template
 from ..widgets import ReadmeMarkdownViewer
+from .hooks_panel import render_hooks_panel
 
 
 def update_readme_tab_state(app: Any) -> None:
@@ -82,6 +83,8 @@ def refresh_side(app: Any, *, base_dir: Path, color_accent_hex: str, level_warn:
             lines.append("[dim]----------------------------------------[/]")
             lines.append("[cyan]managed processes[/]:")
             lines.extend(app._managed_process_info_lines())
+        elif app.side_info_tab == "hooks":
+            lines.extend(render_hooks_panel(app).splitlines())
         else:
             if app.messages:
                 for level, ts, msg in app.messages:

@@ -120,6 +120,7 @@ from ..core.models import (
     RestoreTargetExistsError,
 )
 from ..core.utils import WIDGET_API_ERRORS, fmt_ymd
+from ..hooks.runtime import HookRunRecord
 from ..metadata.api import (
     all_property_defs,
     base_meta_health,
@@ -359,6 +360,7 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
         self._init_pane_state()
         self._init_query_state()
         self._init_busy_state()
+        self._init_hooks_state()
         self._init_settings_state()
         self._init_reconcile_state()
         self.view_config = _VIEW_CONFIG_DEFAULT
@@ -589,6 +591,10 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
         self.open_mode = dict(self.ctx.open_mode_config)
         self.notes_config = dict(self.ctx.notes_config)
         self.open_settings_index = 0
+
+    def _init_hooks_state(self) -> None:
+        self.hook_recent: dict[tuple[str, str], list[HookRunRecord]] = {}
+        self.hook_running: dict[str, float] = {}
 
     def _init_reconcile_state(self) -> None:
         self.reconcile_config = {

@@ -10,6 +10,14 @@ from typing import Callable
 # Defensive catch for textual widget property writes that can fail
 # transiently during teardown / re-mount.
 WIDGET_API_ERRORS = (AttributeError, RuntimeError, ValueError, TypeError)
+HOOK_RUN_ERRORS = (
+    OSError,
+    ValueError,
+    TypeError,
+    RuntimeError,
+    KeyError,
+    AttributeError,
+)
 
 
 def run_out(*cmd: str, check: bool = True) -> str:

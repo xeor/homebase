@@ -9,6 +9,7 @@ from homebase.ui.actions import item_edits
 class _AppStub:
     def __init__(self, src: Path) -> None:
         self.pending_rename_target = src
+        self.view_mode = "active"
         self._rows = [
             ProjectRow(
                 path=src,
@@ -113,3 +114,49 @@ def test_on_rename_item_preserves_opened_ts_and_moves_mapping(tmp_path: Path) ->
     assert app.moved_opened == (src, tmp_path / "beta")
     assert len(app._rows) == 1
     assert app._rows[0].opened_ts == 123
+
+
+def test_on_rename_item_dispatches_post_hook_payload(tmp_path: Path, monkeypatch) -> None:
+    src = tmp_path / "alpha"
+    src.mkdir()
+    app = _AppStub(src)
+    captured: dict[str, object] = {}
+
+    def _project_row(target: Path, **kwargs):
+        return ProjectRow(
+            path=target,
+            name=target.name,
+            branch="-",
+            dirty="",
+            last="-",
+            src="fs",
+            created="-",
+            tags=[],
+            properties=[],
+            description="",
+            created_ts=0,
+            last_ts=0,
+            git_ts=0,
+            opened_ts=int(kwargs.get("opened_ts_override", 0)),
+            is_fork=False,
+            is_tmp=False,
+            archived=bool(kwargs.get("archived", False)),
+            restore_target=kwargs.get("restore_target"),
+            archived_ts=int(kwargs.get("archived_ts", 0)),
+            wip=False,
+            suffix=None,
+        )
+
+    def _capture_dispatch(app_obj, *, event, targets, change, view):
+        captured["event"] = event
+        captured["targets"] = targets
+        captured["change"] = change
+        captured["view"] = view
+
+    monkeypatch.setattr(item_edits.hooks_runtime, "dispatch_post", _capture_dispatch)
+    item_edits.on_rename_item(app, "beta", project_row=_project_row)
+    assert captured["event"] == "rename"
+    assert captured["view"] == "active"
+    change = captured["change"]
+    assert change["old_name"] == "alpha"
+    assert change["new_name"] == "beta"

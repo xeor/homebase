@@ -3,6 +3,22 @@
 Planning doc. Not implementation. Iterate here until shape is settled,
 then peel off discrete tickets.
 
+## Implementation status
+
+- 2026-05-15: Phase 1 completed in-tree.
+  - Added `hooks/` package skeleton (`api.py`, `loader.py`, `runtime.py` stub, bundled dir tree).
+  - Added hook core/config models and parser (`HookSpec`, `HookTarget`, `PreResult`, `load_hook_specs`).
+  - Wired runtime config/UI context/CLI startup, including hard-fail `verify_all_specs(...)`.
+  - Added tests: `tests/test_config_hooks.py`, `tests/test_hooks_loader.py`.
+- 2026-05-15: Phase 2 started.
+  - Implemented threaded `dispatch_post` runtime path with view filtering, sequential hook execution,
+    slow-hook warning loop, runtime-error routing, framing events for single-target dispatch,
+    and `hook_recent` tracking.
+  - Added rename trigger wiring and hook snapshot helper.
+  - Added side-panel `Info -> Hooks` tab renderer.
+  - Added tests: `tests/test_hooks_runtime.py` and rename dispatch assertion in
+    `tests/test_item_edits.py`.
+
 ## Goal
 
 A user-pluggable hook system that fires on workspace events and can

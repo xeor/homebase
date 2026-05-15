@@ -584,6 +584,7 @@ SIDE_CHILD_TABS: dict[str, list[tuple[str, str]]] = {
         ("stats", "Stats and context"),
         ("cheat", "Cheat-sheet"),
         ("cache", "Runtime"),
+        ("hooks", "Hooks"),
     ],
     "settings": [
         ("table", "Table"),
