@@ -47,6 +47,8 @@ then peel off discrete tickets.
   - Wired CLI `b new` flow to dispatch `new_project` post hooks via callback from
     `cli.entry` into `workspace.new.cmd`.
   - Wired CLI `b rm` flow to dispatch `delete` post hooks with pre-delete snapshot payload.
+  - Added CLI slow-hook warning loop + hook_started/hook_done framing events in
+    `dispatch_post_cli`.
 
 ## Goal
 

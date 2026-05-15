@@ -211,3 +211,29 @@ def test_dispatch_post_cli_runs_hook_and_updates_base_log(tmp_path: Path) -> Non
     data = load_base_data(project)
     events = data.get("log", {}).get("events", []) if isinstance(data.get("log", {}), dict) else []
     assert any(isinstance(entry, dict) and entry.get("_event") == "cli_hook_event" for entry in events)
+
+
+def test_dispatch_post_cli_emits_slow_warning(tmp_path: Path, capsys) -> None:
+    _write_hook(tmp_path, "cli_slow", "import time\ndef run(ctx):\n    time.sleep(0.15)\n")
+    project = tmp_path / "p1"
+    project.mkdir()
+    spec = HookSpec(
+        timing="post",
+        event="rename",
+        name="cli_slow",
+        source="custom",
+        enabled=True,
+        views=(),
+        config={},
+        slow_warn_s=0.05,
+    )
+    dispatch_post_cli(
+        base_dir=tmp_path,
+        hook_specs={("post", "rename"): [spec]},
+        event="rename",
+        targets=[_target(project)],
+        change={},
+        view="active",
+    )
+    captured = capsys.readouterr()
+    assert "still running" in captured.err

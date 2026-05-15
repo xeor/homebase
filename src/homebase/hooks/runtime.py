@@ -89,10 +89,36 @@ def dispatch_post_cli(
     for spec in selected:
         spec_id = f"post/{event}/{spec.name}"
         started = time.time()
+        slow_timer: threading.Timer | None = None
+        running = threading.Event()
+        running.set()
         print(f"[hook] {spec_id} ... running", file=os.sys.stderr)
         hook_error = ""
+
+        def _warn_slow() -> None:
+            if not running.is_set():
+                return
+            elapsed = max(0.0, time.time() - started)
+            print(
+                f"[hook] {spec_id} still running ({elapsed:.1f}s)",
+                file=os.sys.stderr,
+            )
+            nonlocal slow_timer
+            slow_timer = threading.Timer(max(0.05, float(spec.slow_warn_s)), _warn_slow)
+            slow_timer.daemon = True
+            slow_timer.start()
+
         try:
             module = resolve_hook_module(spec, base_dir)
+            if len(targets) == 1:
+                append_base_log(
+                    targets[0].path,
+                    "hook_started",
+                    {"hook": spec.name, "timing": "post", "event": event},
+                )
+            slow_timer = threading.Timer(max(0.05, float(spec.slow_warn_s)), _warn_slow)
+            slow_timer.daemon = True
+            slow_timer.start()
             _run_cli_module(
                 module,
                 base_dir=base_dir,
@@ -106,7 +132,22 @@ def dispatch_post_cli(
             hook_error = str(exc)
             print(f"[hook] {spec_id} failed: {hook_error}", file=os.sys.stderr)
         finally:
+            running.clear()
+            if slow_timer is not None:
+                slow_timer.cancel()
             duration = max(0.0, time.time() - started)
+            if len(targets) == 1:
+                append_base_log(
+                    targets[0].path,
+                    "hook_done",
+                    {
+                        "hook": spec.name,
+                        "timing": "post",
+                        "event": event,
+                        "duration_s": round(duration, 3),
+                        "error": hook_error,
+                    },
+                )
             if not hook_error:
                 print(f"[hook] {spec_id} done in {duration:.1f}s", file=os.sys.stderr)
 
