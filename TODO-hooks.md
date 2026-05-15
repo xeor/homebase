@@ -41,6 +41,12 @@ then peel off discrete tickets.
   - Added focused tests for bundled hook behavior:
     `tests/test_hooks_bundled_notes_rename.py` and
     `tests/test_hooks_bundled_tag_symlink_sync.py`.
+- 2026-05-15: Phase 6 started (CLI dispatch path, partial).
+  - Added synchronous CLI hook dispatcher (`dispatch_post_cli`) with stderr progress
+    lines and stdout/stderr capture for hook code.
+  - Wired CLI `b new` flow to dispatch `new_project` post hooks via callback from
+    `cli.entry` into `workspace.new.cmd`.
+  - Wired CLI `b rm` flow to dispatch `delete` post hooks with pre-delete snapshot payload.
 
 ## Goal
 

@@ -110,6 +110,8 @@ def main(argv: list[str]) -> int:
     )
     from ..config.property_defs import load_property_defs
     from ..hooks.loader import ignored_custom_pre_hook_files, verify_all_specs
+    from ..hooks.runtime import dispatch_post_cli
+    from ..hooks.snapshot import snapshot_target_from_path
     from ..tmux.flow import cmd_tmux_load, cmd_tmux_save
     from ..workspace.benchmark import cmd_benchmark, cmd_test
     from ..workspace.new import cmd_new
@@ -237,6 +239,42 @@ def main(argv: list[str]) -> int:
         resolve_filter_expression=lambda expr: _resolve_filter_expression(base_dir, expr),
     )
 
+    def _post_create_hook(result, plan, raw_input, explicit_name) -> None:
+        try:
+            target = snapshot_target_from_path(result.target, archived=bool(getattr(plan, "is_archive", False)))
+        except OSError:
+            return
+        dispatch_post_cli(
+            base_dir=base_dir,
+            hook_specs=runtime_cfg.hook_specs,
+            event="new_project",
+            targets=[target],
+            change={
+                "created_path": result.target,
+                "source": str(getattr(plan, "source_key", "auto")),
+                "template": (str(getattr(plan, "template", "") or "").strip() or None),
+                "initial_tags": [str(tag) for tag in getattr(plan, "tags", [])],
+                "post_commands": [str(cmd) for cmd in getattr(plan, "post_commands", [])],
+                "after_create": "open" if bool(result.open_shell) else "stay",
+                "inputs": {
+                    "raw_input": raw_input,
+                    "explicit_name": explicit_name,
+                    "mode": getattr(ns, "mode", None),
+                    "child_key": getattr(ns, "child_key", None),
+                    "tmp": getattr(ns, "tmp", None),
+                    "timestamp": getattr(ns, "timestamp", None),
+                    "ts_name": getattr(ns, "ts_name", None),
+                    "alpha_name": getattr(ns, "alpha_name", None),
+                    "ask_name": getattr(ns, "ask_name", None),
+                    "ask_source": getattr(ns, "ask_source", None),
+                    "archive": getattr(ns, "archive", None),
+                    "multi": getattr(ns, "multi", None),
+                },
+                "plan": {},
+            },
+            view="archive" if target.archived else "active",
+        )
+
     try:
         rc = dispatch_command(
             ns,
@@ -257,7 +295,12 @@ def main(argv: list[str]) -> int:
                 with_git=with_git,
                 show_archived=show_archived,
             ),
-            cmd_new=cmd_new,
+            cmd_new=lambda ns_obj, bd, cwd_path: cmd_new(
+                ns_obj,
+                bd,
+                cwd_path,
+                post_create_hook=_post_create_hook,
+            ),
             cmd_completion=lambda shell: _cmd_completion(shell),
             cmd_internal_complete=lambda shell, cword, words: _cmd_internal_complete(
                 shell,
@@ -295,6 +338,7 @@ def main(argv: list[str]) -> int:
                 path,
                 force_outside_base=force_outside_base,
                 force=force,
+                hook_specs=runtime_cfg.hook_specs,
             ),
             cmd_fix=cmd_fix,
             cmd_archive_ls=cmd_archive_ls,

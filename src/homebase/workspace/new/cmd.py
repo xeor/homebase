@@ -3,6 +3,7 @@ from __future__ import annotations
 import sys
 from argparse import Namespace
 from pathlib import Path
+from typing import Callable
 
 from ..projects import cmd_new as legacy_cmd_new
 from .adapters import adapter_for_host, parse_url
@@ -257,6 +258,7 @@ def _process_item(
     explicit_name: str | None,
     sources_cfg: dict[str, dict],
     ctx: NewContext,
+    post_create_hook: Callable[[NewResult, NewPlan | None, str | None, str | None], None] | None = None,
 ) -> int:
     rc, result, plan = plan_and_apply_one(
         ns,
@@ -266,6 +268,8 @@ def _process_item(
         ctx,
     )
     if result is not None:
+        if callable(post_create_hook):
+            post_create_hook(result, plan, raw_input, explicit_name)
         if plan is not None:
             print(format_summary(plan))
         else:
@@ -277,7 +281,12 @@ def _process_item(
     return rc
 
 
-def cmd_new(ns: Namespace, base_dir: Path, cwd: Path) -> int:
+def cmd_new(
+    ns: Namespace,
+    base_dir: Path,
+    cwd: Path,
+    post_create_hook: Callable[[NewResult, NewPlan | None, str | None, str | None], None] | None = None,
+) -> int:
     _ = builtin_keys()  # ensure sources are registered
     raw_inputs: list[str] = list(getattr(ns, "inputs", []) or [])
     multi = bool(getattr(ns, "multi", False))
@@ -296,10 +305,10 @@ def cmd_new(ns: Namespace, base_dir: Path, cwd: Path) -> int:
     if multi:
         if not raw_inputs:
             # Allow --multi with --downloaded (zero positionals OK).
-            return _process_item(ns, None, None, sources_cfg, ctx)
+            return _process_item(ns, None, None, sources_cfg, ctx, post_create_hook)
         worst = 0
         for raw in raw_inputs:
-            rc = _process_item(ns, raw, None, sources_cfg, ctx)
+            rc = _process_item(ns, raw, None, sources_cfg, ctx, post_create_hook)
             if rc != 0:
                 worst = rc if worst == 0 or rc > worst else worst
                 print(f"item failed: {raw}", file=sys.stderr)
@@ -314,4 +323,4 @@ def cmd_new(ns: Namespace, base_dir: Path, cwd: Path) -> int:
         return 2
     raw_input = raw_inputs[0] if raw_inputs else None
     explicit_name = raw_inputs[1] if len(raw_inputs) > 1 else None
-    return _process_item(ns, raw_input, explicit_name, sources_cfg, ctx)
+    return _process_item(ns, raw_input, explicit_name, sources_cfg, ctx, post_create_hook)

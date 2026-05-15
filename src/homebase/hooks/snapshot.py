@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from ..core.models import HookTarget, ProjectRow
+from ..metadata.api import load_base_data
 
 
 def snapshot_target(row: ProjectRow, base_meta: dict[str, object]) -> HookTarget:
@@ -20,4 +23,29 @@ def snapshot_target(row: ProjectRow, base_meta: dict[str, object]) -> HookTarget
         archived_ts=int(row.archived_ts),
         git_branch=str(row.branch),
         git_dirty=str(row.dirty),
+    )
+
+
+def snapshot_target_from_path(path: Path, *, archived: bool = False) -> HookTarget:
+    base_meta = load_base_data(path)
+    tags_raw = base_meta.get("tags", [])
+    tags = [str(tag) for tag in tags_raw] if isinstance(tags_raw, list) else []
+    props_raw = base_meta.get("properties", [])
+    props = [str(prop) for prop in props_raw] if isinstance(props_raw, list) else []
+    return HookTarget(
+        path=path,
+        name=path.name,
+        archived=bool(archived),
+        tags=tags,
+        properties=props,
+        description=str(base_meta.get("description", "") or ""),
+        wip=bool(base_meta.get("wip", False)),
+        suffix=(str(base_meta.get("suffix")) if base_meta.get("suffix") is not None else None),
+        packed=False,
+        base_meta=dict(base_meta),
+        last_modified_ts=0,
+        created_ts=0,
+        archived_ts=0,
+        git_branch="",
+        git_dirty="",
     )

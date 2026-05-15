@@ -34,6 +34,7 @@ ALLOWED_IMPORTS: dict[str, set[str]] = {
         "tmux",
         "core",
         "config",
+        "hooks",
         "commands",
     },
     "ui": {

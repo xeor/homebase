@@ -18,6 +18,8 @@ from ..core.constants import (
     PACKED_ARCHIVE_SUFFIX,
 )
 from ..core.models import RestoreTargetExistsError
+from ..hooks.runtime import dispatch_post_cli
+from ..hooks.snapshot import snapshot_target_from_path
 from ..metadata.api import (
     append_base_log,
     cleanup_tag_symlinks_pointing_at,
@@ -398,6 +400,7 @@ def cmd_rm(
     force_outside_base: bool = False,
     *,
     force: bool = False,
+    hook_specs: dict[tuple[str, str], list[object]] | None = None,
 ) -> int:
     target = Path(path).resolve()
     base_dir = Path(os.environ.get(ENV_BASE_DIR, ".")).resolve()
@@ -410,6 +413,27 @@ def cmd_rm(
         original_cwd = Path.cwd().resolve()
     except OSError:
         original_cwd = base_dir
+    delete_target = None
+    removed_snapshot: dict[Path, dict[str, object]] = {}
+    if target.exists() and target.is_dir():
+        try:
+            delete_target = snapshot_target_from_path(
+                target,
+                archived=core_utils.is_under(target, _archive_root(base_dir)),
+            )
+            removed_snapshot[target] = {
+                "name": delete_target.name,
+                "archived": delete_target.archived,
+                "tags": list(delete_target.tags),
+                "properties": list(delete_target.properties),
+                "description": delete_target.description,
+                "wip": delete_target.wip,
+                "suffix": delete_target.suffix,
+                "packed": delete_target.packed,
+                "base_meta": dict(delete_target.base_meta),
+            }
+        except OSError:
+            delete_target = None
     rc = commands_workspace.cmd_rm(
         path,
         env_base_dir_key=ENV_BASE_DIR,
@@ -420,6 +444,18 @@ def cmd_rm(
         force=force,
     )
     if rc == 0:
+        if hook_specs and delete_target is not None:
+            dispatch_post_cli(
+                base_dir=base_dir,
+                hook_specs=hook_specs,
+                event="delete",
+                targets=[delete_target],
+                change={
+                    "removed_paths": [delete_target.path],
+                    "removed_snapshots": removed_snapshot,
+                },
+                view="archive" if delete_target.archived else "active",
+            )
         _exec_shell_at_parent_if_cwd_under(
             target, base_dir, original_cwd=original_cwd,
         )

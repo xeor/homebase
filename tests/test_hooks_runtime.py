@@ -6,7 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from homebase.core.models import HookSpec, HookTarget
-from homebase.hooks.runtime import dispatch_post
+from homebase.hooks.runtime import dispatch_post, dispatch_post_cli
 from homebase.metadata.api import load_base_data
 
 
@@ -180,3 +180,34 @@ def test_dispatch_post_captures_stdout_stderr(tmp_path: Path) -> None:
     text_lines = [text for _level, text in app.logs]
     assert any("stdout: out-line" in line for line in text_lines)
     assert any("stderr: err-line" in line for line in text_lines)
+
+
+def test_dispatch_post_cli_runs_hook_and_updates_base_log(tmp_path: Path) -> None:
+    _write_hook(
+        tmp_path,
+        "cli_event",
+        "def run(ctx):\n    ctx.add_event(ctx.targets[0].path, 'cli_hook_event', {'ok': True})\n",
+    )
+    project = tmp_path / "p1"
+    project.mkdir()
+    spec = HookSpec(
+        timing="post",
+        event="rename",
+        name="cli_event",
+        source="custom",
+        enabled=True,
+        views=(),
+        config={},
+        slow_warn_s=30.0,
+    )
+    dispatch_post_cli(
+        base_dir=tmp_path,
+        hook_specs={("post", "rename"): [spec]},
+        event="rename",
+        targets=[_target(project)],
+        change={},
+        view="active",
+    )
+    data = load_base_data(project)
+    events = data.get("log", {}).get("events", []) if isinstance(data.get("log", {}), dict) else []
+    assert any(isinstance(entry, dict) and entry.get("_event") == "cli_hook_event" for entry in events)

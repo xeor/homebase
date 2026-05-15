@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import getpass
 import io
+import os
 import threading
 import time
 import traceback
@@ -9,6 +10,7 @@ from contextlib import redirect_stderr, redirect_stdout
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from types import ModuleType
 from typing import Any
 
 from .. import __version__ as homebase_version
@@ -65,6 +67,108 @@ def dispatch_post(
     )
     worker.start()
     return None
+
+
+def dispatch_post_cli(
+    *,
+    base_dir: Path,
+    hook_specs: dict[tuple[str, str], list[Any]],
+    event: str,
+    targets: list[HookTarget],
+    change: dict[str, object],
+    view: str,
+) -> None:
+    specs = list(hook_specs.get(("post", event), []))
+    selected = [
+        spec
+        for spec in specs
+        if bool(spec.enabled) and (not spec.views or view in spec.views)
+    ]
+    if not selected:
+        return
+    for spec in selected:
+        spec_id = f"post/{event}/{spec.name}"
+        started = time.time()
+        print(f"[hook] {spec_id} ... running", file=os.sys.stderr)
+        hook_error = ""
+        try:
+            module = resolve_hook_module(spec, base_dir)
+            _run_cli_module(
+                module,
+                base_dir=base_dir,
+                event=event,
+                view=view,
+                targets=targets,
+                change=change,
+                spec=spec,
+            )
+        except HOOK_RUN_ERRORS as exc:
+            hook_error = str(exc)
+            print(f"[hook] {spec_id} failed: {hook_error}", file=os.sys.stderr)
+        finally:
+            duration = max(0.0, time.time() - started)
+            if not hook_error:
+                print(f"[hook] {spec_id} done in {duration:.1f}s", file=os.sys.stderr)
+
+
+def _run_cli_module(
+    module: ModuleType,
+    *,
+    base_dir: Path,
+    event: str,
+    view: str,
+    targets: list[HookTarget],
+    change: dict[str, object],
+    spec: Any,
+) -> None:
+    runtime = HookRuntime(
+        invoker="cli",
+        homebase_version=homebase_version,
+        now_iso=datetime.now(timezone.utc).isoformat(),
+        now_ts=int(time.time()),
+        user=str(getpass.getuser() or ""),
+    )
+    info = HookInfo(
+        name=str(spec.name),
+        source=str(spec.source),
+        timing="post",
+        event=event,
+        config=dict(spec.config),
+    )
+
+    def _add_event(path: Path, kind: str, payload: dict[str, object]) -> None:
+        append_base_log(path, kind, payload)
+
+    def _notify(text: str, level: str = "info") -> None:
+        print(f"[hook] {level}: {text}", file=os.sys.stderr)
+
+    def _log(text: str, level: str = "info") -> None:
+        print(f"[hook] {level}: {text}")
+
+    context = HookContext(
+        event=event,
+        timing="post",
+        view=view,
+        base_dir=base_dir,
+        targets=tuple(targets),
+        change=dict(change),
+        runtime=runtime,
+        hook=info,
+        add_event=_add_event,
+        notify=_notify,
+        log=_log,
+        ask=lambda *_args, **_kwargs: None,
+    )
+    captured_out = io.StringIO()
+    captured_err = io.StringIO()
+    with redirect_stdout(captured_out), redirect_stderr(captured_err):
+        module.run(context)
+    out_text = captured_out.getvalue().strip()
+    err_text = captured_err.getvalue().strip()
+    if out_text:
+        _log(f"hook {spec.name} stdout: {out_text}", "info")
+    if err_text:
+        _notify(f"hook {spec.name} stderr: {err_text}", "warn")
 
 
 def _run_post_chain(
