@@ -164,3 +164,19 @@ def test_dispatch_post_emits_slow_warning(tmp_path: Path) -> None:
     dispatch_post(app, event="rename", targets=[_target(project)], change={}, view="active")
     assert app.done.wait(2.0)
     assert any("still running" in text for _level, text in app.notifications)
+
+
+def test_dispatch_post_captures_stdout_stderr(tmp_path: Path) -> None:
+    _write_hook(
+        tmp_path,
+        "prints",
+        "import sys\ndef run(ctx):\n    print('out-line')\n    print('err-line', file=sys.stderr)\n",
+    )
+    project = tmp_path / "p1"
+    project.mkdir()
+    app = FakeApp(tmp_path, [_spec("prints")])
+    dispatch_post(app, event="rename", targets=[_target(project)], change={}, view="active")
+    assert app.done.wait(2.0)
+    text_lines = [text for _level, text in app.logs]
+    assert any("stdout: out-line" in line for line in text_lines)
+    assert any("stderr: err-line" in line for line in text_lines)

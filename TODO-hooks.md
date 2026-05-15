@@ -25,6 +25,11 @@ then peel off discrete tickets.
     `after_create=open` and stay-in-TUI paths.
   - Wired `delete` post-dispatch in bulk action flow with pre-delete snapshots in
     both `ctx.targets` and `change.removed_snapshots`.
+- 2026-05-15: Phase 4 started (custom loader/runtime hardening).
+  - Added stdout/stderr capture around hook execution; routed captured output through
+    runtime log path.
+  - Added startup scan for `.homebase/hooks/pre/<event>/*.py` and explicit warning that
+    custom pre-hooks are discovered but ignored until phase 7.
 
 ## Goal
 

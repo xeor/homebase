@@ -7,7 +7,7 @@ from pathlib import Path
 from types import ModuleType
 
 from ..config.hooks import HookConfigError
-from ..core.constants import HOMEBASE_DIR_NAME
+from ..core.constants import HOMEBASE_DIR_NAME, HOOK_EVENTS
 from ..core.models import HookSpec
 
 _BUNDLED_REGISTRY: dict[tuple[str, str, str], ModuleType] = {}
@@ -71,3 +71,16 @@ def verify_all_specs(specs: dict[tuple[str, str], list[HookSpec]], base_dir: Pat
             if not spec.enabled:
                 continue
             resolve_hook_module(spec, base_dir)
+
+
+def ignored_custom_pre_hook_files(base_dir: Path) -> list[Path]:
+    root = base_dir / HOMEBASE_DIR_NAME / "hooks" / "pre"
+    out: list[Path] = []
+    for event in HOOK_EVENTS:
+        event_dir = root / event
+        if not event_dir.is_dir():
+            continue
+        for file_path in sorted(event_dir.glob("*.py")):
+            if file_path.is_file():
+                out.append(file_path)
+    return out

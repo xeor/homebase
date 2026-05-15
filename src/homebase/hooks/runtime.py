@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import getpass
+import io
 import threading
 import time
 import traceback
+from contextlib import redirect_stderr, redirect_stdout
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -151,7 +153,16 @@ def _run_post_chain(
             slow_timer = threading.Timer(max(0.05, float(spec.slow_warn_s)), _warn_slow)
             slow_timer.daemon = True
             slow_timer.start()
-            module.run(context)
+            captured_out = io.StringIO()
+            captured_err = io.StringIO()
+            with redirect_stdout(captured_out), redirect_stderr(captured_err):
+                module.run(context)
+            out_text = captured_out.getvalue().strip()
+            err_text = captured_err.getvalue().strip()
+            if out_text:
+                _log_on_main(f"hook {spec_id} stdout: {out_text}", "info")
+            if err_text:
+                _log_on_main(f"hook {spec_id} stderr: {err_text}", "warn")
         except HOOK_RUN_ERRORS as exc:
             hook_error = str(exc)
             tb_tail = "\n".join(traceback.format_exception(type(exc), exc, exc.__traceback__)[-6:])
