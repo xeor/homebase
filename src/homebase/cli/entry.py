@@ -93,6 +93,7 @@ def _resolve_filter_expression(base_dir: Path, expr: str):
 
 def main(argv: list[str]) -> int:
     from ..config import prefs as app_prefs  # noqa: F401  (alias for clarity)
+    from ..config.hooks import HookConfigError, load_hook_specs
     from ..config.prefs import (
         load_actions,
         load_archive_timezone_name,
@@ -108,6 +109,7 @@ def main(argv: list[str]) -> int:
         load_wip_symbol_map,
     )
     from ..config.property_defs import load_property_defs
+    from ..hooks.loader import verify_all_specs
     from ..tmux.flow import cmd_tmux_load, cmd_tmux_save
     from ..workspace.benchmark import cmd_benchmark, cmd_test
     from ..workspace.new import cmd_new
@@ -177,8 +179,13 @@ def main(argv: list[str]) -> int:
             load_notes_config=load_notes_config,
             load_reconcile_config=load_reconcile_config,
             load_cache_profile_table=load_cache_profile_table,
+            load_hook_specs=load_hook_specs,
             load_archive_timezone_name=load_archive_timezone_name,
         )
+        verify_all_specs(runtime_cfg.hook_specs, base_dir)
+    except HookConfigError as exc:
+        print(f"hook config error: {exc}", file=sys.stderr)
+        return 1
     except ValueError as exc:
         print(f"config error: {exc}", file=sys.stderr)
         return 1
@@ -214,6 +221,7 @@ def main(argv: list[str]) -> int:
             scope: {name: dict(profile) for name, profile in table.items()}
             for scope, table in runtime_cfg.cache_profile_table.items()
         },
+        hook_specs=dict(runtime_cfg.hook_specs),
     )
 
     initial_filter_expr = runtime_init.resolve_initial_filter_expression(

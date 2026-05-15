@@ -12,6 +12,7 @@ ALLOWED_IMPORTS: dict[str, set[str]] = {
     "config": {"core", "config"},
     "cache": {"core", "config", "cache"},
     "metadata": {"core", "config", "metadata"},
+    "hooks": {"core", "config", "metadata", "hooks"},
     "archive": {"core", "config", "archive"},
     "tmux": {"core", "config", "tmux"},
     "filter": {"core", "config", "filter"},
@@ -46,6 +47,7 @@ ALLOWED_IMPORTS: dict[str, set[str]] = {
         "workspace",
         "commands",
         "tmux",
+        "hooks",
         "ui",
     },
     "cli": {
@@ -59,6 +61,7 @@ ALLOWED_IMPORTS: dict[str, set[str]] = {
         "workspace",
         "commands",
         "tmux",
+        "hooks",
         "ui",
         "cli",
     },

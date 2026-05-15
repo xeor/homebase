@@ -33,6 +33,7 @@ class UIContext:
     cache_profile_table: dict[str, dict[str, dict[str, object]]] = field(
         default_factory=dict
     )
+    hook_specs: dict[tuple[str, str], list[object]] = field(default_factory=dict)
 
 
 def build_ui_context(base_dir: Path) -> UIContext:
@@ -64,4 +65,5 @@ def build_ui_context(base_dir: Path) -> UIContext:
             scope: {name: dict(profile) for name, profile in table.items()}
             for scope, table in _const.CACHE_PROFILE_CONFIG.items()
         },
+        hook_specs={},
     )

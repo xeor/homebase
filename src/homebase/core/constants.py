@@ -446,6 +446,15 @@ BASE_META_ALLOWED_KEYS: set[str] = {
     "wip",
     "log",
 }
+HOOK_EVENTS: tuple[str, ...] = (
+    "rename",
+    "tag_change",
+    "new_project",
+    "delete",
+)
+HOOK_TIMINGS: tuple[str, ...] = ("pre", "post")
+HOOK_VIEWS: tuple[str, ...] = ("active", "archive")
+HOOK_SLOW_WARN_DEFAULT_S: float = 30.0
 CACHE_SCHEMA_VERSION = 5
 CACHE_MAX_AGE_S = 120
 CACHE_BG_REFRESH_S = 30

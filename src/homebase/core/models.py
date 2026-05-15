@@ -205,3 +205,66 @@ class ManagedProcess:
     terminate_on_quit: bool
     returncode: int | None = None
     ended_ts: float = 0.0
+
+
+@dataclass(frozen=True)
+class HookSpec:
+    timing: str
+    event: str
+    name: str
+    source: str
+    enabled: bool
+    views: tuple[str, ...]
+    config: dict[str, object]
+    slow_warn_s: float
+
+
+@dataclass(frozen=True)
+class HookTarget:
+    path: Path
+    name: str
+    archived: bool
+    tags: list[str]
+    properties: list[str]
+    description: str
+    wip: bool
+    suffix: str | None
+    packed: bool
+    base_meta: dict[str, object]
+    last_modified_ts: int
+    created_ts: int
+    archived_ts: int
+    git_branch: str
+    git_dirty: str
+
+
+@dataclass(frozen=True)
+class HookRuntime:
+    invoker: str
+    homebase_version: str
+    now_iso: str
+    now_ts: int
+    user: str
+
+
+@dataclass(frozen=True)
+class HookInfo:
+    name: str
+    source: str
+    timing: str
+    event: str
+    config: dict[str, object]
+
+
+@dataclass(frozen=True)
+class PreResult:
+    decision: str
+    reason: str = ""
+    mutated_change: dict[str, object] | None = None
+
+
+@dataclass(frozen=True)
+class PreOutcome:
+    cancelled: bool
+    reason: str
+    change: dict[str, object]
