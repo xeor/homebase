@@ -53,8 +53,8 @@ def test_internal_complete_handles_stale_wrapper_without_dash_dash() -> None:
 
 
 def test_completion_candidates_include_top_level_commands() -> None:
-    out = cli_completion.completion_candidates(["st"], 1, base_dir=Path("."))
-    assert "status" in out
+    out = cli_completion.completion_candidates(["l"], 1, base_dir=Path("."))
+    assert "ls" in out
 
 
 def test_completion_candidates_new_mode_flags() -> None:

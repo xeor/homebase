@@ -666,5 +666,5 @@ def cmd_setup(
     print("next steps:")
     print(f"- optional config: create/edit {config_path}")
     print("- docs: README.md (Technical State Files + Kitchen Sink Config)")
-    print("- run: b status")
+    print("- run: b ls")
     return 0 if not hard_fail else 1

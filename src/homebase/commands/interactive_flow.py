@@ -11,7 +11,7 @@ def no_arg_flow(
     cwd: Path,
     *,
     initial_filter_expr: str,
-    cmd_status: Callable[[Path], int],
+    cmd_list: Callable[[Path], int],
     run_textual_ui: Callable[[Path, Path, str], tuple[str, Path | None, list[str]]],
     run_post_commands: Callable[[Path, list[str]], None],
     open_with_mode: Callable[[Path, Path], int],
@@ -21,7 +21,7 @@ def no_arg_flow(
     cmd_rm: Callable[[str], int],
 ) -> int:
     if not sys.stdin.isatty() or not sys.stdout.isatty():
-        return cmd_status(base_dir)
+        return cmd_list(base_dir)
 
     action, path, post_commands = run_textual_ui(base_dir, cwd, initial_filter_expr)
     if action == "quit":

@@ -4,7 +4,7 @@ from pathlib import Path
 
 _TOP_LEVEL_COMMANDS = [
     "help",
-    "status",
+    "ls",
     "new",
     "n",
     "recent",

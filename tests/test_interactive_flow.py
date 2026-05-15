@@ -21,7 +21,7 @@ def test_no_arg_flow_open_action_runs_open_mode(monkeypatch: pytest.MonkeyPatch)
         Path("/tmp/base"),
         Path("/tmp/base"),
         initial_filter_expr="",
-        cmd_status=lambda _b: 0,
+        cmd_list=lambda _b: 0,
         run_textual_ui=lambda _b, _c, _q: ("open", Path("/tmp/base/p"), []),
         run_post_commands=lambda _p, _c: called.append("post"),
         open_with_mode=lambda _b, _p: 9,

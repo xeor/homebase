@@ -39,11 +39,15 @@ for the active shell (`bash`, `zsh`, `fish`).
 ## Common Commands
 
 ```sh
-uv run b               # interactive TUI
-uv run b status        # plain status table
-uv run b help          # full subcommand list
-uv run b new           # new-project wizard
-uv run b archive mv .  # archive current dir
+uv run b                   # interactive TUI
+uv run b ls                # fast cache-backed project list (names only)
+uv run b ls -l             # long format (modified / size / tags)
+uv run b ls tag:work       # filter (same syntax as the TUI's QUERY input)
+uv run b ls --git          # re-probe git + show BRANCH column (slower)
+uv run b ls --archived     # list archived projects
+uv run b help              # full subcommand list
+uv run b new               # new-project wizard
+uv run b archive mv .      # archive current dir
 uv run b benchmark run # synthetic perf bench
 uv run b c tmp         # quick-create from template key
 uv run b c tmp --debug # preview actions, no changes

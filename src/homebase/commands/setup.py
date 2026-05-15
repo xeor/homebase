@@ -21,7 +21,10 @@ def print_help() -> None:
         ("b [--filter=<name|expr>]", "open Textual project overview"),
         ("b new", "interactive new project wizard"),
         ("b help", "show help"),
-        ("b status", "workspace status table"),
+        (
+            "b ls [filter] [-l] [--git] [--archived]",
+            "list projects (cache-backed; same filter syntax as the TUI)",
+        ),
         ("b recent", "projects sorted by last git commit"),
         (
             "b benchmark run [--comment TEXT] [--keep-basefolder]",
@@ -114,8 +117,43 @@ def cmd_tags_sync(base_dir: Path, verbose: bool = True, debug: bool = False) -> 
     )
 
 
-def cmd_status(base_dir: Path) -> int:
-    return commands_basic.cmd_status(base_dir, collect_projects=collect_projects)
+def cmd_ls(
+    base_dir: Path,
+    *,
+    filter_expr: str = "",
+    long_format: bool = False,
+    with_git: bool = False,
+    show_archived: bool = False,
+) -> int:
+    from ..cache.api import cache_load_rows
+    from ..workspace.filter_compile import compile_filter_expr
+    from ..workspace.projects import git_info
+
+    def _enrich_git(rows: list) -> None:
+        # Live re-probe — the slow path the user explicitly asked for
+        # via --git. Updates branch/dirty/git_ts in-place on the rows.
+        for row in rows:
+            try:
+                branch, dirty, git_ts = git_info(row.path, include_dirty=True)
+            except (OSError, ValueError):
+                continue
+            row.branch = branch
+            row.dirty = dirty
+            if git_ts:
+                row.git_ts = git_ts
+
+    return commands_basic.cmd_ls(
+        base_dir,
+        cache_load_rows=cache_load_rows,
+        compile_filter_expr=compile_filter_expr,
+        fmt_ymd=core_utils.fmt_ymd,
+        fmt_size_human=core_utils.fmt_size_human,
+        enrich_git=_enrich_git,
+        filter_expr=filter_expr,
+        long_format=long_format,
+        with_git=with_git,
+        show_archived=show_archived,
+    )
 
 
 def cmd_recent(base_dir: Path) -> int:

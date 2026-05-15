@@ -71,7 +71,32 @@ def build_cli_parser() -> argparse.ArgumentParser:
     p_help.add_argument("--bound", choices=["bound", "unbound"], default="")
     p_help.add_argument("--view", choices=["active", "archive"], default="")
     p_help.add_argument("--show-defaults", action="store_true")
-    sub.add_parser("status")
+    # `b ls` — fast cache-backed listing. Replaces `b status`.
+    p_ls = sub.add_parser(
+        "ls",
+        help="list projects (cache-backed; takes the same filter syntax as the TUI)",
+    )
+    p_ls.add_argument(
+        "filter",
+        nargs="*",
+        default=[],
+        help="filter expression (e.g. `tag:work foo`)",
+    )
+    p_ls.add_argument(
+        "-l", "--long",
+        action="store_true",
+        help="long format with extra columns",
+    )
+    p_ls.add_argument(
+        "--git",
+        action="store_true",
+        help="re-probe git and include the BRANCH column (slower)",
+    )
+    p_ls.add_argument(
+        "--archived",
+        action="store_true",
+        help="list archived projects instead of active",
+    )
     _build_new_parser(sub)
     p_completion = sub.add_parser("completion")
     p_completion.add_argument("shell", choices=["fish", "zsh", "bash"])

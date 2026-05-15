@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from argparse import Namespace
 from pathlib import Path
 
 from homebase.cli import dispatch as cli_dispatch
@@ -19,7 +18,7 @@ def _stub_dispatch_kwargs(**overrides: object) -> dict[str, object]:
     """Default stub callables for ``dispatch_command``. Tests can
     override specific entries to assert routing behavior."""
     base = dict(
-        cmd_status=lambda _a: 0,
+        cmd_ls=lambda _a, **_kw: 0,
         cmd_new=lambda _ns, _bd, _cwd: 0,
         cmd_completion=lambda _a: 0,
         cmd_internal_complete=lambda _a, _b, _c: 0,
@@ -47,9 +46,14 @@ def _stub_dispatch_kwargs(**overrides: object) -> dict[str, object]:
     return base
 
 
-def test_dispatch_command_status_path() -> None:
+def test_dispatch_command_ls_path() -> None:
+    """``b ls`` routes through ``cmd_ls`` with the parsed flags."""
     parser = cli_dispatch.build_cli_parser()
-    ns = Namespace(command="status")
+    ns = parser.parse_args(["ls", "tag:work", "-l", "--archived"])
+    seen: list[dict[str, object]] = []
+    def _capture(_base, **kw):
+        seen.append(kw)
+        return 7
     rc = cli_dispatch.dispatch_command(
         ns,
         parser=parser,
@@ -58,9 +62,17 @@ def test_dispatch_command_status_path() -> None:
         cwd=Path("."),
         no_arg_flow=lambda _a, _b, _c: 0,
         initial_filter_expr="",
-        **_stub_dispatch_kwargs(cmd_status=lambda _a: 7),
+        **_stub_dispatch_kwargs(cmd_ls=_capture),
     )
     assert rc == 7
+    assert seen == [
+        {
+            "filter_expr": "tag:work",
+            "long_format": True,
+            "with_git": False,
+            "show_archived": True,
+        }
+    ]
 
 
 def test_bare_b_archive_routes_to_mv_cwd() -> None:

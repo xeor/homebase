@@ -24,12 +24,94 @@ def cmd_tags_sync(
     return 0
 
 
-def cmd_status(base_dir: Path, *, collect_projects: Callable[[Path], list[Any]]) -> int:
-    print(f"{'PROJECT':<25} {'BRANCH':<15} {'DIRTY':<5} {'MODIFIED':<10} TAGS")
-    print(f"{'-------':<25} {'------':<15} {'-----':<5} {'--------':<10} ----")
-    for row in collect_projects(base_dir):
-        tag_s = ",".join(row.tags)
-        print(f"{row.name:<25} {row.branch[:15]:<15} {row.dirty[:1]:<5} {row.last:<10} {tag_s}")
+def cmd_ls(
+    base_dir: Path,
+    *,
+    cache_load_rows: Callable[[Path], tuple[list[Any], list[Any], int]],
+    compile_filter_expr: Callable[[str], tuple[Callable[[Any], bool], str | None]],
+    fmt_ymd: Callable[[int], str],
+    fmt_size_human: Callable[[int], str],
+    enrich_git: Callable[[list[Any]], None] | None = None,
+    filter_expr: str = "",
+    long_format: bool = False,
+    with_git: bool = False,
+    show_archived: bool = False,
+) -> int:
+    """Fast, cache-backed `ls` over the workspace.
+
+    Defaults: print only project names, one per line. With ``-l`` /
+    ``long_format``, render a few extra columns (last modified, size,
+    tags). All cheap fields come straight from the SQLite cache
+    (``cache_load_rows``) so the no-flag path doesn't probe git, the
+    filesystem, or run any per-row work.
+
+    Opt-in slower data sources go behind explicit flags:
+      ``with_git`` — refresh + show branch / dirty status.
+
+    The ``filter_expr`` accepts the same syntax as the TUI's QUERY
+    input (compiled via ``compile_filter_expr``)."""
+    active, archived, _ts = cache_load_rows(base_dir)
+    rows = archived if show_archived else active
+
+    if filter_expr.strip():
+        pred, err = compile_filter_expr(filter_expr)
+        if err:
+            print(f"b ls: invalid filter: {err}", file=sys.stderr)
+            return 2
+        rows = [r for r in rows if pred(r)]
+
+    rows = sorted(rows, key=lambda r: str(getattr(r, "name", "")).lower())
+
+    if with_git and enrich_git is not None:
+        enrich_git(rows)
+
+    if not long_format and not with_git:
+        for row in rows:
+            print(row.name)
+        return 0
+
+    # Long format. Width-allocated columns; truncated values keep the
+    # output grep-friendly when piped. No ANSI — pipe-clean by design.
+    cols: list[tuple[str, int, Callable[[Any], str]]] = [
+        ("NAME", 28, lambda r: str(r.name)),
+        (
+            "MODIFIED",
+            12,
+            lambda r: fmt_ymd(getattr(r, "last_ts", 0) or 0)
+            if (getattr(r, "last_ts", 0) or 0) > 0
+            else str(getattr(r, "last", "") or "-"),
+        ),
+    ]
+    if with_git:
+        cols.append((
+            "BRANCH",
+            18,
+            lambda r: (
+                f"{getattr(r, 'branch', '') or '-'}"
+                + ("*" if str(getattr(r, "dirty", "")).strip() else "")
+            ),
+        ))
+    cols.append((
+        "SIZE",
+        10,
+        lambda r: fmt_size_human(int(getattr(r, "size_bytes", 0) or 0)),
+    ))
+    cols.append((
+        "TAGS",
+        24,
+        lambda r: ",".join(getattr(r, "tags", []) or []) or "-",
+    ))
+
+    header = "  ".join(f"{label:<{width}}" for label, width, _ in cols)
+    print(header)
+    for row in rows:
+        parts: list[str] = []
+        for _label, width, render in cols:
+            text = str(render(row))
+            if len(text) > width:
+                text = text[: max(1, width - 1)] + "…"
+            parts.append(f"{text:<{width}}")
+        print("  ".join(parts))
     return 0
 
 

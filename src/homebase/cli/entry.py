@@ -18,9 +18,9 @@ from ..commands.archive import (
 from ..commands.setup import (
     cmd_cache_warm,
     cmd_cd,
+    cmd_ls,
     cmd_recent,
     cmd_setup,
-    cmd_status,
     cmd_tags_sync,
     cmd_utils,
 )
@@ -69,7 +69,7 @@ def no_arg_flow(
         base_dir,
         cwd,
         initial_filter_expr=initial_filter_expr,
-        cmd_status=cmd_status,
+        cmd_list=cmd_ls,
         run_textual_ui=lambda bd, c, q: run_textual_ui(
             bd,
             c,
@@ -234,7 +234,13 @@ def main(argv: list[str]) -> int:
                 initial_filter_expr=initial,
                 ctx=ui_ctx,
             ),
-            cmd_status=cmd_status,
+            cmd_ls=lambda bd, filter_expr="", long_format=False, with_git=False, show_archived=False: cmd_ls(
+                bd,
+                filter_expr=filter_expr,
+                long_format=long_format,
+                with_git=with_git,
+                show_archived=show_archived,
+            ),
             cmd_new=cmd_new,
             cmd_completion=lambda shell: _cmd_completion(shell),
             cmd_internal_complete=lambda shell, cword, words: _cmd_internal_complete(

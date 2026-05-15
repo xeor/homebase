@@ -15,7 +15,7 @@ def dispatch_command(
     bin_dir: Path,
     cwd: Path,
     no_arg_flow: Callable[[Path, Path, str], int],
-    cmd_status: Callable[[Path], int],
+    cmd_ls: Callable[..., int],
     cmd_new: Callable[[Any, Path, Path], int],
     cmd_completion: Callable[[str], int],
     cmd_internal_complete: Callable[[str, int, list[str]], int],
@@ -52,8 +52,15 @@ def dispatch_command(
             )
         parser.print_help()
         return 0
-    if ns.command == "status":
-        return cmd_status(base_dir)
+    if ns.command == "ls":
+        filter_parts = list(getattr(ns, "filter", []) or [])
+        return cmd_ls(
+            base_dir,
+            filter_expr=" ".join(filter_parts),
+            long_format=bool(getattr(ns, "long", False)),
+            with_git=bool(getattr(ns, "git", False)),
+            show_archived=bool(getattr(ns, "archived", False)),
+        )
     if ns.command in {"new", "n"}:
         return cmd_new(ns, base_dir, cwd)
     if ns.command == "completion":

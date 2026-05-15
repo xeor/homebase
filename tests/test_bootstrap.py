@@ -34,10 +34,12 @@ def test_cli_help_smoke(tmp_path: Path, monkeypatch, capsys) -> None:
     assert rc == 0
 
 
-def test_cli_status_smoke(tmp_path: Path, monkeypatch, capsys) -> None:
+def test_cli_ls_smoke(tmp_path: Path, monkeypatch, capsys) -> None:
+    """``b ls`` returns 0 on an empty workspace (no projects → no
+    output beyond an empty list)."""
     entry = importlib.import_module("homebase.cli.entry")
     monkeypatch.setenv("BASE_FOLDER", str(tmp_path))
     monkeypatch.chdir(tmp_path)
-    rc = int(entry.main(["status"]))
+    rc = int(entry.main(["ls"]))
     capsys.readouterr()
     assert rc == 0
