@@ -30,6 +30,14 @@ then peel off discrete tickets.
     runtime log path.
   - Added startup scan for `.homebase/hooks/pre/<event>/*.py` and explicit warning that
     custom pre-hooks are discovered but ignored until phase 7.
+- 2026-05-15: Phase 5 started (bundled hooks port).
+  - Added bundled post hooks: `notes_rename` and `tag_symlink_sync` for
+    `rename`, plus `tag_symlink_sync` for `tag_change`, `new_project`, and `delete`.
+  - Removed duplicate inline side effects at trigger sites where these bundled
+    hooks now execute (`rename` note sync, direct tag-sync requests for
+    `rename/tag_change/new_project/delete`).
+  - Added default bundled post specs in config loader to preserve existing behavior
+    on workspaces without explicit `hooks_post` config yet.
 
 ## Goal
 

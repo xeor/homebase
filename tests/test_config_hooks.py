@@ -10,7 +10,14 @@ def test_load_hook_specs_empty_config_has_all_slots(tmp_path) -> None:
     save_global_config_dict(tmp_path, {})
     specs = load_hook_specs(tmp_path)
     assert len(specs) == 8
-    assert all(items == [] for items in specs.values())
+    assert [spec.name for spec in specs[("post", "rename")]] == [
+        "notes_rename",
+        "tag_symlink_sync",
+    ]
+    assert [spec.name for spec in specs[("post", "tag_change")]] == ["tag_symlink_sync"]
+    assert [spec.name for spec in specs[("post", "new_project")]] == ["tag_symlink_sync"]
+    assert [spec.name for spec in specs[("post", "delete")]] == ["tag_symlink_sync"]
+    assert all(specs[("pre", event)] == [] for event in ("rename", "tag_change", "new_project", "delete"))
 
 
 def test_load_hook_specs_parses_bundled_entry(tmp_path) -> None:

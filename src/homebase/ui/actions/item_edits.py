@@ -258,17 +258,6 @@ def on_rename_item(
     app.selected_path = target
     app._touch_rows_cache([updated], removed=[current])
     app._start_cache_refresh("rename item", force=False)
-    if not updated.archived:
-        app._request_tag_sync("rename item")
-    _sync_note_on_project_rename(
-        app,
-        source_row=source_row,
-        updated_row=updated,
-        old_note_path=old_note_path,
-        new_note_path=new_note_path,
-        rendered_command=rendered_note_cmd,
-        base_dir=getattr(app, "base_dir", target.parent),
-    )
     hooks_runtime.dispatch_post(
         app,
         event="rename",
@@ -278,61 +267,12 @@ def on_rename_item(
             "new_path": target,
             "old_name": current.name,
             "new_name": target.name,
+            "old_note_path": old_note_path,
+            "new_note_path": new_note_path,
+            "rendered_note_cmd": rendered_note_cmd,
         },
         view=app.view_mode,
     )
     app._refresh_table()
     app._log(f"renamed: {current.name} -> {target.name}", "info")
     app._refresh_side()
-
-
-def _sync_note_on_project_rename(
-    app: Any,
-    *,
-    source_row: ProjectRow,
-    updated_row: ProjectRow,
-    old_note_path: Path | None,
-    new_note_path: Path | None,
-    rendered_command: str,
-    base_dir: Path,
-) -> None:
-    enabled, _command = note_sync_actions.note_sync_config(app, "rename")
-    if not enabled:
-        return
-    if old_note_path is None:
-        return
-    try:
-        if not old_note_path.exists() or not old_note_path.is_file():
-            return
-    except OSError:
-        return
-    if new_note_path is None:
-        return
-    if new_note_path == old_note_path:
-        return
-
-    if rendered_command:
-        try:
-            proc = subprocess.run(
-                ["sh", "-lc", rendered_command],
-                cwd=str(base_dir),
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                capture_output=True,
-                check=False,
-            )
-        except (subprocess.SubprocessError, OSError, ValueError) as exc:
-            app._show_runtime_error("rename note command", exc)
-            return
-        if proc.returncode != 0:
-            err = (proc.stderr or "").strip() or f"exit={proc.returncode}"
-            app._log(f"note rename command failed: {err}", "warn")
-            _notify_warning(app, f"Note rename command failed: {err}")
-        return
-
-    try:
-        new_note_path.parent.mkdir(parents=True, exist_ok=True)
-        old_note_path.rename(new_note_path)
-    except OSError as exc:
-        app._show_runtime_error("rename note file", exc)

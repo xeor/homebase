@@ -305,7 +305,7 @@ def on_confirm_bulk(
 
     if removed_paths:
         app._remove_paths_local(removed_paths)
-    if action in {"archive", "restore", "delete"}:
+    if action in {"archive", "restore"}:
         app._request_tag_sync(f"{action} update")
     if action == "delete" and delete_targets:
         hooks_runtime.dispatch_post(

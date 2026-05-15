@@ -92,7 +92,6 @@ def rename_tag_globally(
     if changed_rows:
         app._touch_rows_cache(changed_rows)
         app._start_cache_refresh("tag rename", force=False)
-        app._request_tag_sync("tag rename")
         per_target: dict[Path, dict[str, list[str]]] = {}
         targets = []
         for row in changed_rows:
@@ -158,7 +157,6 @@ def delete_tag_globally(
     if changed_rows:
         app._touch_rows_cache(changed_rows)
         app._start_cache_refresh("tag delete", force=False)
-        app._request_tag_sync("tag delete")
         per_target: dict[Path, dict[str, list[str]]] = {}
         targets = []
         for row in changed_rows:
@@ -255,8 +253,6 @@ def on_pick_tags(
     finally:
         app._busy_stop()
         app.pending_tag_updates.clear()
-
-    app._request_tag_sync("tag update")
 
     changed_rows: list[ProjectRow] = []
     before_by_path: dict[Path, list[str]] = {}

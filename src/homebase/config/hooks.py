@@ -16,6 +16,7 @@ def load_hook_specs(base_dir: Path) -> dict[tuple[str, str], list[HookSpec]]:
     out: dict[tuple[str, str], list[HookSpec]] = {
         (timing, event): [] for timing in HOOK_TIMINGS for event in HOOK_EVENTS
     }
+    out.update(_default_post_specs())
     if not isinstance(raw, dict):
         return out
     for timing in HOOK_TIMINGS:
@@ -37,6 +38,69 @@ def load_hook_specs(base_dir: Path) -> dict[tuple[str, str], list[HookSpec]]:
                 _parse_spec(timing, event_id, idx, item) for idx, item in enumerate(items)
             ]
     return out
+
+
+def _default_post_specs() -> dict[tuple[str, str], list[HookSpec]]:
+    return {
+        ("post", "rename"): [
+            HookSpec(
+                timing="post",
+                event="rename",
+                name="notes_rename",
+                source="bundled",
+                enabled=True,
+                views=(),
+                config={},
+                slow_warn_s=HOOK_SLOW_WARN_DEFAULT_S,
+            ),
+            HookSpec(
+                timing="post",
+                event="rename",
+                name="tag_symlink_sync",
+                source="bundled",
+                enabled=True,
+                views=(),
+                config={},
+                slow_warn_s=HOOK_SLOW_WARN_DEFAULT_S,
+            ),
+        ],
+        ("post", "tag_change"): [
+            HookSpec(
+                timing="post",
+                event="tag_change",
+                name="tag_symlink_sync",
+                source="bundled",
+                enabled=True,
+                views=(),
+                config={},
+                slow_warn_s=HOOK_SLOW_WARN_DEFAULT_S,
+            )
+        ],
+        ("post", "new_project"): [
+            HookSpec(
+                timing="post",
+                event="new_project",
+                name="tag_symlink_sync",
+                source="bundled",
+                enabled=True,
+                views=(),
+                config={},
+                slow_warn_s=HOOK_SLOW_WARN_DEFAULT_S,
+            )
+        ],
+        ("post", "delete"): [
+            HookSpec(
+                timing="post",
+                event="delete",
+                name="tag_symlink_sync",
+                source="bundled",
+                enabled=True,
+                views=(),
+                config={},
+                slow_warn_s=HOOK_SLOW_WARN_DEFAULT_S,
+            )
+        ],
+    }
 
 
 def _parse_spec(timing: str, event: str, idx: int, item: object) -> HookSpec:

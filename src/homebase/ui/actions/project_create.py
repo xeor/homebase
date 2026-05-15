@@ -149,9 +149,6 @@ def on_new_project_submit(
 
     if after_create == "open" or app.start_new_mode:
         cache_upsert_project_fast(base_dir, created)
-        tags = payload.get("tags") or []
-        if isinstance(tags, list) and tags:
-            app._request_tag_sync("new project")
         _dispatch_new_project_hook(
             app,
             base_dir=base_dir,
@@ -177,9 +174,6 @@ def on_new_project_submit(
     app.selected_path = created
     app.multi_selected.clear()
     app._refresh_table()
-    tags = payload.get("tags") or []
-    if isinstance(tags, list) and tags:
-        app._request_tag_sync("new project")
     _dispatch_new_project_hook(
         app,
         base_dir=base_dir,
