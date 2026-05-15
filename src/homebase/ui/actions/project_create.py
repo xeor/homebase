@@ -111,6 +111,47 @@ def on_new_project_submit(
     explicit_name = ns.inputs[1] if len(ns.inputs) > 1 else None
 
     after_create = str(payload.get("after_create", "open") or "open").strip() or "open"
+    pre_outcome = hooks_runtime.dispatch_pre(
+        app,
+        event="new_project",
+        targets=[],
+        change={
+            "source": str(ns.mode or ns.child_key or "auto"),
+            "template": (str(ns.template).strip() if str(ns.template).strip() else None),
+            "initial_tags": [str(tag) for tag in (payload.get("tags") or []) if str(tag).strip()],
+            "post_commands": [str(cmd) for cmd in (payload.get("post_commands") or []) if str(cmd).strip()],
+            "after_create": after_create,
+            "inputs": {
+                "raw_input": raw_input,
+                "explicit_name": explicit_name,
+                "mode": ns.mode,
+                "child_key": ns.child_key,
+                "tmp": ns.tmp,
+                "timestamp": ns.timestamp,
+                "ts_name": ns.ts_name,
+                "alpha_name": ns.alpha_name,
+                "ask_name": ns.ask_name,
+                "ask_source": ns.ask_source,
+                "archive": ns.archive,
+                "multi": ns.multi,
+            },
+        },
+        view=app.view_mode,
+    )
+    if pre_outcome.cancelled:
+        app._log(f"new project cancelled by hook: {pre_outcome.reason}", "warn")
+        if app.start_new_mode:
+            app.exit(("quit", None, []))
+        app._refresh_side()
+        return
+    _apply_pre_new_project_mutations(
+        payload=payload,
+        ns=ns,
+        change=pre_outcome.change,
+    )
+    raw_input = ns.inputs[0] if ns.inputs else None
+    explicit_name = ns.inputs[1] if len(ns.inputs) > 1 else None
+    after_create = str(pre_outcome.change.get("after_create", after_create) or after_create)
 
     # ``plan_and_apply_one`` writes the actual failure reason to
     # stderr via ``print(..., file=sys.stderr)``. Inside the TUI that
@@ -203,6 +244,35 @@ def _to_plain(value: object) -> object:
     if isinstance(value, tuple):
         return [_to_plain(item) for item in value]
     return value
+
+
+def _apply_pre_new_project_mutations(
+    *,
+    payload: dict[str, object],
+    ns: Namespace,
+    change: dict[str, object],
+) -> None:
+    initial_tags = change.get("initial_tags")
+    if isinstance(initial_tags, list):
+        payload["tags"] = [str(tag) for tag in initial_tags if str(tag).strip()]
+        ns.tag = [str(tag) for tag in initial_tags if str(tag).strip()]
+    post_commands = change.get("post_commands")
+    if isinstance(post_commands, list):
+        payload["post_commands"] = [str(cmd) for cmd in post_commands if str(cmd).strip()]
+    template = change.get("template")
+    if template is not None:
+        text = str(template).strip()
+        payload["template"] = text
+        ns.template = text
+    source = change.get("source")
+    if source is not None:
+        source_text = str(source).strip()
+        if source_text in set(builtin_keys()):
+            ns.mode = source_text
+            ns.child_key = None
+        elif source_text:
+            ns.mode = None
+            ns.child_key = source_text
 
 
 def _dispatch_new_project_hook(
