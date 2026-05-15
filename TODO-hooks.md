@@ -5,6 +5,8 @@ then peel off discrete tickets.
 
 ## Implementation status
 
+- 2026-05-15: Hooks system v1 implementation phases completed (1-8).
+
 - 2026-05-15: Phase 1 completed in-tree.
   - Added `hooks/` package skeleton (`api.py`, `loader.py`, `runtime.py` stub, bundled dir tree).
   - Added hook core/config models and parser (`HookSpec`, `HookTarget`, `PreResult`, `load_hook_specs`).
@@ -89,7 +91,10 @@ then peel off discrete tickets.
   - Wired pre hooks in TUI for rename/tag_change/delete/new_project and in CLI for delete/new_project.
   - Implemented `ctx.ask` for TUI and CLI.
   - Added bundled pre hook `confirm_delete` (disabled by default) to validate pre-hook contract.
-- Phase 8 (docs): not started (`docs/hooks.md` missing).
+- 2026-05-15: Phase 8 completed (docs).
+  - Added `docs/hooks.md` reference covering config schema, runtime contract,
+    dispatch semantics, mutation allowlist, payload shapes, and bundled hooks.
+- Phase 8 (docs): done (`docs/hooks.md`).
 
 Known deviations from original doc wording:
 
@@ -2045,11 +2050,11 @@ against the as-implemented code.
 
 Before starting any phase, confirm:
 
-- [ ] All previous phases' tests still pass.
-- [ ] `ruff` is clean.
-- [ ] No file outside the phase's listed paths has been edited.
-- [ ] No `# previously…` / `# Phase X will…` comments anywhere.
-- [ ] No re-export shim modules added.
-- [ ] No new files in `core/` other than additions to `constants.py`
+- [x] All previous phases' tests still pass.
+- [x] `ruff` is clean.
+- [x] No file outside the phase's listed paths has been edited.
+- [x] No `# previously…` / `# Phase X will…` comments anywhere.
+- [x] No re-export shim modules added.
+- [x] No new files in `core/` other than additions to `constants.py`
       and `models.py` (per layering).
-- [ ] `hooks/` imports only from `core/`, `config/`, `metadata/`.
+- [x] `hooks/` imports only from `core/`, `config/`, `metadata/`.

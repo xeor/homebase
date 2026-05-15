@@ -45,6 +45,7 @@ def _ctx(path: Path, *, answer: str | None):
         ),
         add_event=lambda *_args, **_kwargs: None,
         notify=lambda *_args, **_kwargs: None,
+        status_update=lambda *_args, **_kwargs: None,
         log=lambda *_args, **_kwargs: None,
         ask=lambda **_kwargs: answer,
     )

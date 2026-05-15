@@ -51,6 +51,7 @@ class FakeApp:
         self.hook_running: dict[str, float] = {}
         self.view_mode = "active"
         self.notifications: list[tuple[str, str]] = []
+        self.toasts: list[tuple[str, str]] = []
         self.logs: list[tuple[str, str]] = []
         self.errors: list[tuple[str, str]] = []
         self.busy_starts: list[str] = []
@@ -58,14 +59,17 @@ class FakeApp:
         self.expected_stops = len(specs)
         self.done = threading.Event()
 
-    def call_from_thread(self, fn, *args):
-        return fn(*args)
+    def call_from_thread(self, fn, *args, **kwargs):
+        return fn(*args, **kwargs)
 
     def _log(self, text: str, level: str = "info") -> None:
         self.logs.append((level, text))
 
     def _set_runtime_status(self, text: str, level: str = "info", _ttl_s: float = 0.0) -> None:
         self.notifications.append((level, text))
+
+    def notify(self, text: str, *, severity: str = "information", timeout: float = 0.0) -> None:
+        self.toasts.append((severity, text))
 
     def _show_runtime_error(self, context: str, exc: BaseException, _traceback_tail: str = "") -> None:
         self.errors.append((context, str(exc)))
@@ -124,7 +128,23 @@ def test_dispatch_post_notify_routes_to_status(tmp_path: Path) -> None:
     app = FakeApp(tmp_path, [_spec("notify_me")])
     dispatch_post(app, event="rename", targets=[_target(project)], change={}, view="active")
     assert app.done.wait(2.0)
-    assert ("info", "hi") in app.notifications
+    assert ("information", "hi") in app.toasts
+    assert ("info", "hi") not in app.notifications
+
+
+def test_dispatch_post_status_update_routes_to_status_field(tmp_path: Path) -> None:
+    _write_hook(
+        tmp_path,
+        "status_me",
+        "def run(ctx):\n    ctx.status_update('saving', 'info')\n",
+    )
+    project = tmp_path / "p1"
+    project.mkdir()
+    app = FakeApp(tmp_path, [_spec("status_me")])
+    dispatch_post(app, event="rename", targets=[_target(project)], change={}, view="active")
+    assert app.done.wait(2.0)
+    assert ("info", "saving") in app.notifications
+    assert all(text != "saving" for _, text in app.toasts)
 
 
 def test_dispatch_post_add_event_appends_log(tmp_path: Path) -> None:
@@ -155,7 +175,7 @@ def test_dispatch_post_error_contained_and_next_hook_runs(tmp_path: Path) -> Non
     dispatch_post(app, event="rename", targets=[_target(project)], change={}, view="active")
     assert app.done.wait(2.0)
     assert app.errors
-    assert ("info", "after") in app.notifications
+    assert ("information", "after") in app.toasts
     records = app.hook_recent[("post", "rename")]
     assert records[0].ok is False
     assert records[1].ok is True

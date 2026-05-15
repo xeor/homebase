@@ -28,6 +28,17 @@ _PRE_MUTATION_ALLOWLIST: dict[str, frozenset[str]] = {
     "delete": frozenset(),
 }
 
+_NOTIFY_SEVERITY = {"info": "information", "warn": "warning", "error": "error"}
+
+
+def _tui_notify(app: Any, text: str, level: str) -> None:
+    severity = _NOTIFY_SEVERITY.get(level, "information")
+    app.call_from_thread(app.notify, text, severity=severity, timeout=6.0)
+
+
+def _tui_status_update(app: Any, text: str, level: str) -> None:
+    app.call_from_thread(app._set_runtime_status, text, level, 6.0)
+
 
 @dataclass(frozen=True)
 class HookRunRecord:
@@ -105,7 +116,10 @@ def _run_pre_chain(
                 app.call_from_thread(append_base_log, path, kind, payload)
 
             def _notify(text: str, level: str = "info") -> None:
-                app.call_from_thread(app._set_runtime_status, text, level, 6.0)
+                _tui_notify(app, text, level)
+
+            def _status_update(text: str, level: str = "info") -> None:
+                _tui_status_update(app, text, level)
 
             def _log(text: str, level: str = "info") -> None:
                 app.call_from_thread(app._log, text, level)
@@ -121,6 +135,7 @@ def _run_pre_chain(
                 hook=info,
                 add_event=_add_event,
                 notify=_notify,
+                status_update=_status_update,
                 log=_log,
                 ask=_build_tui_ask(app),
             )
@@ -333,6 +348,9 @@ def _run_cli_module(
     def _notify(text: str, level: str = "info") -> None:
         print(f"[hook] {level}: {text}", file=os.sys.stderr)
 
+    def _status_update(text: str, level: str = "info") -> None:
+        print(f"[hook] status {level}: {text}", file=os.sys.stderr)
+
     def _log(text: str, level: str = "info") -> None:
         print(f"[hook] {level}: {text}")
 
@@ -347,6 +365,7 @@ def _run_cli_module(
         hook=info,
         add_event=_add_event,
         notify=_notify,
+        status_update=_status_update,
         log=_log,
         ask=lambda *_args, **_kwargs: None,
     )
@@ -445,6 +464,9 @@ def _run_cli_pre_module(
     def _notify(text: str, level: str = "info") -> None:
         print(f"[hook] {level}: {text}", file=os.sys.stderr)
 
+    def _status_update(text: str, level: str = "info") -> None:
+        print(f"[hook] status {level}: {text}", file=os.sys.stderr)
+
     def _log(text: str, level: str = "info") -> None:
         print(f"[hook] {level}: {text}")
 
@@ -485,6 +507,7 @@ def _run_cli_pre_module(
         hook=info,
         add_event=_add_event,
         notify=_notify,
+        status_update=_status_update,
         log=_log,
         ask=_ask,
     )
@@ -536,7 +559,10 @@ def _run_post_chain(
             app.call_from_thread(app._log, text, level)
 
         def _notify_on_main(text: str, level: str = "info") -> None:
-            app.call_from_thread(app._set_runtime_status, text, level, 6.0)
+            _tui_notify(app, text, level)
+
+        def _status_update_on_main(text: str, level: str = "info") -> None:
+            _tui_status_update(app, text, level)
 
         def _add_event_on_main(path: Path, kind: str, payload: dict[str, object]) -> None:
             app.call_from_thread(append_base_log, path, kind, payload)
@@ -548,7 +574,7 @@ def _run_post_chain(
             if not still_running.is_set():
                 return
             elapsed = max(0.0, time.time() - started_ts)
-            _notify_on_main(
+            _status_update_on_main(
                 f"hook {spec_id} still running ({elapsed:.1f}s)",
                 "warn",
             )
@@ -582,6 +608,7 @@ def _run_post_chain(
             hook=info,
             add_event=_add_event_on_main,
             notify=_notify_on_main,
+            status_update=_status_update_on_main,
             log=_log_on_main,
             ask=_ask_noop,
         )
@@ -593,7 +620,7 @@ def _run_post_chain(
                 {"hook": spec.name, "timing": "post", "event": event},
             )
         else:
-            _notify_on_main(f"hook {spec_id} running on {len(targets)} target(s)", "info")
+            _status_update_on_main(f"hook {spec_id} running on {len(targets)} target(s)", "info")
         app.call_from_thread(app._busy_start, f"hook: {spec_id}")
         app.hook_running[spec_id] = started_ts
 
@@ -636,7 +663,7 @@ def _run_post_chain(
                 )
             else:
                 status = "ok" if not hook_error else f"error={hook_error}"
-                _notify_on_main(
+                _status_update_on_main(
                     f"hook {spec_id} done in {duration:.1f}s ({status})",
                     "warn" if hook_error else "info",
                 )

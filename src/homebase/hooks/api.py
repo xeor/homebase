@@ -9,6 +9,7 @@ from ..core.models import HookInfo, HookRuntime, HookTarget
 AskCallable = Callable[..., str | None]
 AddEventCallable = Callable[[Path, str, dict[str, object]], None]
 NotifyCallable = Callable[[str, str], None]
+StatusUpdateCallable = Callable[[str, str], None]
 LogCallable = Callable[[str, str], None]
 
 
@@ -24,5 +25,6 @@ class HookContext:
     hook: HookInfo
     add_event: AddEventCallable
     notify: NotifyCallable
+    status_update: StatusUpdateCallable
     log: LogCallable
     ask: AskCallable

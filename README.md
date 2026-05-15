@@ -191,6 +191,12 @@ See `AGENTS.md` for the full architecture rules and conventions.
 
 Global config file: `<base>/.homebase/config.yaml`
 
+References:
+
+- `docs/actions.md`
+- `docs/hooks.md`
+- `docs/kitchen-sink-config.md`
+
 Most used top-level sections:
 
 - `archive`

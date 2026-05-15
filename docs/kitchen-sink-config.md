@@ -275,6 +275,86 @@ reconcile:
   archive:
     update_batch_size: 8
 
+# Hooks: pre/post event automation.
+hooks_pre:
+  delete:
+    # Bundled pre-hook example (disabled by default in runtime defaults).
+    - name: confirm_delete
+      source: bundled
+      enabled: false
+      views: [active, archive]
+      config:
+        require_confirm: true
+
+hooks_post:
+  rename:
+    # Keep notes path in sync on rename.
+    - name: notes_rename
+      source: bundled
+      enabled: true
+      views: [active, archive]
+      config: {}
+
+    # Rebuild/repair _tags symlink index after rename.
+    - name: tag_symlink_sync
+      source: bundled
+      enabled: true
+      slow_warn_s: 30
+      config: {}
+
+    # Minimal demo hook: shows a status notification.
+    # config.level: info|warn|error (default info).
+    - name: notify
+      source: bundled
+      enabled: false
+      config:
+        level: info
+
+  tag_change:
+    - name: tag_symlink_sync
+      source: bundled
+      enabled: true
+      config: {}
+
+    - name: notify
+      source: bundled
+      enabled: false
+      config:
+        level: info
+
+  new_project:
+    - name: tag_symlink_sync
+      source: bundled
+      enabled: true
+      config: {}
+
+    - name: notify
+      source: bundled
+      enabled: false
+      config:
+        level: info
+
+  delete:
+    - name: tag_symlink_sync
+      source: bundled
+      enabled: true
+      config: {}
+
+    - name: notify
+      source: bundled
+      enabled: false
+      config:
+        level: info
+
+  # Custom hook example:
+  # rename:
+  #   - name: my_rename_hook
+  #     source: custom
+  #     enabled: true
+  #     views: [active]
+  #     config:
+  #       dry_run: false
+
 # Table behavior, columns, and date-color gradients.
 table:
   behavior:

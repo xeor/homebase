@@ -51,6 +51,7 @@ def _ctx(base_dir: Path, target: Path, change: dict[str, object], events: list[t
         ),
         add_event=lambda path, kind, payload: events.append((path, kind, payload)),
         notify=lambda text, level: notices.append((level, text)),
+        status_update=lambda *_args, **_kwargs: None,
         log=lambda _text, _level: None,
         ask=lambda *_args, **_kwargs: None,
     )

@@ -48,6 +48,7 @@ def _ctx(base_dir: Path, notices: list[tuple[str, str]], logs: list[tuple[str, s
         ),
         add_event=lambda *_args, **_kwargs: None,
         notify=lambda text, level: notices.append((level, text)),
+        status_update=lambda *_args, **_kwargs: None,
         log=lambda text, level: logs.append((level, text)),
         ask=lambda *_args, **_kwargs: None,
     )
