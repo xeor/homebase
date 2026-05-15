@@ -6,6 +6,9 @@ from pathlib import Path
 from typing import Any, Callable
 
 from ...core.models import ProjectRow
+from ...hooks import runtime as hooks_runtime
+from ...hooks.snapshot import snapshot_target
+from ...metadata.api import load_base_data
 from . import note_sync as note_sync_actions
 
 
@@ -165,6 +168,32 @@ def on_confirm_bulk(
     failed = 0
     removed_paths: list[Path] = []
     upsert_rows: list[ProjectRow] = []
+    delete_targets: list[object] = []
+    removed_snapshots: dict[Path, dict[str, object]] = {}
+    if action == "delete":
+        for path in runnable_paths:
+            hit = app._find_row(path)
+            if hit is None:
+                continue
+            rows, idx = hit
+            row = rows[idx]
+            try:
+                base_meta = load_base_data(path)
+            except OSError:
+                base_meta = {}
+            target = snapshot_target(row, base_meta)
+            delete_targets.append(target)
+            removed_snapshots[path] = {
+                "name": target.name,
+                "archived": target.archived,
+                "tags": list(target.tags),
+                "properties": list(target.properties),
+                "description": target.description,
+                "wip": target.wip,
+                "suffix": target.suffix,
+                "packed": target.packed,
+                "base_meta": dict(target.base_meta),
+            }
     app._busy_start(f"running {action} on target")
     try:
         for path in runnable_paths:
@@ -278,6 +307,17 @@ def on_confirm_bulk(
         app._remove_paths_local(removed_paths)
     if action in {"archive", "restore", "delete"}:
         app._request_tag_sync(f"{action} update")
+    if action == "delete" and delete_targets:
+        hooks_runtime.dispatch_post(
+            app,
+            event="delete",
+            targets=delete_targets,
+            change={
+                "removed_paths": [target.path for target in delete_targets],
+                "removed_snapshots": removed_snapshots,
+            },
+            view=app.view_mode,
+        )
     for row in upsert_rows:
         app._upsert_row_local(row)
     if removed_paths or upsert_rows:

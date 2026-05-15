@@ -18,6 +18,13 @@ then peel off discrete tickets.
   - Added side-panel `Info -> Hooks` tab renderer.
   - Added tests: `tests/test_hooks_runtime.py` and rename dispatch assertion in
     `tests/test_item_edits.py`.
+- 2026-05-15: Phase 3 started (post hooks on additional events).
+  - Wired `tag_change` post-dispatch in `on_pick_tags`, `rename_tag_globally`, and
+    `delete_tag_globally` with `plan` + `per_target` payloads.
+  - Wired `new_project` post-dispatch in `on_new_project_submit` for both
+    `after_create=open` and stay-in-TUI paths.
+  - Wired `delete` post-dispatch in bulk action flow with pre-delete snapshots in
+    both `ctx.targets` and `change.removed_snapshots`.
 
 ## Goal
 

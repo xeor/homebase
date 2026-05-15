@@ -5,10 +5,14 @@ import io
 import sqlite3
 import subprocess
 from argparse import Namespace
+from dataclasses import asdict, is_dataclass
 from pathlib import Path
 from typing import Any
 
 from ...cache.api import cache_upsert_project_fast
+from ...hooks import runtime as hooks_runtime
+from ...hooks.snapshot import snapshot_target
+from ...metadata.api import load_base_data
 from ...workspace.new.base import NewContext
 from ...workspace.new.cmd import format_summary, plan_and_apply_one
 from ...workspace.new.config_loader import NewConfigError, load_new_sources
@@ -148,6 +152,17 @@ def on_new_project_submit(
         tags = payload.get("tags") or []
         if isinstance(tags, list) and tags:
             app._request_tag_sync("new project")
+        _dispatch_new_project_hook(
+            app,
+            base_dir=base_dir,
+            created=created,
+            payload=payload,
+            after_create=after_create,
+            ns=ns,
+            raw_input=raw_input,
+            explicit_name=explicit_name,
+            plan_obj=plan_obj,
+        )
         app._log(f"new project created: {created.name}", "info")
         app.exit(("open", created, []))
         return
@@ -165,5 +180,80 @@ def on_new_project_submit(
     tags = payload.get("tags") or []
     if isinstance(tags, list) and tags:
         app._request_tag_sync("new project")
+    _dispatch_new_project_hook(
+        app,
+        base_dir=base_dir,
+        created=created,
+        payload=payload,
+        after_create=after_create,
+        ns=ns,
+        raw_input=raw_input,
+        explicit_name=explicit_name,
+        plan_obj=plan_obj,
+    )
     app._log(f"new project created: {created.name}", "info")
     app._refresh_side()
+
+
+def _to_plain(value: object) -> object:
+    if isinstance(value, Path):
+        return str(value)
+    if is_dataclass(value):
+        return _to_plain(asdict(value))
+    if isinstance(value, Namespace):
+        return {key: _to_plain(val) for key, val in vars(value).items()}
+    if isinstance(value, dict):
+        return {str(key): _to_plain(val) for key, val in value.items()}
+    if isinstance(value, list):
+        return [_to_plain(item) for item in value]
+    if isinstance(value, tuple):
+        return [_to_plain(item) for item in value]
+    return value
+
+
+def _dispatch_new_project_hook(
+    app: Any,
+    *,
+    base_dir: Path,
+    created: Path,
+    payload: dict[str, object],
+    after_create: str,
+    ns: Namespace,
+    raw_input: str | None,
+    explicit_name: str | None,
+    plan_obj: object,
+) -> None:
+    try:
+        row = project_row(created, archived=False)
+        target = snapshot_target(row, load_base_data(created))
+    except (OSError, ValueError, TypeError, subprocess.SubprocessError, sqlite3.Error):
+        return
+    hooks_runtime.dispatch_post(
+        app,
+        event="new_project",
+        targets=[target],
+        change={
+            "created_path": created,
+            "source": str(ns.mode or ns.child_key or "auto"),
+            "template": (str(ns.template).strip() if str(ns.template).strip() else None),
+            "initial_tags": [str(tag) for tag in (payload.get("tags") or []) if str(tag).strip()],
+            "post_commands": [str(cmd) for cmd in (payload.get("post_commands") or []) if str(cmd).strip()],
+            "after_create": after_create,
+            "inputs": {
+                "raw_input": raw_input,
+                "explicit_name": explicit_name,
+                "mode": ns.mode,
+                "child_key": ns.child_key,
+                "tmp": ns.tmp,
+                "timestamp": ns.timestamp,
+                "ts_name": ns.ts_name,
+                "alpha_name": ns.alpha_name,
+                "ask_name": ns.ask_name,
+                "ask_source": ns.ask_source,
+                "archive": ns.archive,
+                "multi": ns.multi,
+            },
+            "plan": _to_plain(plan_obj) if plan_obj is not None else {},
+        },
+        view=app.view_mode,
+    )

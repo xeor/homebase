@@ -7,6 +7,9 @@ from typing import Any, Callable
 import yaml
 
 from ...core.models import ProjectRow
+from ...hooks import runtime as hooks_runtime
+from ...hooks.snapshot import snapshot_target
+from ...metadata.api import load_base_data
 from ...workspace.projects import refresh_row_caches
 
 
@@ -65,11 +68,13 @@ def rename_tag_globally(
     existed = any(new in row.tags for row in (app.active_rows + app.archived_rows))
     touched = 0
     changed_rows: list[ProjectRow] = []
+    before_by_path: dict[Path, list[str]] = {}
     app._busy_start("renaming tag")
     try:
         for row in app.active_rows + app.archived_rows:
             if old not in row.tags:
                 continue
+            before_by_path[row.path] = list(row.tags)
             merged = sorted({(new if t == old else t).strip() for t in row.tags if t.strip()})
             try:
                 save_base_tags(base_dir, row.path, merged)
@@ -88,6 +93,28 @@ def rename_tag_globally(
         app._touch_rows_cache(changed_rows)
         app._start_cache_refresh("tag rename", force=False)
         app._request_tag_sync("tag rename")
+        per_target: dict[Path, dict[str, list[str]]] = {}
+        targets = []
+        for row in changed_rows:
+            before = before_by_path.get(row.path, [])
+            after = list(row.tags)
+            per_target[row.path] = {
+                "before": before,
+                "after": after,
+                "added": sorted(set(after) - set(before)),
+                "removed": sorted(set(before) - set(after)),
+            }
+            targets.append(snapshot_target(row, load_base_data(row.path)))
+        hooks_runtime.dispatch_post(
+            app,
+            event="tag_change",
+            targets=targets,
+            change={
+                "plan": {old: "remove", new: "add"},
+                "per_target": per_target,
+            },
+            view=app.view_mode,
+        )
     app._refresh_table()
     app._refresh_side()
 
@@ -107,11 +134,13 @@ def delete_tag_globally(
         return False, "delete failed: empty tag"
     touched = 0
     changed_rows: list[ProjectRow] = []
+    before_by_path: dict[Path, list[str]] = {}
     app._busy_start("deleting tag")
     try:
         for row in app.active_rows + app.archived_rows:
             if victim not in row.tags:
                 continue
+            before_by_path[row.path] = list(row.tags)
             remaining = sorted({t for t in row.tags if t != victim and t.strip()})
             try:
                 save_base_tags(base_dir, row.path, remaining)
@@ -130,6 +159,28 @@ def delete_tag_globally(
         app._touch_rows_cache(changed_rows)
         app._start_cache_refresh("tag delete", force=False)
         app._request_tag_sync("tag delete")
+        per_target: dict[Path, dict[str, list[str]]] = {}
+        targets = []
+        for row in changed_rows:
+            before = before_by_path.get(row.path, [])
+            after = list(row.tags)
+            per_target[row.path] = {
+                "before": before,
+                "after": after,
+                "added": sorted(set(after) - set(before)),
+                "removed": sorted(set(before) - set(after)),
+            }
+            targets.append(snapshot_target(row, load_base_data(row.path)))
+        hooks_runtime.dispatch_post(
+            app,
+            event="tag_change",
+            targets=targets,
+            change={
+                "plan": {victim: "remove"},
+                "per_target": per_target,
+            },
+            view=app.view_mode,
+        )
     app._refresh_table()
     app._refresh_side()
     return True, f"deleted '{victim}' from {touched} project(s)"
@@ -208,12 +259,14 @@ def on_pick_tags(
     app._request_tag_sync("tag update")
 
     changed_rows: list[ProjectRow] = []
+    before_by_path: dict[Path, list[str]] = {}
     for path in successful_paths:
         hit = app._find_row(path)
         if hit is None:
             continue
         rows, idx = hit
         row = rows[idx]
+        before_by_path[path] = list(row.tags)
         tags = set(row.tags)
         for tag, op in plan.items():
             if op == "add":
@@ -228,6 +281,28 @@ def on_pick_tags(
     if changed_rows:
         app._touch_rows_cache(changed_rows)
         app._start_cache_refresh("tag update", force=False)
+        per_target: dict[Path, dict[str, list[str]]] = {}
+        targets = []
+        for row in changed_rows:
+            before = before_by_path.get(row.path, [])
+            after = list(row.tags)
+            per_target[row.path] = {
+                "before": before,
+                "after": after,
+                "added": sorted(set(after) - set(before)),
+                "removed": sorted(set(before) - set(after)),
+            }
+            targets.append(snapshot_target(row, load_base_data(row.path)))
+        hooks_runtime.dispatch_post(
+            app,
+            event="tag_change",
+            targets=targets,
+            change={
+                "plan": dict(plan),
+                "per_target": per_target,
+            },
+            view=app.view_mode,
+        )
     else:
         app._refresh_data()
     app._refresh_table()
