@@ -18,7 +18,7 @@ from ..core.constants import (
     PACKED_ARCHIVE_SUFFIX,
 )
 from ..core.models import RestoreTargetExistsError
-from ..hooks.runtime import dispatch_post_cli
+from ..hooks.runtime import dispatch_post_cli, dispatch_pre_cli
 from ..hooks.snapshot import snapshot_target_from_path
 from ..metadata.api import (
     append_base_log,
@@ -434,6 +434,21 @@ def cmd_rm(
             }
         except OSError:
             delete_target = None
+    if hook_specs and delete_target is not None:
+        pre_outcome = dispatch_pre_cli(
+            base_dir=base_dir,
+            hook_specs=hook_specs,
+            event="delete",
+            targets=[delete_target],
+            change={
+                "removed_paths": [delete_target.path],
+                "removed_snapshots": removed_snapshot,
+            },
+            view="archive" if delete_target.archived else "active",
+        )
+        if pre_outcome.cancelled:
+            print(f"delete cancelled by hook: {pre_outcome.reason}", file=os.sys.stderr)
+            return 1
     rc = commands_workspace.cmd_rm(
         path,
         env_base_dir_key=ENV_BASE_DIR,

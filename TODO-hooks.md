@@ -56,6 +56,9 @@ then peel off discrete tickets.
     support for mutated `new_path` returned by a pre-hook.
   - Wired `dispatch_pre` into `tag_change` and `delete` TUI trigger sites with
     cancel handling and mutable `plan` support for `tag_change`.
+  - Added CLI `dispatch_pre_cli` runtime path and wired it into `b rm` delete flow.
+  - Wired CLI `b new` through `pre_create_hook` callback path so pre-hooks can cancel
+    or mutate request inputs before `plan_and_apply_one` executes.
 
 ## Goal
 

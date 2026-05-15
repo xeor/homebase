@@ -110,7 +110,7 @@ def main(argv: list[str]) -> int:
     )
     from ..config.property_defs import load_property_defs
     from ..hooks.loader import ignored_custom_pre_hook_files, verify_all_specs
-    from ..hooks.runtime import dispatch_post_cli
+    from ..hooks.runtime import dispatch_post_cli, dispatch_pre_cli
     from ..hooks.snapshot import snapshot_target_from_path
     from ..tmux.flow import cmd_tmux_load, cmd_tmux_save
     from ..workspace.benchmark import cmd_benchmark, cmd_test
@@ -275,6 +275,59 @@ def main(argv: list[str]) -> int:
             view="archive" if target.archived else "active",
         )
 
+    def _pre_create_hook(ns_obj, raw_input, explicit_name):
+        pre = dispatch_pre_cli(
+            base_dir=base_dir,
+            hook_specs=runtime_cfg.hook_specs,
+            event="new_project",
+            targets=[],
+            change={
+                "source": str(getattr(ns_obj, "mode", None) or getattr(ns_obj, "child_key", None) or "auto"),
+                "template": (str(getattr(ns_obj, "template", "") or "").strip() or None),
+                "initial_tags": [str(tag) for tag in getattr(ns_obj, "tag", [])],
+                "post_commands": [str(cmd) for cmd in getattr(ns_obj, "post", [])],
+                "after_create": "open" if bool(getattr(ns_obj, "open", False)) else "stay",
+                "inputs": {
+                    "raw_input": raw_input,
+                    "explicit_name": explicit_name,
+                    "mode": getattr(ns_obj, "mode", None),
+                    "child_key": getattr(ns_obj, "child_key", None),
+                    "tmp": getattr(ns_obj, "tmp", None),
+                    "timestamp": getattr(ns_obj, "timestamp", None),
+                    "ts_name": getattr(ns_obj, "ts_name", None),
+                    "alpha_name": getattr(ns_obj, "alpha_name", None),
+                    "ask_name": getattr(ns_obj, "ask_name", None),
+                    "ask_source": getattr(ns_obj, "ask_source", None),
+                    "archive": getattr(ns_obj, "archive", None),
+                    "multi": getattr(ns_obj, "multi", None),
+                },
+            },
+            view="active",
+        )
+        if pre.cancelled:
+            return False, pre.reason, ns_obj, raw_input, explicit_name
+        changed = dict(pre.change)
+        source = changed.get("source")
+        if source is not None:
+            source_text = str(source).strip()
+            builtin = {"empty", "local", "git", "download", "downloaded"}
+            if source_text in builtin:
+                ns_obj.mode = source_text
+                ns_obj.child_key = None
+            elif source_text:
+                ns_obj.mode = None
+                ns_obj.child_key = source_text
+        template = changed.get("template")
+        if template is not None:
+            ns_obj.template = str(template).strip()
+        tags = changed.get("initial_tags")
+        if isinstance(tags, list):
+            ns_obj.tag = [str(tag) for tag in tags if str(tag).strip()]
+        post_commands = changed.get("post_commands")
+        if isinstance(post_commands, list):
+            ns_obj.post = [str(cmd) for cmd in post_commands if str(cmd).strip()]
+        return True, "", ns_obj, raw_input, explicit_name
+
     try:
         rc = dispatch_command(
             ns,
@@ -299,6 +352,7 @@ def main(argv: list[str]) -> int:
                 ns_obj,
                 bd,
                 cwd_path,
+                pre_create_hook=_pre_create_hook,
                 post_create_hook=_post_create_hook,
             ),
             cmd_completion=lambda shell: _cmd_completion(shell),

@@ -6,7 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from homebase.core.models import HookSpec, HookTarget
-from homebase.hooks.runtime import dispatch_post, dispatch_post_cli, dispatch_pre
+from homebase.hooks.runtime import dispatch_post, dispatch_post_cli, dispatch_pre, dispatch_pre_cli
 from homebase.metadata.api import load_base_data
 
 
@@ -301,3 +301,61 @@ def test_dispatch_pre_mutate_updates_change(tmp_path: Path) -> None:
     )
     assert out.cancelled is False
     assert out.change["new_name"] == "z"
+
+
+def test_dispatch_pre_cli_cancel(tmp_path: Path) -> None:
+    _write_hook(
+        tmp_path,
+        "pre_cli_cancel",
+        "from homebase.core.models import PreResult\ndef run(ctx):\n    return PreResult(decision='cancel', reason='stop')\n",
+        timing="pre",
+    )
+    spec = HookSpec(
+        timing="pre",
+        event="rename",
+        name="pre_cli_cancel",
+        source="custom",
+        enabled=True,
+        views=(),
+        config={},
+        slow_warn_s=30.0,
+    )
+    out = dispatch_pre_cli(
+        base_dir=tmp_path,
+        hook_specs={("pre", "rename"): [spec]},
+        event="rename",
+        targets=[],
+        change={"new_name": "b"},
+        view="active",
+    )
+    assert out.cancelled is True
+    assert out.reason == "stop"
+
+
+def test_dispatch_pre_cli_mutate(tmp_path: Path) -> None:
+    _write_hook(
+        tmp_path,
+        "pre_cli_mutate",
+        "from homebase.core.models import PreResult\ndef run(ctx):\n    return PreResult(decision='mutate', mutated_change={'new_name': 'c'})\n",
+        timing="pre",
+    )
+    spec = HookSpec(
+        timing="pre",
+        event="rename",
+        name="pre_cli_mutate",
+        source="custom",
+        enabled=True,
+        views=(),
+        config={},
+        slow_warn_s=30.0,
+    )
+    out = dispatch_pre_cli(
+        base_dir=tmp_path,
+        hook_specs={("pre", "rename"): [spec]},
+        event="rename",
+        targets=[],
+        change={"new_name": "b"},
+        view="active",
+    )
+    assert out.cancelled is False
+    assert out.change["new_name"] == "c"

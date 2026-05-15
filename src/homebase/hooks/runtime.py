@@ -14,6 +14,7 @@ from types import ModuleType
 from typing import Any
 
 from .. import __version__ as homebase_version
+from ..core import prompting
 from ..core.models import HookInfo, HookRuntime, HookTarget, PreOutcome, PreResult
 from ..core.utils import HOOK_RUN_ERRORS
 from ..metadata.api import append_base_log
@@ -300,6 +301,140 @@ def _run_cli_module(
         _log(f"hook {spec.name} stdout: {out_text}", "info")
     if err_text:
         _notify(f"hook {spec.name} stderr: {err_text}", "warn")
+
+
+def dispatch_pre_cli(
+    *,
+    base_dir: Path,
+    hook_specs: dict[tuple[str, str], list[Any]],
+    event: str,
+    targets: list[HookTarget],
+    change: dict[str, object],
+    view: str,
+) -> PreOutcome:
+    specs = list(hook_specs.get(("pre", event), []))
+    selected = [
+        spec
+        for spec in specs
+        if bool(spec.enabled) and (not spec.views or view in spec.views)
+    ]
+    running_change = dict(change)
+    if not selected:
+        return PreOutcome(cancelled=False, reason="", change=running_change)
+    for spec in selected:
+        spec_id = f"pre/{event}/{spec.name}"
+        print(f"[hook] {spec_id} ... running", file=os.sys.stderr)
+        try:
+            module = resolve_hook_module(spec, base_dir)
+            result = _run_cli_pre_module(
+                module,
+                base_dir=base_dir,
+                event=event,
+                view=view,
+                targets=targets,
+                change=running_change,
+                spec=spec,
+            )
+            if isinstance(result, PreResult):
+                if result.decision == "cancel":
+                    reason = str(result.reason or "cancelled by hook")
+                    print(f"[hook] {spec_id} cancelled: {reason}", file=os.sys.stderr)
+                    return PreOutcome(cancelled=True, reason=reason, change=running_change)
+                if result.decision == "mutate" and isinstance(result.mutated_change, dict):
+                    running_change.update(result.mutated_change)
+        except HOOK_RUN_ERRORS as exc:
+            reason = str(exc)
+            print(f"[hook] {spec_id} failed: {reason}", file=os.sys.stderr)
+            return PreOutcome(cancelled=True, reason=reason, change=running_change)
+        print(f"[hook] {spec_id} done", file=os.sys.stderr)
+    return PreOutcome(cancelled=False, reason="", change=running_change)
+
+
+def _run_cli_pre_module(
+    module: ModuleType,
+    *,
+    base_dir: Path,
+    event: str,
+    view: str,
+    targets: list[HookTarget],
+    change: dict[str, object],
+    spec: Any,
+) -> object:
+    runtime = HookRuntime(
+        invoker="cli",
+        homebase_version=homebase_version,
+        now_iso=datetime.now(timezone.utc).isoformat(),
+        now_ts=int(time.time()),
+        user=str(getpass.getuser() or ""),
+    )
+    info = HookInfo(
+        name=str(spec.name),
+        source=str(spec.source),
+        timing="pre",
+        event=event,
+        config=dict(spec.config),
+    )
+
+    def _add_event(path: Path, kind: str, payload: dict[str, object]) -> None:
+        append_base_log(path, kind, payload)
+
+    def _notify(text: str, level: str = "info") -> None:
+        print(f"[hook] {level}: {text}", file=os.sys.stderr)
+
+    def _log(text: str, level: str = "info") -> None:
+        print(f"[hook] {level}: {text}")
+
+    def _ask(*_args: object, **kwargs: object) -> str | None:
+        prompt_text = str(kwargs.get("prompt", "confirm?"))
+        kind = str(kwargs.get("kind", "yes_no") or "yes_no")
+        default = kwargs.get("default")
+        if kind == "yes_no":
+            default_bool = bool(default) if isinstance(default, bool) else False
+            ok = prompting.prompt_yes_no(prompt_text, default=default_bool)
+            return "yes" if ok else None
+        if kind == "text":
+            response = input(f"{prompt_text} ")
+            text = str(response).strip()
+            if not text and default is not None:
+                return str(default)
+            return text or None
+        if kind == "choice":
+            choices = kwargs.get("choices", [])
+            options = [str(item) for item in choices if str(item).strip()]
+            if not options:
+                return None
+            print(f"{prompt_text}: {', '.join(options)}")
+            response = input("> ").strip()
+            if not response and default is not None:
+                return str(default)
+            return response or None
+        return None
+
+    context = HookContext(
+        event=event,
+        timing="pre",
+        view=view,
+        base_dir=base_dir,
+        targets=tuple(targets),
+        change=dict(change),
+        runtime=runtime,
+        hook=info,
+        add_event=_add_event,
+        notify=_notify,
+        log=_log,
+        ask=_ask,
+    )
+    captured_out = io.StringIO()
+    captured_err = io.StringIO()
+    with redirect_stdout(captured_out), redirect_stderr(captured_err):
+        result = module.run(context)
+    out_text = captured_out.getvalue().strip()
+    err_text = captured_err.getvalue().strip()
+    if out_text:
+        _log(f"hook {spec.name} stdout: {out_text}", "info")
+    if err_text:
+        _notify(f"hook {spec.name} stderr: {err_text}", "warn")
+    return result
 
 
 def _run_post_chain(

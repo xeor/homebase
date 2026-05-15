@@ -258,8 +258,18 @@ def _process_item(
     explicit_name: str | None,
     sources_cfg: dict[str, dict],
     ctx: NewContext,
+    pre_create_hook: Callable[[Namespace, str | None, str | None], tuple[bool, str, Namespace, str | None, str | None]] | None = None,
     post_create_hook: Callable[[NewResult, NewPlan | None, str | None, str | None], None] | None = None,
 ) -> int:
+    if callable(pre_create_hook):
+        proceed, reason, ns, raw_input, explicit_name = pre_create_hook(
+            ns,
+            raw_input,
+            explicit_name,
+        )
+        if not proceed:
+            print(f"b new: cancelled by hook: {reason}", file=sys.stderr)
+            return 1
     rc, result, plan = plan_and_apply_one(
         ns,
         raw_input,
@@ -285,6 +295,7 @@ def cmd_new(
     ns: Namespace,
     base_dir: Path,
     cwd: Path,
+    pre_create_hook: Callable[[Namespace, str | None, str | None], tuple[bool, str, Namespace, str | None, str | None]] | None = None,
     post_create_hook: Callable[[NewResult, NewPlan | None, str | None, str | None], None] | None = None,
 ) -> int:
     _ = builtin_keys()  # ensure sources are registered
@@ -305,10 +316,26 @@ def cmd_new(
     if multi:
         if not raw_inputs:
             # Allow --multi with --downloaded (zero positionals OK).
-            return _process_item(ns, None, None, sources_cfg, ctx, post_create_hook)
+            return _process_item(
+                ns,
+                None,
+                None,
+                sources_cfg,
+                ctx,
+                pre_create_hook,
+                post_create_hook,
+            )
         worst = 0
         for raw in raw_inputs:
-            rc = _process_item(ns, raw, None, sources_cfg, ctx, post_create_hook)
+            rc = _process_item(
+                ns,
+                raw,
+                None,
+                sources_cfg,
+                ctx,
+                pre_create_hook,
+                post_create_hook,
+            )
             if rc != 0:
                 worst = rc if worst == 0 or rc > worst else worst
                 print(f"item failed: {raw}", file=sys.stderr)
@@ -323,4 +350,12 @@ def cmd_new(
         return 2
     raw_input = raw_inputs[0] if raw_inputs else None
     explicit_name = raw_inputs[1] if len(raw_inputs) > 1 else None
-    return _process_item(ns, raw_input, explicit_name, sources_cfg, ctx, post_create_hook)
+    return _process_item(
+        ns,
+        raw_input,
+        explicit_name,
+        sources_cfg,
+        ctx,
+        pre_create_hook,
+        post_create_hook,
+    )
