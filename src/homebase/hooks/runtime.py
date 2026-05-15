@@ -14,7 +14,7 @@ from types import ModuleType
 from typing import Any
 
 from .. import __version__ as homebase_version
-from ..core.models import HookInfo, HookRuntime, HookTarget, PreOutcome
+from ..core.models import HookInfo, HookRuntime, HookTarget, PreOutcome, PreResult
 from ..core.utils import HOOK_RUN_ERRORS
 from ..metadata.api import append_base_log
 from .api import HookContext
@@ -39,7 +39,97 @@ def dispatch_pre(
     change: dict[str, object],
     view: str,
 ) -> PreOutcome:
-    return PreOutcome(cancelled=False, reason="", change=dict(change))
+    hook_specs = getattr(getattr(app, "ctx", None), "hook_specs", {})
+    specs = list(hook_specs.get(("pre", event), []))
+    selected = [
+        spec
+        for spec in specs
+        if bool(spec.enabled) and (not spec.views or view in spec.views)
+    ]
+    if not selected:
+        return PreOutcome(cancelled=False, reason="", change=dict(change))
+
+    done = threading.Event()
+    out = PreOutcome(cancelled=False, reason="", change=dict(change))
+
+    def _run() -> None:
+        nonlocal out
+        out = _run_pre_chain(app, event, list(targets), dict(change), view, selected)
+        done.set()
+
+    worker = threading.Thread(target=_run, daemon=True)
+    worker.start()
+    done.wait()
+    return out
+
+
+def _run_pre_chain(
+    app: Any,
+    event: str,
+    targets: list[HookTarget],
+    change: dict[str, object],
+    view: str,
+    specs: list[Any],
+) -> PreOutcome:
+    running_change = dict(change)
+    for spec in specs:
+        spec_id = f"pre/{event}/{spec.name}"
+        app.call_from_thread(app._busy_start, f"hook: {spec_id}")
+        app.hook_running[spec_id] = time.time()
+        try:
+            module = resolve_hook_module(spec, Path(app.base_dir))
+            runtime = HookRuntime(
+                invoker="tui",
+                homebase_version=homebase_version,
+                now_iso=datetime.now(timezone.utc).isoformat(),
+                now_ts=int(time.time()),
+                user=str(getpass.getuser() or ""),
+            )
+            info = HookInfo(
+                name=str(spec.name),
+                source=str(spec.source),
+                timing="pre",
+                event=event,
+                config=dict(spec.config),
+            )
+
+            def _add_event(path: Path, kind: str, payload: dict[str, object]) -> None:
+                app.call_from_thread(append_base_log, path, kind, payload)
+
+            def _notify(text: str, level: str = "info") -> None:
+                app.call_from_thread(app._set_runtime_status, text, level, 6.0)
+
+            def _log(text: str, level: str = "info") -> None:
+                app.call_from_thread(app._log, text, level)
+
+            context = HookContext(
+                event=event,
+                timing="pre",
+                view=view,
+                base_dir=Path(app.base_dir),
+                targets=tuple(targets),
+                change=running_change,
+                runtime=runtime,
+                hook=info,
+                add_event=_add_event,
+                notify=_notify,
+                log=_log,
+                ask=lambda *_args, **_kwargs: None,
+            )
+            result = module.run(context)
+            if isinstance(result, PreResult):
+                if result.decision == "cancel":
+                    return PreOutcome(cancelled=True, reason=str(result.reason), change=running_change)
+                if result.decision == "mutate" and isinstance(result.mutated_change, dict):
+                    running_change.update(result.mutated_change)
+        except HOOK_RUN_ERRORS as exc:
+            tb_tail = "\n".join(traceback.format_exception(type(exc), exc, exc.__traceback__)[-6:])
+            app.call_from_thread(app._show_runtime_error, f"hook {spec.name}", exc, tb_tail)
+            return PreOutcome(cancelled=True, reason=str(exc), change=running_change)
+        finally:
+            app.call_from_thread(app._busy_stop)
+            app.hook_running.pop(spec_id, None)
+    return PreOutcome(cancelled=False, reason="", change=running_change)
 
 
 def dispatch_post(

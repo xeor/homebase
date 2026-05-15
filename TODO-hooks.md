@@ -49,6 +49,11 @@ then peel off discrete tickets.
   - Wired CLI `b rm` flow to dispatch `delete` post hooks with pre-delete snapshot payload.
   - Added CLI slow-hook warning loop + hook_started/hook_done framing events in
     `dispatch_post_cli`.
+- 2026-05-15: Phase 7 started (pre hooks, partial).
+  - Implemented functional `dispatch_pre` path (TUI runtime): sequential pre-hook
+    execution, cancel/mutate handling via `PreResult`, and exception->cancel behavior.
+  - Wired rename trigger to call `dispatch_pre` before filesystem rename, including
+    support for mutated `new_path` returned by a pre-hook.
 
 ## Goal
 

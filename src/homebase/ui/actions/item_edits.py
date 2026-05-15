@@ -223,6 +223,30 @@ def on_rename_item(
         _rename_abort(app, reason)
         return
 
+    pre_outcome = hooks_runtime.dispatch_pre(
+        app,
+        event="rename",
+        targets=[snapshot_target(source_row, load_base_data(source_row.path))],
+        change={
+            "old_path": current,
+            "new_path": target,
+            "old_name": current.name,
+            "new_name": target.name,
+        },
+        view=app.view_mode,
+    )
+    if pre_outcome.cancelled:
+        _rename_abort(app, pre_outcome.reason or "cancelled by hook")
+        return
+    change = dict(pre_outcome.change)
+    mutated_new_path = change.get("new_path")
+    if isinstance(mutated_new_path, Path):
+        target = mutated_new_path
+        new_name = target.name
+    elif isinstance(mutated_new_path, str):
+        target = Path(mutated_new_path)
+        new_name = target.name
+
     try:
         current.rename(target)
     except (OSError, ValueError) as exc:

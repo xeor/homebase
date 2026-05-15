@@ -6,7 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from homebase.core.models import HookSpec, HookTarget
-from homebase.hooks.runtime import dispatch_post, dispatch_post_cli
+from homebase.hooks.runtime import dispatch_post, dispatch_post_cli, dispatch_pre
 from homebase.metadata.api import load_base_data
 
 
@@ -79,8 +79,14 @@ class FakeApp:
             self.done.set()
 
 
-def _write_hook(base_dir: Path, name: str, body: str) -> None:
-    path = base_dir / ".homebase" / "hooks" / "post" / "rename" / f"{name}.py"
+class FakePreApp(FakeApp):
+    def __init__(self, base_dir: Path, specs: list[HookSpec]) -> None:
+        super().__init__(base_dir, [])
+        self.ctx = SimpleNamespace(hook_specs={("pre", "rename"): specs})
+
+
+def _write_hook(base_dir: Path, name: str, body: str, *, timing: str = "post", event: str = "rename") -> None:
+    path = base_dir / ".homebase" / "hooks" / timing / event / f"{name}.py"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(body, encoding="utf-8")
 
@@ -237,3 +243,61 @@ def test_dispatch_post_cli_emits_slow_warning(tmp_path: Path, capsys) -> None:
     )
     captured = capsys.readouterr()
     assert "still running" in captured.err
+
+
+def test_dispatch_pre_cancel_stops_operation(tmp_path: Path) -> None:
+    _write_hook(
+        tmp_path,
+        "pre_cancel",
+        "from homebase.core.models import PreResult\ndef run(ctx):\n    return PreResult(decision='cancel', reason='nope')\n",
+        timing="pre",
+    )
+    spec = HookSpec(
+        timing="pre",
+        event="rename",
+        name="pre_cancel",
+        source="custom",
+        enabled=True,
+        views=(),
+        config={},
+        slow_warn_s=30.0,
+    )
+    app = FakePreApp(tmp_path, [spec])
+    out = dispatch_pre(
+        app,
+        event="rename",
+        targets=[],
+        change={"old_name": "a", "new_name": "b"},
+        view="active",
+    )
+    assert out.cancelled is True
+    assert out.reason == "nope"
+
+
+def test_dispatch_pre_mutate_updates_change(tmp_path: Path) -> None:
+    _write_hook(
+        tmp_path,
+        "pre_mutate",
+        "from homebase.core.models import PreResult\ndef run(ctx):\n    return PreResult(decision='mutate', mutated_change={'new_name': 'z'})\n",
+        timing="pre",
+    )
+    spec = HookSpec(
+        timing="pre",
+        event="rename",
+        name="pre_mutate",
+        source="custom",
+        enabled=True,
+        views=(),
+        config={},
+        slow_warn_s=30.0,
+    )
+    app = FakePreApp(tmp_path, [spec])
+    out = dispatch_pre(
+        app,
+        event="rename",
+        targets=[],
+        change={"old_name": "a", "new_name": "b"},
+        view="active",
+    )
+    assert out.cancelled is False
+    assert out.change["new_name"] == "z"
