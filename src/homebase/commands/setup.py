@@ -83,6 +83,7 @@ def cmd_setup(
     bin_dir: Path,
     *,
     completion_script_fn: Callable[[str], str] | None = None,
+    shell_init_script_fn: Callable[[str], str] | None = None,
     dry_run: bool = False,
 ) -> int:
     return setup_tools.cmd_setup(
@@ -91,6 +92,7 @@ def cmd_setup(
         tmux_bin_candidates=TMUX_BIN_CANDIDATES,
         prompt_yes_no=_prompt_yes_no,
         completion_script_fn=completion_script_fn,
+        shell_init_script_fn=shell_init_script_fn,
         dry_run=dry_run,
     )
 
@@ -122,6 +124,18 @@ def cmd_recent(base_dir: Path) -> int:
         collect_projects=collect_projects,
         sort_rows=sort_rows,
         fmt_ymd=core_utils.fmt_ymd,
+    )
+
+
+def cmd_cd(base_dir: Path, name: str) -> int:
+    from ..core.constants import ARCHIVE_DIR_NAME
+    from ..tmux.flow import open_shell_in_dir
+
+    return commands_basic.cmd_cd(
+        base_dir,
+        name,
+        archive_dir_name=ARCHIVE_DIR_NAME,
+        open_shell_in_dir=open_shell_in_dir,
     )
 
 

@@ -75,6 +75,14 @@ def build_cli_parser() -> argparse.ArgumentParser:
     _build_new_parser(sub)
     p_completion = sub.add_parser("completion")
     p_completion.add_argument("shell", choices=["fish", "zsh", "bash"])
+    # `b shell-init <shell>` prints a wrapper function that lets the
+    # parent shell `cd` into the new project / removed project's
+    # parent / etc. See src/homebase/cli/shell_init.py.
+    p_shell_init = sub.add_parser(
+        "shell-init",
+        help="print shell-integration wrapper (cd handoff via HOMEBASE_CD_FILE)",
+    )
+    p_shell_init.add_argument("shell", choices=["fish", "zsh", "bash"])
     p_internal_complete = sub.add_parser("__complete")
     p_internal_complete.add_argument("shell", choices=["fish", "zsh", "bash"])
     p_internal_complete.add_argument("cword", type=int)
@@ -104,15 +112,27 @@ def build_cli_parser() -> argparse.ArgumentParser:
     p_a = sub.add_parser("a")
     p_a.add_argument("path", nargs="?", default=".")
 
+    p_cd = sub.add_parser(
+        "cd",
+        help="open a shell in a project under base (tab-completes names)",
+    )
+    p_cd.add_argument("name", nargs="?", default="")
+
     p_rm = sub.add_parser("rm")
     p_rm.add_argument("path", nargs="?", default=".")
     p_rm.add_argument("--force-outside-base", action="store_true")
+    # ``--force`` / ``-f`` skips the y/N confirmation prompt. It does
+    # NOT bypass the outside-base safety net — that's still
+    # ``--force-outside-base``.
+    p_rm.add_argument("--force", "-f", action="store_true")
 
     p_fix = sub.add_parser("fix")
     p_fix.add_argument("path", nargs="?", default=".")
 
+    # ``b archive`` with no subcommand → archive cwd (same as `b a`).
+    # That's why ``archive_subcommand`` is not required.
     p_archive = sub.add_parser("archive")
-    archive_sub = p_archive.add_subparsers(dest="archive_subcommand", required=True)
+    archive_sub = p_archive.add_subparsers(dest="archive_subcommand")
     p_archive_mv = archive_sub.add_parser("mv")
     p_archive_mv.add_argument("path", nargs="?", default=".")
     p_archive_ls = archive_sub.add_parser("ls")

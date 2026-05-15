@@ -13,6 +13,7 @@ _TOP_LEVEL_COMMANDS = [
     "tags",
     "utils",
     "a",
+    "cd",
     "rm",
     "fix",
     "archive",
@@ -20,7 +21,27 @@ _TOP_LEVEL_COMMANDS = [
     "benchmark",
     "test",
     "completion",
+    "shell-init",
 ]
+
+
+def _active_project_names(base_dir: Path) -> list[str]:
+    """Names of top-level directories under base that aren't archived,
+    hidden, or reserved (``_archive``, ``_tags``, ``.homebase`` …).
+    Used by ``b cd <tab>`` to offer only real projects."""
+    try:
+        entries = list(base_dir.iterdir())
+    except OSError:
+        return []
+    names: list[str] = []
+    for entry in entries:
+        if not entry.is_dir():
+            continue
+        if entry.name.startswith(".") or entry.name.startswith("_"):
+            continue
+        names.append(entry.name)
+    names.sort()
+    return names
 
 
 def _new_child_source_keys(base_dir: Path) -> list[str]:
@@ -137,6 +158,10 @@ def _subcommand_candidates(
         if prev == "--template":
             return _new_template_keys(base_dir)
         return [*_NEW_MODE_FLAGS, *_NEW_COMMON_FLAGS]
+    if cmd == "cd":
+        return _active_project_names(base_dir)
+    if cmd == "rm":
+        return [*_active_project_names(base_dir), "--force", "--force-outside-base"]
     if cmd == "setup":
         return ["--yes", "--no-tmux-binding"]
     if cmd == "cache":

@@ -187,9 +187,10 @@ def cmd_rm(
     *,
     env_base_dir_key: str,
     policy_reason_outside_base: Callable[[Path, Path], str | None],
-    confirm: Callable[[], None],
+    prompt_yes_no: Callable[[str, bool], bool],
     delete_internal: Callable[[Path, Path], None],
     force_outside_base: bool,
+    force: bool = False,
 ) -> int:
     target = Path(path).resolve()
     base_dir = Path(os.environ.get(env_base_dir_key, ".")).resolve()
@@ -199,11 +200,13 @@ def cmd_rm(
     if not force_outside_base and policy_reason_outside_base(target, base_dir):
         print(f"refusing to delete outside base (use --force-outside-base): {target}", file=sys.stderr)
         return 1
-    print(f"delete: {target}")
-    confirm()
+    if not force:
+        if not prompt_yes_no(f"delete: {target}", False):
+            print("aborted")
+            return 1
     try:
         delete_internal(base_dir, target)
-        print("done")
+        print(f"deleted: {target}")
         return 0
     except ValueError as exc:
         print(str(exc), file=sys.stderr)

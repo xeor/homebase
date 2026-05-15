@@ -242,13 +242,56 @@ def cmd_tmux_save(
 
 
 def open_shell_in_dir(path: Path) -> int:
-    # No-op when stdout isn't an interactive terminal — under pytest,
-    # stdout is captured even when stdin is monkeypatched to a fake
-    # TTY, and ``os.execvp`` would replace the running test process
-    # with a login shell. Real CLI usage always has both, so the
-    # guarded path is the one that matters in production.
+    """Either tell the parent shell to ``cd`` here (preferred), or
+    exec a sub-shell at this directory (fallback).
+
+    Protocol — when the user has installed the shell-integration
+    wrapper (see ``b shell-init <shell>``) it exports
+    ``HOMEBASE_CD_FILE=<temp>`` before invoking the binary. We write
+    the target path into that file and return cleanly; the wrapper
+    then `cd`s the parent shell into it. This keeps the user's
+    original shell alive — no phantom-cwd errors after deletion or
+    archive moves.
+
+    When the wrapper isn't installed:
+      * TTY → exec a fresh shell at ``path`` (existing behavior),
+        prefixed with a one-line stderr hint pointing at
+        ``b shell-init`` so the user knows the better path exists.
+        Suppress the hint when ``HOMEBASE_QUIET_FALLBACK`` is truthy.
+      * Non-TTY (pipes, pytest captures) → no-op.
+    """
+    cd_file = os.environ.get("HOMEBASE_CD_FILE", "")
+    if cd_file:
+        # The wrapper expects either an empty file (no cd requested)
+        # or a single path. ``fsync`` defends against a SIGKILL race:
+        # a partial write fails the wrapper's ``[ -d "$d" ]`` check.
+        try:
+            payload = str(path.resolve()).encode("utf-8")
+            fd = os.open(cd_file, os.O_WRONLY | os.O_TRUNC)
+            try:
+                os.write(fd, payload)
+                os.fsync(fd)
+            finally:
+                os.close(fd)
+            return 0
+        except OSError:
+            # Wrapper file unwritable for some reason — fall through
+            # to the sub-shell fallback rather than crashing.
+            pass
+
     if not sys.stdout.isatty():
+        # pytest / piped output / non-interactive — never exec.
         return 0
+
+    if not os.environ.get("HOMEBASE_QUIET_FALLBACK"):
+        shell_name = Path(os.environ.get("SHELL", "/bin/sh")).name
+        print(
+            f"[homebase] tip: install the shell wrapper so the parent\n"
+            f"           shell can cd instead of opening a sub-shell.\n"
+            f"           Run `b setup` (or `b shell-init {shell_name}`).\n"
+            f"           Falling back to sub-shell.",
+            file=sys.stderr,
+        )
     shell = os.environ.get("SHELL", "/bin/sh")
     os.chdir(path)
     os.execvp(shell, [shell])

@@ -386,6 +386,13 @@ def sync_tag_symlinks(base_dir: Path) -> str | None:
     )
 
 
+def cleanup_tag_symlinks_pointing_at(base_dir: Path, target: Path) -> int:
+    """Cheap O(|_tags/|) cleanup used after a single project's path is
+    deleted or moved — much faster than a full ``sync_tag_symlinks``
+    rebuild."""
+    return tag_index.cleanup_tag_symlinks_pointing_at(base_dir, target)
+
+
 def save_base_tags(_base_dir: Path, path: Path, new_tags: list[str]) -> None:
     ensure_base_marker(path)
     data = load_base_data(path)

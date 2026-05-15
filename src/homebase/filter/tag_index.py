@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import re
 import sqlite3
 import subprocess
@@ -162,3 +163,52 @@ def sync_tag_symlinks(
         debug=False,
     )
     return err
+
+
+def cleanup_tag_symlinks_pointing_at(base_dir: Path, target: Path) -> int:
+    """Remove every ``_tags/*/`` symlink that points at ``target`` (or
+    anything underneath it). Returns the count of symlinks removed.
+
+    Used after ``b rm`` / ``b archive`` instead of the full
+    ``sync_tag_symlinks`` rebuild: a single deletion / move only
+    invalidates symlinks pointing at the one moved/removed path,
+    and detecting that is O(|_tags/|) instead of O(|base/|).
+    Walking all projects under base (with their nested files / git
+    histories) is what blows a delete up to 10+ seconds; this helper
+    walks only the small ``_tags/`` tree and untouched symlinks stay
+    in place.
+
+    Also prunes any tag-directories that become empty as a result.
+    """
+    tags_root = base_dir / "_tags"
+    if not tags_root.is_dir():
+        return 0
+    target_str = str(target)
+    target_prefix = target_str + os.sep
+    removed = 0
+    for link in tags_root.rglob("*"):
+        if not link.is_symlink():
+            continue
+        try:
+            link_target = os.readlink(link)
+        except OSError:
+            continue
+        if link_target == target_str or link_target.startswith(target_prefix):
+            try:
+                link.unlink()
+                removed += 1
+            except OSError:
+                pass
+    # Tag dirs that just lost their last symlink are now empty —
+    # drop them so ``_tags/`` doesn't accumulate orphan dirs.
+    empties = sorted(
+        (p for p in tags_root.rglob("*") if p.is_dir() and not p.is_symlink()),
+        key=lambda p: len(p.parts),
+        reverse=True,
+    )
+    for d in empties:
+        try:
+            d.rmdir()
+        except OSError:
+            pass  # not empty — fine
+    return removed

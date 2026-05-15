@@ -94,6 +94,41 @@ def test_completion_includes_n_alias() -> None:
     assert "new" in out
 
 
+def test_completion_includes_cd() -> None:
+    out = cli_completion.completion_candidates([""], 1, base_dir=Path("."))
+    assert "cd" in out
+
+
+def test_completion_cd_lists_active_projects(tmp_path: Path) -> None:
+    """``b cd <tab>`` must show non-archived, non-hidden project
+    directories under base — and NOT ``_archive``, ``_tags``, dotfiles,
+    or regular files."""
+    (tmp_path / "myproj").mkdir()
+    (tmp_path / "other").mkdir()
+    (tmp_path / "_archive").mkdir()
+    (tmp_path / "_tags").mkdir()
+    (tmp_path / ".homebase").mkdir()
+    (tmp_path / "stray.txt").write_text("ignore me")
+    out = cli_completion.completion_candidates(["cd", ""], 2, base_dir=tmp_path)
+    assert out == ["myproj", "other"]
+
+
+def test_completion_cd_prefix_filters(tmp_path: Path) -> None:
+    (tmp_path / "alpha").mkdir()
+    (tmp_path / "alpine").mkdir()
+    (tmp_path / "beta").mkdir()
+    out = cli_completion.completion_candidates(["cd", "alp"], 2, base_dir=tmp_path)
+    assert out == ["alpha", "alpine"]
+
+
+def test_completion_rm_offers_projects_and_force(tmp_path: Path) -> None:
+    (tmp_path / "foo").mkdir()
+    out = cli_completion.completion_candidates(["rm", ""], 2, base_dir=tmp_path)
+    assert "foo" in out
+    assert "--force" in out
+    assert "--force-outside-base" in out
+
+
 def test_completion_candidates_support_named_filters(monkeypatch) -> None:
     monkeypatch.setattr(
         cli_completion,

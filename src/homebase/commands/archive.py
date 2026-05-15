@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from ..archive import io as archive_io
@@ -19,14 +20,48 @@ from ..core.constants import (
 from ..core.models import RestoreTargetExistsError
 from ..metadata.api import (
     append_base_log,
+    cleanup_tag_symlinks_pointing_at,
     ensure_base_marker,
     sync_tag_symlinks,
 )
+from ..tmux.flow import open_shell_in_dir
 from ..workspace.rows import (
     archive_destination,
     archived_restore_target,
 )
 from . import workspace as commands_workspace
+
+
+def _exec_shell_at_parent_if_cwd_under(
+    target: Path,
+    base_dir: Path,
+    *,
+    original_cwd: Path | None = None,
+) -> None:
+    """When the user just deleted or archived ``target`` and the
+    shell-process cwd at the start of the command was at or under
+    that target, the shell is now pointing at a phantom directory.
+    Drop the user into a fresh shell at the parent (falling back to
+    ``base_dir`` if the parent is gone too).
+
+    The caller MUST pass ``original_cwd`` (the cwd captured BEFORE any
+    inner ``os.chdir`` from archive/delete) — by the time we reach
+    this helper, ``archive_service`` has already chdir'd to base, so
+    ``Path.cwd()`` here is no longer a useful signal.
+
+    No-op outside a TTY — ``open_shell_in_dir`` already guards itself.
+    """
+    if original_cwd is None:
+        try:
+            original_cwd = Path.cwd().resolve()
+        except OSError:
+            return
+    if original_cwd != target and target not in original_cwd.parents:
+        return
+    parent = target.parent
+    if not parent.is_dir():
+        parent = base_dir
+    open_shell_in_dir(parent)
 
 
 def _packed_cache_invalidate_path(path: Path) -> None:
@@ -176,6 +211,12 @@ def _archive_entry_ts_iso(path: Path) -> str:
 
 
 def archive_move_internal(base_dir: Path, src: Path, sync_tags: bool = True) -> Path:
+    # ``sync_tags=False`` to the inner service so it skips the full
+    # ``sync_tag_symlinks`` rebuild (walks every project under
+    # ``base/`` — 10+ seconds on a real workspace). We follow up with
+    # a targeted cleanup that only touches symlinks pointing at the
+    # path we just moved.
+    src_resolved = src.resolve() if src.exists() else src
     dst = archive_service.archive_move_internal(
         base_dir,
         src,
@@ -183,8 +224,10 @@ def archive_move_internal(base_dir: Path, src: Path, sync_tags: bool = True) -> 
         ensure_safe_cwd=_ensure_safe_cwd,
         archive_destination=archive_destination,
         sync_tags_if_needed=_archive_sync_tags_if_needed,
-        sync_tags=sync_tags,
+        sync_tags=False,
     )
+    if sync_tags:
+        cleanup_tag_symlinks_pointing_at(base_dir, src_resolved)
     cache_move_opened_ts(base_dir, src, dst)
     append_base_log(
         dst,
@@ -275,25 +318,46 @@ def archive_restore_internal(
 
 
 def delete_internal(base_dir: Path, target: Path, sync_tags: bool = True) -> None:
+    # Snapshot the resolved target before deletion so we know what
+    # the now-stale _tags/ symlinks would have been pointing at. The
+    # inner service does ``sync_tags=False`` (no full rebuild) and we
+    # finish with a targeted cleanup of just the affected symlinks.
+    target_resolved = target.resolve() if target.exists() else target
     archive_service.delete_internal(
         base_dir,
         target,
         ensure_safe_cwd=_ensure_safe_cwd,
         is_packed_archive_path=is_packed_archive_path,
         sync_tags_if_needed=_archive_sync_tags_if_needed,
-        sync_tags=sync_tags,
+        sync_tags=False,
     )
+    if sync_tags:
+        cleanup_tag_symlinks_pointing_at(base_dir, target_resolved)
     cache_delete_opened_ts(base_dir, target)
 
 
 def cmd_archive_mv(base_dir: Path, path: str = ".") -> int:
-    return commands_workspace.cmd_archive_mv(
+    target = Path(path).resolve()
+    # Capture cwd BEFORE the inner archive code chdir's away from the
+    # source dir — without this snapshot the safety check below can
+    # never fire when the user is sitting inside the project being
+    # moved.
+    try:
+        original_cwd = Path.cwd().resolve()
+    except OSError:
+        original_cwd = base_dir
+    rc = commands_workspace.cmd_archive_mv(
         base_dir,
         path,
         archive_destination=archive_destination,
         confirm=confirm,
         archive_move_internal=lambda bd, src: archive_move_internal(bd, src),
     )
+    if rc == 0:
+        _exec_shell_at_parent_if_cwd_under(
+            target, base_dir, original_cwd=original_cwd,
+        )
+    return rc
 
 
 def cmd_archive_ls(base_dir: Path, path: str = ".") -> int:
@@ -329,15 +393,37 @@ def cmd_archive_undo(base_dir: Path, path: str = ".") -> int:
     )
 
 
-def cmd_rm(path: str = ".", force_outside_base: bool = False) -> int:
-    return commands_workspace.cmd_rm(
+def cmd_rm(
+    path: str = ".",
+    force_outside_base: bool = False,
+    *,
+    force: bool = False,
+) -> int:
+    target = Path(path).resolve()
+    base_dir = Path(os.environ.get(ENV_BASE_DIR, ".")).resolve()
+    # Snapshot cwd BEFORE delete_internal -> archive_service does an
+    # ``os.chdir(base_dir)`` internally to escape the target. Without
+    # this snapshot the safety check below sees cwd == base_dir and
+    # never spawns the recovery shell, so the user's parent shell is
+    # left sitting in a deleted directory.
+    try:
+        original_cwd = Path.cwd().resolve()
+    except OSError:
+        original_cwd = base_dir
+    rc = commands_workspace.cmd_rm(
         path,
         env_base_dir_key=ENV_BASE_DIR,
         policy_reason_outside_base=_policy_reason_outside_base,
-        confirm=confirm,
+        prompt_yes_no=_prompt_yes_no,
         delete_internal=lambda bd, target: delete_internal(bd, target),
         force_outside_base=force_outside_base,
+        force=force,
     )
+    if rc == 0:
+        _exec_shell_at_parent_if_cwd_under(
+            target, base_dir, original_cwd=original_cwd,
+        )
+    return rc
 
 
 def cmd_archive_reorganize(base_dir: Path, dry_run: bool = False) -> int:

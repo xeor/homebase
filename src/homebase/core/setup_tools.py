@@ -184,6 +184,70 @@ def _completion_ok(path: Path, expected_script: str) -> bool:
     return current == expected_script
 
 
+def _shell_init_target_for_shell(shell: str) -> Path | None:
+    """Where the `b shell-init <shell>` wrapper should be installed.
+
+    fish gets its own auto-sourced file under ``conf.d/``. bash and
+    zsh have nowhere as canonical as that, so we use a dedicated
+    homebase init file and a separate one-liner the user adds to
+    their ``~/.bashrc`` / ``~/.zshrc`` that sources it. The check +
+    fix logic in ``cmd_setup`` covers both halves."""
+    value = str(shell).strip().lower()
+    if value == "bash":
+        return Path.home() / ".local/share/homebase/shell-init.bash"
+    if value == "zsh":
+        return Path.home() / ".local/share/homebase/shell-init.zsh"
+    if value == "fish":
+        return Path.home() / ".config/fish/conf.d/b.fish"
+    return None
+
+
+def _shell_init_rc_for_shell(shell: str) -> Path | None:
+    """The rc file that needs to source the shell-init script (bash
+    and zsh only; fish's conf.d/ is auto-sourced)."""
+    value = str(shell).strip().lower()
+    if value == "bash":
+        return Path.home() / ".bashrc"
+    if value == "zsh":
+        return Path.home() / ".zshrc"
+    return None
+
+
+def _shell_init_source_line(shell: str, target: Path) -> str:
+    """The exact line the user's rc file needs to source the script."""
+    home = str(Path.home())
+    display = str(target)
+    if display.startswith(home + "/"):
+        display = "$HOME" + display[len(home):]
+    return f'[ -f "{display}" ] && . "{display}"  # homebase shell integration'
+
+
+def _shell_init_installed(
+    shell: str,
+    expected_script: str,
+    target: Path | None,
+    rc_path: Path | None,
+) -> bool:
+    """The wrapper counts as installed when the target file contains
+    the expected script body AND (for bash/zsh) the rc file sources
+    it. A user-edited rc file isn't required to be byte-equal — we
+    just look for the source line."""
+    if target is None:
+        return False
+    try:
+        if not target.is_file() or target.read_text() != expected_script:
+            return False
+    except OSError:
+        return False
+    if rc_path is None:
+        return True
+    try:
+        rc_text = rc_path.read_text() if rc_path.is_file() else ""
+    except OSError:
+        return False
+    return _shell_init_source_line(shell, target) in rc_text
+
+
 def cmd_setup(
     base_dir: Path,
     bin_dir: Path,
@@ -191,6 +255,7 @@ def cmd_setup(
     tmux_bin_candidates: tuple[str, ...],
     prompt_yes_no: Callable[[str, bool], bool],
     completion_script_fn: Callable[[str], str] | None = None,
+    shell_init_script_fn: Callable[[str], str] | None = None,
     dry_run: bool = False,
 ) -> int:
     print("setup: homebase")
@@ -341,6 +406,50 @@ def cmd_setup(
         completion_detail = f"needs change: completion checker unavailable for {completion_shell}"
     _print_check(completion_status, "shell completion", completion_detail)
 
+    # ---- shell-init wrapper (parent-shell cd handoff) -----------
+    shell_init_target = (
+        _shell_init_target_for_shell(completion_shell)
+        if completion_shell
+        else None
+    )
+    shell_init_rc = (
+        _shell_init_rc_for_shell(completion_shell)
+        if completion_shell
+        else None
+    )
+    expected_shell_init = ""
+    shell_init_ok = False
+    shell_init_detail = "unsupported shell for auto-check"
+    if (
+        completion_shell
+        and shell_init_script_fn is not None
+        and shell_init_target is not None
+    ):
+        expected_shell_init = shell_init_script_fn(completion_shell)
+        shell_init_ok = _shell_init_installed(
+            completion_shell,
+            expected_shell_init,
+            shell_init_target,
+            shell_init_rc,
+        )
+        if shell_init_ok:
+            shell_init_detail = f"{_state_text('PASS')}: {shell_init_target}"
+        else:
+            shell_init_detail = (
+                f"needs change: install wrapper at {shell_init_target}"
+            )
+            if shell_init_rc is not None:
+                shell_init_detail += f" and source it from {shell_init_rc}"
+    elif completion_shell and shell_init_target is not None:
+        shell_init_detail = (
+            f"needs change: shell-init writer unavailable for {completion_shell}"
+        )
+    _print_check(
+        "PASS" if shell_init_ok else "WARN",
+        "shell-init wrapper",
+        shell_init_detail,
+    )
+
     print("")
     print("fix proposals:")
 
@@ -412,6 +521,60 @@ def cmd_setup(
                 except OSError as exc:
                     print(f"- completion write failed ({exc})", file=sys.stderr)
 
+    if (
+        completion_shell
+        and shell_init_target is not None
+        and not shell_init_ok
+        and expected_shell_init
+    ):
+        rc_hint = (
+            f" + add source line to {shell_init_rc}"
+            if shell_init_rc is not None
+            else ""
+        )
+        if prompt_yes_no(
+            f"install {completion_shell} shell-init wrapper at "
+            f"{shell_init_target}{rc_hint}?",
+            True,
+        ):
+            if dry_run:
+                print(f"- would fix: write {shell_init_target}{rc_hint}")
+            else:
+                try:
+                    shell_init_target.parent.mkdir(parents=True, exist_ok=True)
+                    shell_init_target.write_text(expected_shell_init)
+                    print(f"- fixed: wrote {shell_init_target}")
+                except OSError as exc:
+                    print(f"- shell-init write failed ({exc})", file=sys.stderr)
+                if shell_init_rc is not None:
+                    source_line = _shell_init_source_line(
+                        completion_shell, shell_init_target,
+                    )
+                    try:
+                        existing = (
+                            shell_init_rc.read_text()
+                            if shell_init_rc.is_file()
+                            else ""
+                        )
+                    except OSError:
+                        existing = ""
+                    if source_line in existing:
+                        print(f"- already sources from {shell_init_rc}")
+                    else:
+                        try:
+                            shell_init_rc.parent.mkdir(parents=True, exist_ok=True)
+                            with shell_init_rc.open("a") as fh:
+                                if existing and not existing.endswith("\n"):
+                                    fh.write("\n")
+                                fh.write(source_line + "\n")
+                            print(f"- fixed: appended source line to {shell_init_rc}")
+                        except OSError as exc:
+                            print(
+                                f"- shell-init rc update failed ({exc})",
+                                file=sys.stderr,
+                            )
+                print("- open a NEW shell for the wrapper to take effect")
+
     print("")
     print("final validation:")
     uv_bin = find_executable("uv", ("/opt/homebrew/bin/uv", "/usr/local/bin/uv"))
@@ -452,6 +615,21 @@ def cmd_setup(
             )
         except (ValueError, OSError):
             completion_ok_final = False
+    shell_init_ok_final = shell_init_ok
+    if (
+        completion_shell
+        and shell_init_target is not None
+        and shell_init_script_fn is not None
+    ):
+        try:
+            shell_init_ok_final = _shell_init_installed(
+                completion_shell,
+                shell_init_script_fn(completion_shell),
+                shell_init_target,
+                shell_init_rc,
+            )
+        except (ValueError, OSError):
+            shell_init_ok_final = False
 
     hard_fail = False
     fail_checks = [
@@ -473,8 +651,9 @@ def cmd_setup(
         not tmux_binding_ok,
         not config_path.is_file(),
         completion_shell in {"bash", "zsh", "fish"} and not completion_ok_final,
+        completion_shell in {"bash", "zsh", "fish"} and not shell_init_ok_final,
     ]
-    pass_count = 14 - sum(1 for x in fail_checks if x) - sum(1 for x in warn_checks if x)
+    pass_count = 15 - sum(1 for x in fail_checks if x) - sum(1 for x in warn_checks if x)
     warn_count = sum(1 for x in warn_checks if x)
     fail_count = sum(1 for x in fail_checks if x)
     _print_check(

@@ -17,6 +17,7 @@ from ..commands.archive import (
 )
 from ..commands.setup import (
     cmd_cache_warm,
+    cmd_cd,
     cmd_recent,
     cmd_setup,
     cmd_status,
@@ -38,6 +39,7 @@ from ..workspace.startup_validation import run_startup_validations
 from .completion import completion_candidates, completion_script
 from .dispatch import dispatch_command
 from .parser import build_cli_parser
+from .shell_init import shell_init_script
 
 
 def resolve_base_dir(base_folder_arg: str | None) -> Path:
@@ -128,6 +130,9 @@ def main(argv: list[str]) -> int:
     # every keystroke that triggers the completion function).
     if ns.command == "completion":
         return _cmd_completion(str(ns.shell))
+    if ns.command == "shell-init":
+        print(shell_init_script(str(ns.shell)), end="")
+        return 0
     if ns.command == "__complete":
         # Strip a leading ``--`` separator that newer shell wrappers
         # use to keep argparse from eating option-shaped user words.
@@ -252,6 +257,7 @@ def main(argv: list[str]) -> int:
                 base_path,
                 bin_path,
                 completion_script_fn=completion_script,
+                shell_init_script_fn=shell_init_script,
                 dry_run=dry_run,
             ),
             cmd_cache_warm=cmd_cache_warm,
@@ -262,7 +268,12 @@ def main(argv: list[str]) -> int:
             ),
             cmd_utils=cmd_utils,
             cmd_archive_mv=cmd_archive_mv,
-            cmd_rm=lambda path, force: cmd_rm(path, force_outside_base=force),
+            cmd_cd=cmd_cd,
+            cmd_rm=lambda path, force_outside_base, force=False: cmd_rm(
+                path,
+                force_outside_base=force_outside_base,
+                force=force,
+            ),
             cmd_fix=cmd_fix,
             cmd_archive_ls=cmd_archive_ls,
             cmd_archive_undo=cmd_archive_undo,

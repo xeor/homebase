@@ -55,8 +55,61 @@ uv run b completion fish > ~/.config/fish/completions/b.fish
 Shell completion:
 
 - `b completion bash|zsh|fish` prints a completion script for that shell.
-- Dynamic completion includes quick-create keys from `create_templates`
-  for `b c <key>`.
+- Dynamic completion offers source keys (`b new --as <tab>`),
+  templates (`b new --template <tab>`), and project names
+  (`b cd <tab>`, `b rm <tab>`).
+
+## Shell integration (parent-shell cd handoff)
+
+Commands like `b cd <name>`, `b new --cd`, and the post-action cleanup
+of `b rm` / `b archive` need to land you in a directory once they're
+done. A bare binary can't change the parent shell's cwd, so by default
+`b` execs a fresh sub-shell at the target — which means when you
+eventually `exit` that sub-shell you're back in the (possibly deleted)
+original cwd.
+
+Install the small wrapper function once and the binary will instead
+hand the cwd off to your existing shell via a temp file (env var
+`HOMEBASE_CD_FILE`). Same pattern as `zoxide`, `direnv`, `pyenv`.
+
+Easiest path — let `b setup` detect what's missing and offer to
+install both completion and the wrapper interactively:
+
+```sh
+b setup
+```
+
+Manual install (if you'd rather):
+
+```sh
+# bash
+b shell-init bash > ~/.local/share/homebase/shell-init.bash
+echo '[ -f "$HOME/.local/share/homebase/shell-init.bash" ] && . "$HOME/.local/share/homebase/shell-init.bash"  # homebase shell integration' >> ~/.bashrc
+
+# zsh
+b shell-init zsh > ~/.local/share/homebase/shell-init.zsh
+echo '[ -f "$HOME/.local/share/homebase/shell-init.zsh" ] && . "$HOME/.local/share/homebase/shell-init.zsh"  # homebase shell integration' >> ~/.zshrc
+
+# fish (conf.d/ is auto-sourced — no rc edit needed)
+b shell-init fish > ~/.config/fish/conf.d/b.fish
+```
+
+Open a **new** shell after install. After that, `b cd foo`,
+`b new myproj`, the post-action cleanup of `b rm` / `b archive`, etc.
+all `cd` your existing shell — no sub-shell, no
+`getcwd: cannot access parent directories` errors on the next prompt.
+
+If you don't install the wrapper, the previous sub-shell behavior is
+still the fallback, plus a one-line stderr hint pointing at
+`b shell-init`. Set `HOMEBASE_QUIET_FALLBACK=1` to silence that hint
+when you've made an informed decision to keep the sub-shell.
+
+> If you installed `b` via `uv tool install ...`, remember to
+> `uv tool install --reinstall --editable .` (or
+> `uv tool upgrade homebase`) after pulling new code — the installed
+> binary is a snapshot. A stale binary won't know about
+> `HOMEBASE_CD_FILE` and will keep opening sub-shells even with the
+> wrapper installed.
 
 ## Validation
 

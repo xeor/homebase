@@ -13,6 +13,98 @@ def test_compact_path_for_display_uses_tilde() -> None:
     assert out.startswith("~")
 
 
+def test_shell_init_target_paths() -> None:
+    """The wrapper target is conf.d/ for fish (auto-sourced) and a
+    dedicated homebase init file for bash/zsh (sourced from rc)."""
+    home = Path.home()
+    assert setup_tools._shell_init_target_for_shell("fish") == (
+        home / ".config/fish/conf.d/b.fish"
+    )
+    assert setup_tools._shell_init_target_for_shell("bash") == (
+        home / ".local/share/homebase/shell-init.bash"
+    )
+    assert setup_tools._shell_init_target_for_shell("zsh") == (
+        home / ".local/share/homebase/shell-init.zsh"
+    )
+    assert setup_tools._shell_init_target_for_shell("powershell") is None
+
+
+def test_shell_init_installed_detects_present_and_missing(
+    tmp_path: Path,
+) -> None:
+    """For fish the conf.d file must match the script byte-for-byte;
+    for bash/zsh both the init file AND the source line in rc count."""
+    # --- fish path (no rc file involved) ---
+    fish_target = tmp_path / "conf.d" / "b.fish"
+    fish_target.parent.mkdir(parents=True)
+    body = "# script\nfunction b\n  ...\nend\n"
+    fish_target.write_text(body)
+    assert setup_tools._shell_init_installed("fish", body, fish_target, None)
+    fish_target.write_text("stale")
+    assert not setup_tools._shell_init_installed("fish", body, fish_target, None)
+
+    # --- bash path (script + rc source line) ---
+    bash_target = tmp_path / "share" / "homebase" / "shell-init.bash"
+    bash_target.parent.mkdir(parents=True)
+    bash_target.write_text(body)
+    rc = tmp_path / ".bashrc"
+    line = setup_tools._shell_init_source_line("bash", bash_target)
+    rc.write_text("# user stuff\n" + line + "\nmore stuff\n")
+    assert setup_tools._shell_init_installed("bash", body, bash_target, rc)
+    # missing source line → not installed
+    rc.write_text("# user stuff only\n")
+    assert not setup_tools._shell_init_installed("bash", body, bash_target, rc)
+
+
+def test_cmd_setup_offers_to_install_shell_init(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    """End-to-end through cmd_setup: with no wrapper installed and
+    auto-confirm, the script lands at the expected target AND the
+    user's rc file gets the source line appended."""
+    base_dir = tmp_path / "base"
+    bin_dir = tmp_path / "bin"
+    base_dir.mkdir()
+    bin_dir.mkdir()
+    (bin_dir / "b").write_text("#!/bin/sh\n")
+    (base_dir / ".homebase").mkdir()
+    (base_dir / ".homebase" / ".gitignore").write_text("cache.sqlite3\n")
+
+    home = tmp_path / "home"
+    home.mkdir()
+    local_bin = home / ".local" / "bin"
+    local_bin.mkdir(parents=True)
+    (local_bin / "b").symlink_to((bin_dir / "b").resolve())
+
+    monkeypatch.setattr(setup_tools.Path, "home", lambda: home)
+    monkeypatch.setattr(
+        setup_tools,
+        "find_executable",
+        lambda name, extra_candidates=(): "/usr/bin/x"
+        if name in {"uv", "git", "tmux"} else None,
+    )
+    monkeypatch.setattr(setup_tools, "_runtime_imports_ok", lambda: (True, "ok"))
+    monkeypatch.setenv("PATH", f"{local_bin}:/usr/bin")
+    monkeypatch.setenv("SHELL", "/usr/local/bin/bash")
+
+    expected_wrapper = "# wrapper body\nb() { :; }\n"
+    rc = setup_tools.cmd_setup(
+        base_dir,
+        bin_dir,
+        tmux_bin_candidates=(),
+        prompt_yes_no=lambda _q, _d: True,  # yes to every fix
+        completion_script_fn=lambda _s: "# completion\n",
+        shell_init_script_fn=lambda _s: expected_wrapper,
+    )
+    assert rc == 0
+    init_target = home / ".local/share/homebase/shell-init.bash"
+    assert init_target.is_file()
+    assert init_target.read_text() == expected_wrapper
+    bashrc = home / ".bashrc"
+    assert bashrc.is_file()
+    assert "homebase shell integration" in bashrc.read_text()
+
+
 def test_has_any_tmux_save_binding_detects_bind_line() -> None:
     text = 'bind-key t run-shell -b "uv run --script b.py b tmux save"\n'
     assert setup_tools.has_any_tmux_save_binding(text) is True
