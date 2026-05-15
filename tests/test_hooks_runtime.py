@@ -83,6 +83,26 @@ class FakePreApp(FakeApp):
     def __init__(self, base_dir: Path, specs: list[HookSpec]) -> None:
         super().__init__(base_dir, [])
         self.ctx = SimpleNamespace(hook_specs={("pre", "rename"): specs})
+        self._confirm_screen_cls = lambda title: SimpleNamespace(title=title)
+        self._input_screen_cls = lambda title, placeholder, value="": SimpleNamespace(
+            title=title,
+            placeholder=placeholder,
+            value=value,
+        )
+        self._single_choice_screen_cls = lambda title, options: SimpleNamespace(
+            title=title,
+            options=options,
+        )
+
+    def push_screen(self, screen, callback):
+        if hasattr(screen, "placeholder"):
+            callback("typed-value")
+            return
+        if hasattr(screen, "options"):
+            first = screen.options[0][0] if screen.options else None
+            callback(first)
+            return
+        callback(True)
 
 
 def _write_hook(base_dir: Path, name: str, body: str, *, timing: str = "post", event: str = "rename") -> None:
@@ -303,6 +323,36 @@ def test_dispatch_pre_mutate_updates_change(tmp_path: Path) -> None:
     assert out.change["new_name"] == "z"
 
 
+def test_dispatch_pre_mutate_disallowed_key_ignored(tmp_path: Path) -> None:
+    _write_hook(
+        tmp_path,
+        "pre_mutate_bad",
+        "from homebase.core.models import PreResult\ndef run(ctx):\n    return PreResult(decision='mutate', mutated_change={'old_name': 'x', 'new_name': 'z'})\n",
+        timing="pre",
+    )
+    spec = HookSpec(
+        timing="pre",
+        event="rename",
+        name="pre_mutate_bad",
+        source="custom",
+        enabled=True,
+        views=(),
+        config={},
+        slow_warn_s=30.0,
+    )
+    app = FakePreApp(tmp_path, [spec])
+    out = dispatch_pre(
+        app,
+        event="rename",
+        targets=[],
+        change={"old_name": "a", "new_name": "b"},
+        view="active",
+    )
+    assert out.cancelled is False
+    assert out.change["old_name"] == "a"
+    assert out.change["new_name"] == "z"
+
+
 def test_dispatch_pre_cli_cancel(tmp_path: Path) -> None:
     _write_hook(
         tmp_path,
@@ -359,3 +409,61 @@ def test_dispatch_pre_cli_mutate(tmp_path: Path) -> None:
     )
     assert out.cancelled is False
     assert out.change["new_name"] == "c"
+
+
+def test_dispatch_pre_tui_ask_text_roundtrip(tmp_path: Path) -> None:
+    _write_hook(
+        tmp_path,
+        "pre_ask",
+        "from homebase.core.models import PreResult\ndef run(ctx):\n    value = ctx.ask(prompt='name?', kind='text', default='x')\n    return PreResult(decision='mutate', mutated_change={'new_name': value})\n",
+        timing="pre",
+    )
+    spec = HookSpec(
+        timing="pre",
+        event="rename",
+        name="pre_ask",
+        source="custom",
+        enabled=True,
+        views=(),
+        config={},
+        slow_warn_s=30.0,
+    )
+    app = FakePreApp(tmp_path, [spec])
+    out = dispatch_pre(
+        app,
+        event="rename",
+        targets=[],
+        change={"old_name": "a", "new_name": "b"},
+        view="active",
+    )
+    assert out.cancelled is False
+    assert out.change["new_name"] == "typed-value"
+
+
+def test_dispatch_pre_tui_ask_choice_roundtrip(tmp_path: Path) -> None:
+    _write_hook(
+        tmp_path,
+        "pre_ask_choice",
+        "from homebase.core.models import PreResult\ndef run(ctx):\n    value = ctx.ask(prompt='pick?', kind='choice', choices=['a', 'b'])\n    return PreResult(decision='mutate', mutated_change={'new_name': value})\n",
+        timing="pre",
+    )
+    spec = HookSpec(
+        timing="pre",
+        event="rename",
+        name="pre_ask_choice",
+        source="custom",
+        enabled=True,
+        views=(),
+        config={},
+        slow_warn_s=30.0,
+    )
+    app = FakePreApp(tmp_path, [spec])
+    out = dispatch_pre(
+        app,
+        event="rename",
+        targets=[],
+        change={"old_name": "a", "new_name": "b"},
+        view="active",
+    )
+    assert out.cancelled is False
+    assert out.change["new_name"] == "a"

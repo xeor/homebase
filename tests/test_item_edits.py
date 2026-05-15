@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from homebase.core.models import ProjectRow
+from homebase.core.models import PreOutcome, ProjectRow
 from homebase.ui.actions import item_edits
 
 
@@ -160,3 +160,92 @@ def test_on_rename_item_dispatches_post_hook_payload(tmp_path: Path, monkeypatch
     change = captured["change"]
     assert change["old_name"] == "alpha"
     assert change["new_name"] == "beta"
+
+
+def test_on_rename_item_pre_hook_cancel_stops_rename(tmp_path: Path, monkeypatch) -> None:
+    src = tmp_path / "alpha"
+    src.mkdir()
+    app = _AppStub(src)
+
+    def _project_row(target: Path, **kwargs):
+        return ProjectRow(
+            path=target,
+            name=target.name,
+            branch="-",
+            dirty="",
+            last="-",
+            src="fs",
+            created="-",
+            tags=[],
+            properties=[],
+            description="",
+            created_ts=0,
+            last_ts=0,
+            git_ts=0,
+            opened_ts=int(kwargs.get("opened_ts_override", 0)),
+            is_fork=False,
+            is_tmp=False,
+            archived=bool(kwargs.get("archived", False)),
+            restore_target=kwargs.get("restore_target"),
+            archived_ts=int(kwargs.get("archived_ts", 0)),
+            wip=False,
+            suffix=None,
+        )
+
+    monkeypatch.setattr(
+        item_edits.hooks_runtime,
+        "dispatch_pre",
+        lambda *_args, **_kwargs: PreOutcome(cancelled=True, reason="blocked", change={}),
+    )
+    item_edits.on_rename_item(app, "beta", project_row=_project_row)
+    assert src.exists()
+    assert not (tmp_path / "beta").exists()
+
+
+def test_on_rename_item_pre_hook_mutate_path_used(tmp_path: Path, monkeypatch) -> None:
+    src = tmp_path / "alpha"
+    src.mkdir()
+    app = _AppStub(src)
+
+    def _project_row(target: Path, **kwargs):
+        return ProjectRow(
+            path=target,
+            name=target.name,
+            branch="-",
+            dirty="",
+            last="-",
+            src="fs",
+            created="-",
+            tags=[],
+            properties=[],
+            description="",
+            created_ts=0,
+            last_ts=0,
+            git_ts=0,
+            opened_ts=int(kwargs.get("opened_ts_override", 0)),
+            is_fork=False,
+            is_tmp=False,
+            archived=bool(kwargs.get("archived", False)),
+            restore_target=kwargs.get("restore_target"),
+            archived_ts=int(kwargs.get("archived_ts", 0)),
+            wip=False,
+            suffix=None,
+        )
+
+    monkeypatch.setattr(
+        item_edits.hooks_runtime,
+        "dispatch_pre",
+        lambda *_args, **_kwargs: PreOutcome(
+            cancelled=False,
+            reason="",
+            change={
+                "old_path": src,
+                "new_path": tmp_path / "gamma",
+                "old_name": "alpha",
+                "new_name": "gamma",
+            },
+        ),
+    )
+    item_edits.on_rename_item(app, "beta", project_row=_project_row)
+    assert not src.exists()
+    assert (tmp_path / "gamma").exists()

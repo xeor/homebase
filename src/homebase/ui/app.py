@@ -350,6 +350,7 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
         self._input_screen_cls = InputScreen
         self._action_picker_screen_cls = ActionPickerScreen
         self._fuzzy_choice_screen_cls = FuzzyChoiceScreen
+        self._single_choice_screen_cls = SingleChoiceScreen
         self.start_new_mode = start_new_mode
         persisted = load_ui_state(self.base_dir)
         self._init_rows_state(initial_filter, persisted)

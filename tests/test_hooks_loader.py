@@ -4,11 +4,7 @@ import pytest
 
 from homebase.config.hooks import HookConfigError
 from homebase.core.models import HookSpec
-from homebase.hooks.loader import (
-    ignored_custom_pre_hook_files,
-    resolve_hook_module,
-    verify_all_specs,
-)
+from homebase.hooks.loader import resolve_hook_module, verify_all_specs
 
 
 def _spec(*, name: str, source: str = "custom", event: str = "rename", timing: str = "post") -> HookSpec:
@@ -65,12 +61,3 @@ def test_verify_all_specs_raises_on_first_bad_entry(tmp_path) -> None:
     }
     with pytest.raises(HookConfigError, match="custom hook file not found"):
         verify_all_specs(specs, tmp_path)
-
-
-def test_ignored_custom_pre_hook_files_lists_python_files(tmp_path) -> None:
-    pre_dir = tmp_path / ".homebase" / "hooks" / "pre" / "rename"
-    pre_dir.mkdir(parents=True, exist_ok=True)
-    hook_file = pre_dir / "check.py"
-    hook_file.write_text("def run(ctx):\n    return None\n", encoding="utf-8")
-    found = ignored_custom_pre_hook_files(tmp_path)
-    assert hook_file in found

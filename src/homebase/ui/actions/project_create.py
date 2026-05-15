@@ -259,6 +259,7 @@ def _apply_pre_new_project_mutations(
     post_commands = change.get("post_commands")
     if isinstance(post_commands, list):
         payload["post_commands"] = [str(cmd) for cmd in post_commands if str(cmd).strip()]
+        ns.post = [str(cmd) for cmd in post_commands if str(cmd).strip()]
     template = change.get("template")
     if template is not None:
         text = str(template).strip()

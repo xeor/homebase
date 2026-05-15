@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from homebase.commands import workspace as commands_workspace
+from homebase.core.models import PreOutcome
 
 
 def test_cmd_archive_ls_no_archives(capsys, tmp_path: Path) -> None:
@@ -258,3 +259,35 @@ def test_exec_shell_falls_back_to_base_when_parent_gone(
         fake_target, base, original_cwd=fake_cwd,
     )
     assert landed == [base]
+
+
+def test_archive_cmd_rm_honors_pre_hook_cancel(monkeypatch, tmp_path: Path) -> None:
+    from homebase.commands import archive as commands_archive
+
+    base = tmp_path / "base"
+    base.mkdir()
+    proj = base / "proj"
+    proj.mkdir()
+    monkeypatch.setenv("BASE_FOLDER", str(base))
+
+    called = {"workspace_rm": 0}
+
+    monkeypatch.setattr(
+        commands_archive,
+        "dispatch_pre_cli",
+        lambda **_kwargs: PreOutcome(cancelled=True, reason="blocked", change={}),
+    )
+
+    def _cmd_rm(*_args, **_kwargs):
+        called["workspace_rm"] += 1
+        return 0
+
+    monkeypatch.setattr(commands_archive.commands_workspace, "cmd_rm", _cmd_rm)
+    rc = commands_archive.cmd_rm(
+        str(proj),
+        force_outside_base=False,
+        force=True,
+        hook_specs={("pre", "delete"): [object()]},
+    )
+    assert rc == 1
+    assert called["workspace_rm"] == 0

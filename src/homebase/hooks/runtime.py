@@ -21,6 +21,13 @@ from ..metadata.api import append_base_log
 from .api import HookContext
 from .loader import resolve_hook_module
 
+_PRE_MUTATION_ALLOWLIST: dict[str, frozenset[str]] = {
+    "rename": frozenset({"new_path", "new_name"}),
+    "tag_change": frozenset({"plan"}),
+    "new_project": frozenset({"initial_tags", "template", "post_commands", "after_create"}),
+    "delete": frozenset(),
+}
+
 
 @dataclass(frozen=True)
 class HookRunRecord:
@@ -115,14 +122,19 @@ def _run_pre_chain(
                 add_event=_add_event,
                 notify=_notify,
                 log=_log,
-                ask=lambda *_args, **_kwargs: None,
+                ask=_build_tui_ask(app),
             )
             result = module.run(context)
             if isinstance(result, PreResult):
                 if result.decision == "cancel":
                     return PreOutcome(cancelled=True, reason=str(result.reason), change=running_change)
                 if result.decision == "mutate" and isinstance(result.mutated_change, dict):
-                    running_change.update(result.mutated_change)
+                    _apply_pre_mutation(
+                        event=event,
+                        running_change=running_change,
+                        mutated=result.mutated_change,
+                        notify=lambda text: _notify(text, "warn"),
+                    )
         except HOOK_RUN_ERRORS as exc:
             tb_tail = "\n".join(traceback.format_exception(type(exc), exc, exc.__traceback__)[-6:])
             app.call_from_thread(app._show_runtime_error, f"hook {spec.name}", exc, tb_tail)
@@ -131,6 +143,53 @@ def _run_pre_chain(
             app.call_from_thread(app._busy_stop)
             app.hook_running.pop(spec_id, None)
     return PreOutcome(cancelled=False, reason="", change=running_change)
+
+
+def _build_tui_ask(app: Any):
+    def _ask(*_args: object, **kwargs: object) -> str | None:
+        prompt_text = str(kwargs.get("prompt", "confirm?"))
+        kind = str(kwargs.get("kind", "yes_no") or "yes_no")
+        default = kwargs.get("default")
+        response_ready = threading.Event()
+        response: dict[str, str | None] = {"value": None}
+
+        def _set_response(value: str | None) -> None:
+            response["value"] = value
+            response_ready.set()
+
+        def _present() -> None:
+            if kind == "yes_no":
+                confirm_cls = getattr(app, "_confirm_screen_cls", None)
+                if confirm_cls is None:
+                    _set_response(None)
+                    return
+                app.push_screen(confirm_cls(prompt_text), lambda ok: _set_response("yes" if bool(ok) else None))
+                return
+            if kind == "text":
+                input_cls = getattr(app, "_input_screen_cls", None)
+                if input_cls is None:
+                    _set_response(None)
+                    return
+                seed = str(default) if default is not None else ""
+                app.push_screen(input_cls(prompt_text, "value", seed), lambda value: _set_response(value))
+                return
+            if kind == "choice":
+                choices = kwargs.get("choices", [])
+                options = [str(item) for item in choices if str(item).strip()]
+                choice_cls = getattr(app, "_single_choice_screen_cls", None)
+                if choice_cls is None:
+                    _set_response(None)
+                    return
+                entries = [(opt, opt) for opt in options]
+                app.push_screen(choice_cls(prompt_text, entries), lambda value: _set_response(value))
+                return
+            _set_response(None)
+
+        app.call_from_thread(_present)
+        response_ready.wait()
+        return response["value"]
+
+    return _ask
 
 
 def dispatch_post(
@@ -341,7 +400,12 @@ def dispatch_pre_cli(
                     print(f"[hook] {spec_id} cancelled: {reason}", file=os.sys.stderr)
                     return PreOutcome(cancelled=True, reason=reason, change=running_change)
                 if result.decision == "mutate" and isinstance(result.mutated_change, dict):
-                    running_change.update(result.mutated_change)
+                    _apply_pre_mutation(
+                        event=event,
+                        running_change=running_change,
+                        mutated=result.mutated_change,
+                        notify=lambda text: print(f"[hook] warn: {text}", file=os.sys.stderr),
+                    )
         except HOOK_RUN_ERRORS as exc:
             reason = str(exc)
             print(f"[hook] {spec_id} failed: {reason}", file=os.sys.stderr)
@@ -435,6 +499,21 @@ def _run_cli_pre_module(
     if err_text:
         _notify(f"hook {spec.name} stderr: {err_text}", "warn")
     return result
+
+
+def _apply_pre_mutation(
+    *,
+    event: str,
+    running_change: dict[str, object],
+    mutated: dict[str, object],
+    notify,
+) -> None:
+    allowed = _PRE_MUTATION_ALLOWLIST.get(event, frozenset())
+    for key, value in mutated.items():
+        if key not in allowed:
+            notify(f"pre-hook mutation ignored for {event}: key {key!r} is not allowed")
+            continue
+        running_change[key] = value
 
 
 def _run_post_chain(

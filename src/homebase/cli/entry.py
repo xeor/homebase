@@ -109,7 +109,7 @@ def main(argv: list[str]) -> int:
         load_wip_symbol_map,
     )
     from ..config.property_defs import load_property_defs
-    from ..hooks.loader import ignored_custom_pre_hook_files, verify_all_specs
+    from ..hooks.loader import verify_all_specs
     from ..hooks.runtime import dispatch_post_cli, dispatch_pre_cli
     from ..hooks.snapshot import snapshot_target_from_path
     from ..tmux.flow import cmd_tmux_load, cmd_tmux_save
@@ -185,14 +185,6 @@ def main(argv: list[str]) -> int:
             load_archive_timezone_name=load_archive_timezone_name,
         )
         verify_all_specs(runtime_cfg.hook_specs, base_dir)
-        ignored_pre_files = ignored_custom_pre_hook_files(base_dir)
-        if ignored_pre_files:
-            print(
-                "hook warning: custom pre-hooks are discovered but ignored until pre-hook runtime is implemented",
-                file=sys.stderr,
-            )
-            for file_path in ignored_pre_files:
-                print(f"- {file_path}", file=sys.stderr)
     except HookConfigError as exc:
         print(f"hook config error: {exc}", file=sys.stderr)
         return 1

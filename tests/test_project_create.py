@@ -75,3 +75,53 @@ def test_apply_pre_new_project_mutations_updates_namespace() -> None:
     assert payload["template"] == "tpl"
     assert ns.template == "tpl"
     assert ns.mode == "git"
+
+
+def test_on_new_project_submit_applies_pre_mutation_before_plan(tmp_path: Path, monkeypatch) -> None:
+    app = _App()
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(project_create, "load_new_sources", lambda _bd: {})
+    monkeypatch.setattr(
+        project_create.hooks_runtime,
+        "dispatch_pre",
+        lambda *_args, **_kwargs: PreOutcome(
+            cancelled=False,
+            reason="",
+            change={
+                "source": "git",
+                "template": "mut-template",
+                "initial_tags": ["mut-tag"],
+                "post_commands": ["echo hello"],
+                "after_create": "stay",
+            },
+        ),
+    )
+
+    def _capture_plan(ns, raw_input, explicit_name, _sources_cfg, _ctx):
+        captured["mode"] = ns.mode
+        captured["child_key"] = ns.child_key
+        captured["template"] = ns.template
+        captured["tag"] = list(ns.tag)
+        captured["post"] = list(ns.post)
+        captured["raw_input"] = raw_input
+        captured["explicit_name"] = explicit_name
+        return 1, None, None
+
+    monkeypatch.setattr(project_create, "plan_and_apply_one", _capture_plan)
+
+    payload = {
+        "input": "x",
+        "name": "",
+        "source": "auto",
+        "tags": [],
+        "template": "",
+        "post_commands": [],
+        "after_create": "open",
+    }
+    project_create.on_new_project_submit(app, payload, base_dir=tmp_path)
+    assert captured["mode"] == "git"
+    assert captured["child_key"] is None
+    assert captured["template"] == "mut-template"
+    assert captured["tag"] == ["mut-tag"]
+    assert captured["post"] == ["echo hello"]

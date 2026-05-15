@@ -42,6 +42,18 @@ def load_hook_specs(base_dir: Path) -> dict[tuple[str, str], list[HookSpec]]:
 
 def _default_post_specs() -> dict[tuple[str, str], list[HookSpec]]:
     return {
+        ("pre", "delete"): [
+            HookSpec(
+                timing="pre",
+                event="delete",
+                name="confirm_delete",
+                source="bundled",
+                enabled=False,
+                views=(),
+                config={"require_confirm": True},
+                slow_warn_s=HOOK_SLOW_WARN_DEFAULT_S,
+            )
+        ],
         ("post", "rename"): [
             HookSpec(
                 timing="post",

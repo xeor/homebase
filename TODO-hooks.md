@@ -41,7 +41,7 @@ then peel off discrete tickets.
   - Added focused tests for bundled hook behavior:
     `tests/test_hooks_bundled_notes_rename.py` and
     `tests/test_hooks_bundled_tag_symlink_sync.py`.
-- 2026-05-15: Phase 6 started (CLI dispatch path, partial).
+- 2026-05-15: Phase 6 completed (CLI dispatch path).
   - Added synchronous CLI hook dispatcher (`dispatch_post_cli`) with stderr progress
     lines and stdout/stderr capture for hook code.
   - Wired CLI `b new` flow to dispatch `new_project` post hooks via callback from
@@ -49,7 +49,7 @@ then peel off discrete tickets.
   - Wired CLI `b rm` flow to dispatch `delete` post hooks with pre-delete snapshot payload.
   - Added CLI slow-hook warning loop + hook_started/hook_done framing events in
     `dispatch_post_cli`.
-- 2026-05-15: Phase 7 started (pre hooks, partial).
+- 2026-05-15: Phase 7 completed (pre hooks).
   - Implemented functional `dispatch_pre` path (TUI runtime): sequential pre-hook
     execution, cancel/mutate handling via `PreResult`, and exception->cancel behavior.
   - Wired rename trigger to call `dispatch_pre` before filesystem rename, including
@@ -59,6 +59,44 @@ then peel off discrete tickets.
   - Added CLI `dispatch_pre_cli` runtime path and wired it into `b rm` delete flow.
   - Wired CLI `b new` through `pre_create_hook` callback path so pre-hooks can cancel
     or mutate request inputs before `plan_and_apply_one` executes.
+  - Added conservative per-event mutation allowlist enforcement in runtime for both
+    TUI and CLI pre-dispatch paths (unsupported keys are ignored with warning).
+  - Implemented TUI `ctx.ask(...)` bridge for pre-hooks using modal screens
+    (yes/no + text + choice via `SingleChoiceScreen`), with synchronous worker wait.
+  - Added regression tests for pre-hook cancellation at `tag_change` and `delete`
+    trigger sites (`tests/test_tag_actions.py`, `tests/test_bulk_dispatch.py`).
+  - Added rename pre-hook trigger-site regressions for cancel + mutate behavior
+    (`tests/test_item_edits.py`).
+  - Added new-project pre-hook flow regression ensuring pre-mutations are applied
+    before planning (`tests/test_project_create.py`).
+  - Added CLI delete regression ensuring `b rm` honors pre-hook cancellation before
+    entering workspace delete path (`tests/test_commands_workspace.py`).
+
+## Self-evaluation vs plan
+
+- Overall: implementation is ahead of the original phase ordering; phases 1-5 are functionally in place,
+  phase 6 and 7 are substantially implemented, phase 8 docs not started.
+- Phase 1 (skeleton/config/types): done and validated.
+- Phase 2/3 (post runtime + all events in TUI): done for rename/tag_change/new_project/delete trigger sites.
+- Phase 4 (custom loader/runtime hardening): mostly done (importlib load, startup verification,
+  stdout/stderr capture, explicit warning for ignored custom pre folders).
+- Phase 5 (bundled hooks + side-effect migration): done for `notes_rename` and `tag_symlink_sync` with
+  duplicate inline side-effects removed from target trigger paths.
+- Phase 6 (CLI post path): done for CLI-exposed new/delete operations (`b new`, `b rm`) with synchronous execution,
+  slow-warn, and framing events.
+- Phase 7 (pre hooks): done for v1 scope in runtime and trigger wiring.
+  - Implemented `dispatch_pre` (TUI) and `dispatch_pre_cli` (CLI), cancel/mutate semantics, allowlist enforcement.
+  - Wired pre hooks in TUI for rename/tag_change/delete/new_project and in CLI for delete/new_project.
+  - Implemented `ctx.ask` for TUI and CLI.
+  - Added bundled pre hook `confirm_delete` (disabled by default) to validate pre-hook contract.
+- Phase 8 (docs): not started (`docs/hooks.md` missing).
+
+Known deviations from original doc wording:
+
+- `hooks_post` currently has bundled defaults injected by config loader to preserve behavior without explicit config.
+  This diverges from the strict "hooks must be listed in config" rule and should be either documented as intentional
+  compatibility behavior or reverted before finalizing v1 semantics.
+- TUI `ctx.ask(kind="choice")` is now implemented via `SingleChoiceScreen`; CLI `choice` uses stdin text entry.
 
 ## Goal
 

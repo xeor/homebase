@@ -17,7 +17,10 @@ def test_load_hook_specs_empty_config_has_all_slots(tmp_path) -> None:
     assert [spec.name for spec in specs[("post", "tag_change")]] == ["tag_symlink_sync"]
     assert [spec.name for spec in specs[("post", "new_project")]] == ["tag_symlink_sync"]
     assert [spec.name for spec in specs[("post", "delete")]] == ["tag_symlink_sync"]
-    assert all(specs[("pre", event)] == [] for event in ("rename", "tag_change", "new_project", "delete"))
+    assert specs[("pre", "rename")] == []
+    assert specs[("pre", "tag_change")] == []
+    assert specs[("pre", "new_project")] == []
+    assert [spec.name for spec in specs[("pre", "delete")]] == ["confirm_delete"]
 
 
 def test_load_hook_specs_parses_bundled_entry(tmp_path) -> None:
