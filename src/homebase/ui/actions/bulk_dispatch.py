@@ -5,7 +5,7 @@ import subprocess
 from pathlib import Path
 from typing import Any, Callable
 
-from ...core.models import ProjectRow
+from ...core.models import HookTarget, ProjectRow
 from ...hooks import runtime as hooks_runtime
 from ...hooks.snapshot import snapshot_target
 from ...metadata.api import load_base_data
@@ -168,7 +168,7 @@ def on_confirm_bulk(
     failed = 0
     removed_paths: list[Path] = []
     upsert_rows: list[ProjectRow] = []
-    delete_targets: list[object] = []
+    delete_targets: list[HookTarget] = []
     removed_snapshots: dict[Path, dict[str, object]] = {}
     if action == "delete":
         for path in runnable_paths:
@@ -194,6 +194,20 @@ def on_confirm_bulk(
                 "packed": target.packed,
                 "base_meta": dict(target.base_meta),
             }
+        pre_outcome = hooks_runtime.dispatch_pre(
+            app,
+            event="delete",
+            targets=delete_targets,
+            change={
+                "removed_paths": [target.path for target in delete_targets],
+                "removed_snapshots": removed_snapshots,
+            },
+            view=app.view_mode,
+        )
+        if pre_outcome.cancelled:
+            app._log(f"delete cancelled by hook: {pre_outcome.reason}", "warn")
+            app._refresh_side()
+            return
     app._busy_start(f"running {action} on target")
     try:
         for path in runnable_paths:

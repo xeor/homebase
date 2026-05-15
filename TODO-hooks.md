@@ -54,6 +54,8 @@ then peel off discrete tickets.
     execution, cancel/mutate handling via `PreResult`, and exception->cancel behavior.
   - Wired rename trigger to call `dispatch_pre` before filesystem rename, including
     support for mutated `new_path` returned by a pre-hook.
+  - Wired `dispatch_pre` into `tag_change` and `delete` TUI trigger sites with
+    cancel handling and mutable `plan` support for `tag_change`.
 
 ## Goal
 

@@ -6,7 +6,7 @@ from typing import Any, Callable
 
 import yaml
 
-from ...core.models import ProjectRow
+from ...core.models import HookTarget, ProjectRow
 from ...hooks import runtime as hooks_runtime
 from ...hooks.snapshot import snapshot_target
 from ...metadata.api import load_base_data
@@ -222,6 +222,29 @@ def on_pick_tags(
         app._log("tag update cancelled", "warn")
         app._refresh_side()
         return
+
+    pre_targets: list[HookTarget] = []
+    for path in paths:
+        hit = app._find_row(path)
+        if hit is None:
+            continue
+        rows, idx = hit
+        row = rows[idx]
+        pre_targets.append(snapshot_target(row, load_base_data(path)))
+    pre_outcome = hooks_runtime.dispatch_pre(
+        app,
+        event="tag_change",
+        targets=pre_targets,
+        change={"plan": dict(plan)},
+        view=app.view_mode,
+    )
+    if pre_outcome.cancelled:
+        app._log(f"tag update cancelled by hook: {pre_outcome.reason}", "warn")
+        app._refresh_side()
+        return
+    plan_change = pre_outcome.change.get("plan")
+    if isinstance(plan_change, dict):
+        plan = {str(tag): str(op) for tag, op in plan_change.items()}
 
     success = 0
     failed = 0
