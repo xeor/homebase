@@ -28,3 +28,4 @@ class HookContext:
     status_update: StatusUpdateCallable
     log: LogCallable
     ask: AskCallable
+    mode: str = "event"

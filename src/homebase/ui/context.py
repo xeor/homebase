@@ -34,6 +34,7 @@ class UIContext:
         default_factory=dict
     )
     hook_specs: dict[tuple[str, str], list[object]] = field(default_factory=dict)
+    hook_refresh_config: object | None = None
 
 
 def build_ui_context(base_dir: Path) -> UIContext:

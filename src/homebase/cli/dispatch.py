@@ -24,6 +24,7 @@ def dispatch_command(
     cmd_setup: Callable[[Path, Path, bool], int],
     cmd_cache_warm: Callable[[], int],
     cmd_tags_sync: Callable[[Path, bool, bool], int],
+    cmd_hooks_refresh: Callable[..., int],
     cmd_utils: Callable[[Path, str], int],
     cmd_archive_mv: Callable[[Path, str], int],
     cmd_cd: Callable[[Path, str], int],
@@ -80,6 +81,20 @@ def dispatch_command(
     if ns.command == "tags":
         if ns.tags_subcommand == "sync-_tags":
             return cmd_tags_sync(base_dir, True, bool(ns.debug))
+        return 1
+    if ns.command == "hooks":
+        if ns.hooks_subcommand == "refresh":
+            return cmd_hooks_refresh(
+                base_dir,
+                project_filters=list(getattr(ns, "projects", []) or []),
+                tag_filters=list(getattr(ns, "tags", []) or []),
+                filter_expr=str(getattr(ns, "filter_expr", "") or ""),
+                hook_filter=list(getattr(ns, "hook_filter", []) or []),
+                event_filter=list(getattr(ns, "event_filter", []) or []),
+                select_all=bool(getattr(ns, "all_projects", False)),
+                show_archived=bool(getattr(ns, "archived", False)),
+                dry_run=bool(getattr(ns, "dry_run", False)),
+            )
         return 1
     if ns.command == "utils":
         return cmd_utils(base_dir, str(ns.utils_subcommand))

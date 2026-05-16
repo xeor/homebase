@@ -42,3 +42,8 @@ def test_bare_token() -> None:
 def test_empty_or_none() -> None:
     assert classify_input(None) == "empty"
     assert classify_input("") == "empty"
+
+
+def test_path_single_dot() -> None:
+    assert is_path_shaped(".")
+    assert classify_input(".") == "path"

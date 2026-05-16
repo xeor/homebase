@@ -17,6 +17,9 @@ summaries the binary already prints aren't disturbed.
 
 from __future__ import annotations
 
+import os
+from pathlib import Path
+
 
 def shell_init_script(shell: str) -> str:
     """Return the wrapper script for ``shell`` (bash / zsh / fish)."""
@@ -26,6 +29,22 @@ def shell_init_script(shell: str) -> str:
     if value == "fish":
         return _fish_init_script()
     raise ValueError(f"unsupported shell: {shell}")
+
+
+def shell_init_help_text() -> str:
+    shell = Path(str(os.environ.get("SHELL", "")).strip() or "/bin/zsh").name
+    detected = shell if shell in {"bash", "zsh", "fish"} else "zsh"
+    return (
+        "`b shell-init` prints a small wrapper function for your shell.\n"
+        "The wrapper lets `b` request a parent-shell `cd` after commands like `b new` / `b cd`\n"
+        "instead of falling back to a child sub-shell.\n\n"
+        "Usage:\n"
+        "  b shell-init bash >> ~/.bashrc\n"
+        "  b shell-init zsh >> ~/.zshrc\n"
+        "  b shell-init fish > ~/.config/fish/conf.d/b.fish\n\n"
+        f"Detected shell: {shell}\n"
+        f"Suggested: b shell-init {detected}"
+    )
 
 
 def _bash_zsh_init_script() -> str:

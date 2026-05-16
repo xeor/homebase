@@ -77,6 +77,18 @@ def test_apply_pre_new_project_mutations_updates_namespace() -> None:
     assert ns.mode == "git"
 
 
+def test_apply_pre_new_project_mutations_auto_source_clears_overrides() -> None:
+    ns = SimpleNamespace(mode="git", child_key="custom", tag=[], template="")
+    payload: dict[str, object] = {"tags": [], "template": ""}
+    project_create._apply_pre_new_project_mutations(
+        payload=payload,
+        ns=ns,
+        change={"source": "auto"},
+    )
+    assert ns.mode is None
+    assert ns.child_key is None
+
+
 def test_on_new_project_submit_applies_pre_mutation_before_plan(tmp_path: Path, monkeypatch) -> None:
     app = _App()
     captured: dict[str, object] = {}

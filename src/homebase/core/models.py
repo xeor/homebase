@@ -217,6 +217,8 @@ class HookSpec:
     views: tuple[str, ...]
     config: dict[str, object]
     slow_warn_s: float
+    refresh_enabled: bool = False
+    refresh_min_interval_s: float = 60.0
 
 
 @dataclass(frozen=True)

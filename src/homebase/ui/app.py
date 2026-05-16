@@ -103,6 +103,7 @@ from ..core.constants import (
     TABLE_SIDE_WIDTH_PRESETS,
     UI_TICK_BUSY_S,
     UI_TICK_GIT_REFRESH_S,
+    UI_TICK_HOOK_REFRESH_S,
     UI_TICK_MICRO_RECONCILE_S,
     UI_TICK_PANE_PROBE_S,
     UI_TICK_QUERY_FLUSH_S,
@@ -596,6 +597,7 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
     def _init_hooks_state(self) -> None:
         self.hook_recent: dict[tuple[str, str], list[HookRunRecord]] = {}
         self.hook_running: dict[str, float] = {}
+        self.hook_refresh_last: dict[tuple[Path, str], float] = {}
 
     def _init_reconcile_state(self) -> None:
         self.reconcile_config = {
@@ -843,6 +845,7 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
         self.set_interval(UI_TICK_PANE_PROBE_S, self._maybe_probe_open_panes)
         self.set_interval(UI_TICK_GIT_REFRESH_S, self._maybe_refresh_visible_git)
         self.set_interval(UI_TICK_MICRO_RECONCILE_S, self._maybe_run_micro_reconcile)
+        self.set_interval(UI_TICK_HOOK_REFRESH_S, self._maybe_run_hook_refresh)
         for wid in (
             self.query_one("#side", Vertical),
             self.query_one("#side_main_tabs", Tabs),
@@ -1041,6 +1044,7 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
             "notes_open",
             "tags_set",
             "reconcile_selection_cache",
+            "hooks_refresh",
             "suffix_set",
             "rename_item",
             "review_meta",
@@ -1059,6 +1063,7 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
             "reconcile_all_cache",
             "reload_global_config",
             "edit_global_config",
+            "hooks_refresh_view",
         }
 
         def _scope_for_action(action_id: str) -> str:
@@ -1854,6 +1859,95 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
             return
         self._set_reconcile_skip_reason(f"running {mode} micro batch={len(rows)}")
         self._start_reconcile_rows(mode, "micro", [r.path for r in rows])
+
+    def _maybe_run_hook_refresh(self) -> None:
+        if self.fast_exit_requested:
+            return
+        cfg = getattr(self.ctx, "hook_refresh_config", None)
+        if cfg is None or not bool(getattr(cfg, "enabled", False)):
+            return
+        worker = getattr(cfg, "worker", None)
+        skip_when_busy = bool(getattr(worker, "skip_when_busy", True))
+        if skip_when_busy and (
+            self._critical_job_active()
+            or self.cache_worker_running
+            or self.reconcile_worker_running
+        ):
+            return
+        from ..hooks.refresh import dispatch_refresh_tui
+        from ..hooks.snapshot import snapshot_target
+
+        rows = self.active_rows if self.view_mode == MODE_ACTIVE else self.archived_rows
+        if not rows:
+            return
+        now = time.time()
+        candidates: list[tuple[object, object]] = []
+        for (timing, _event), specs in self.ctx.hook_specs.items():
+            if timing != "post":
+                continue
+            for spec in specs:
+                if not getattr(spec, "enabled", False):
+                    continue
+                if not getattr(spec, "refresh_enabled", False):
+                    continue
+                if spec.views and self.view_mode not in spec.views:
+                    continue
+                min_interval = float(getattr(spec, "refresh_min_interval_s", 60.0))
+                for row in rows:
+                    if spec.event == "tag_change" and not row.tags:
+                        continue
+                    last = self.hook_refresh_last.get((row.path, spec.name), 0.0)
+                    if last + min_interval > now:
+                        continue
+                    candidates.append((row, spec))
+        if not candidates:
+            return
+        batch_size = max(1, int(getattr(worker, "batch_size", 4)))
+        candidates.sort(key=lambda rs: self.hook_refresh_last.get((rs[0].path, rs[1].name), 0.0))
+        batch = candidates[:batch_size]
+        grouped: dict[tuple[str, str], list[object]] = {}
+        for row, spec in batch:
+            key = (spec.name, spec.event)
+            grouped.setdefault(key, []).append(
+                snapshot_target(row, dict(row.base_meta if hasattr(row, "base_meta") else {}))
+            )
+            self.hook_refresh_last[(row.path, spec.name)] = now
+        for (spec_name, spec_event), targets in grouped.items():
+            dispatch_refresh_tui(
+                self,
+                targets=targets,
+                view=self.view_mode,
+                hook_filter=(spec_name,),
+                event_filter=(spec_event,),
+                source="worker",
+                require_refresh_enabled=True,
+            )
+
+    def _hooks_refresh_action(self, *, workspace_scope: bool) -> None:
+        from ..hooks.refresh import dispatch_refresh_tui
+        from ..hooks.snapshot import snapshot_target
+
+        if workspace_scope:
+            rows = self.active_rows if self.view_mode == MODE_ACTIVE else self.archived_rows
+        else:
+            rows = self._target_rows()
+        if not rows:
+            self._log("hooks refresh skipped: no target", "warn")
+            self._refresh_side()
+            return
+        targets = [
+            snapshot_target(r, dict(r.base_meta if hasattr(r, "base_meta") else {}))
+            for r in rows
+        ]
+        dispatch_refresh_tui(
+            self,
+            targets=targets,
+            view=self.view_mode,
+            source="tui-action",
+            require_refresh_enabled=False,
+        )
+        self._log(f"hooks refresh requested for {len(targets)} target(s)", "info")
+        self._refresh_side()
 
     def _maybe_refresh_visible_git(self) -> None:
         textual_ui_git_refresh.maybe_refresh_visible_git(self)

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 
 from ..core.constants import HOOK_EVENTS, HOOK_SLOW_WARN_DEFAULT_S, HOOK_TIMINGS, HOOK_VIEWS
@@ -9,6 +10,19 @@ from .store import load_global_config_dict
 
 class HookConfigError(ValueError):
     """Raised on malformed or unresolvable hook config."""
+
+
+@dataclass(frozen=True)
+class HookRefreshWorkerConfig:
+    batch_size: int = 4
+    jitter_pct: float = 15.0
+    skip_when_busy: bool = True
+
+
+@dataclass(frozen=True)
+class HookRefreshConfig:
+    enabled: bool = False
+    worker: HookRefreshWorkerConfig = HookRefreshWorkerConfig()
 
 
 def load_hook_specs(base_dir: Path) -> dict[tuple[str, str], list[HookSpec]]:
@@ -60,7 +74,7 @@ def _default_post_specs() -> dict[tuple[str, str], list[HookSpec]]:
                 event="rename",
                 name="notes_rename",
                 source="bundled",
-                enabled=True,
+                enabled=False,
                 views=(),
                 config={},
                 slow_warn_s=HOOK_SLOW_WARN_DEFAULT_S,
@@ -70,7 +84,7 @@ def _default_post_specs() -> dict[tuple[str, str], list[HookSpec]]:
                 event="rename",
                 name="tag_symlink_sync",
                 source="bundled",
-                enabled=True,
+                enabled=False,
                 views=(),
                 config={},
                 slow_warn_s=HOOK_SLOW_WARN_DEFAULT_S,
@@ -82,7 +96,7 @@ def _default_post_specs() -> dict[tuple[str, str], list[HookSpec]]:
                 event="tag_change",
                 name="tag_symlink_sync",
                 source="bundled",
-                enabled=True,
+                enabled=False,
                 views=(),
                 config={},
                 slow_warn_s=HOOK_SLOW_WARN_DEFAULT_S,
@@ -94,7 +108,7 @@ def _default_post_specs() -> dict[tuple[str, str], list[HookSpec]]:
                 event="new_project",
                 name="tag_symlink_sync",
                 source="bundled",
-                enabled=True,
+                enabled=False,
                 views=(),
                 config={},
                 slow_warn_s=HOOK_SLOW_WARN_DEFAULT_S,
@@ -106,7 +120,7 @@ def _default_post_specs() -> dict[tuple[str, str], list[HookSpec]]:
                 event="delete",
                 name="tag_symlink_sync",
                 source="bundled",
-                enabled=True,
+                enabled=False,
                 views=(),
                 config={},
                 slow_warn_s=HOOK_SLOW_WARN_DEFAULT_S,
@@ -147,6 +161,14 @@ def _parse_spec(timing: str, event: str, idx: int, item: object) -> HookSpec:
         raise HookConfigError(
             f"hooks_{timing}.{event}.{name}: invalid `slow_warn_s`: {exc}"
         ) from exc
+    refresh_enabled = bool(item.get("refresh_enabled", False))
+    refresh_min = item.get("refresh_min_interval_s", 60.0)
+    try:
+        refresh_min_interval_s = float(refresh_min)
+    except (TypeError, ValueError) as exc:
+        raise HookConfigError(
+            f"hooks_{timing}.{event}.{name}: invalid `refresh_min_interval_s`: {exc}"
+        ) from exc
     return HookSpec(
         timing=timing,
         event=event,
@@ -156,4 +178,40 @@ def _parse_spec(timing: str, event: str, idx: int, item: object) -> HookSpec:
         views=tuple(views),
         config=dict(config_raw),
         slow_warn_s=max(1.0, slow_warn_s),
+        refresh_enabled=refresh_enabled,
+        refresh_min_interval_s=max(1.0, refresh_min_interval_s),
+    )
+
+
+def load_hook_refresh_config(base_dir: Path) -> HookRefreshConfig:
+    raw = load_global_config_dict(base_dir)
+    if not isinstance(raw, dict):
+        return HookRefreshConfig()
+    section = raw.get("hooks_refresh")
+    if section is None:
+        return HookRefreshConfig()
+    if not isinstance(section, dict):
+        raise HookConfigError("'hooks_refresh' must be a mapping")
+    enabled = bool(section.get("enabled", False))
+    worker_raw = section.get("worker", {})
+    if worker_raw is None:
+        worker_raw = {}
+    if not isinstance(worker_raw, dict):
+        raise HookConfigError("'hooks_refresh.worker' must be a mapping")
+    try:
+        batch_size = int(worker_raw.get("batch_size", 4))
+    except (TypeError, ValueError) as exc:
+        raise HookConfigError(f"hooks_refresh.worker.batch_size: {exc}") from exc
+    try:
+        jitter_pct = float(worker_raw.get("jitter_pct", 15.0))
+    except (TypeError, ValueError) as exc:
+        raise HookConfigError(f"hooks_refresh.worker.jitter_pct: {exc}") from exc
+    skip_when_busy = bool(worker_raw.get("skip_when_busy", True))
+    return HookRefreshConfig(
+        enabled=enabled,
+        worker=HookRefreshWorkerConfig(
+            batch_size=max(1, batch_size),
+            jitter_pct=max(0.0, min(100.0, jitter_pct)),
+            skip_when_busy=skip_when_busy,
+        ),
     )

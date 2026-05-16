@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import os
 import sys
+import time
 from argparse import Namespace
 from pathlib import Path
 from typing import Callable
@@ -20,6 +22,52 @@ _SHAPE_TO_SOURCE = {
     "bare": "empty",
     "path": "local",
 }
+
+
+def _debug_enabled() -> bool:
+    raw = str(os.environ.get("HOMEBASE_DEBUG", "")).strip().lower()
+    return raw in {"1", "true", "yes", "on", "y"}
+
+
+def _debug_log(message: str) -> None:
+    if not _debug_enabled():
+        return
+    print(f"[debug] new: {message}", file=sys.stderr)
+
+
+def _local_move_contains_cwd(plan: NewPlan, ctx: NewContext) -> bool:
+    if plan.source_key != "local":
+        return False
+    if not isinstance(plan.log_payload, dict):
+        return False
+    source = plan.log_payload.get("source")
+    if not isinstance(source, str) or not source.strip():
+        return False
+    src = Path(source)
+    if src == ctx.cwd:
+        return True
+    try:
+        ctx.cwd.relative_to(src)
+        return True
+    except ValueError:
+        return False
+
+
+def _local_move_handoff_target(plan: NewPlan, ctx: NewContext) -> Path | None:
+    if plan.source_key != "local":
+        return None
+    if not isinstance(plan.log_payload, dict):
+        return None
+    source = plan.log_payload.get("source")
+    if not isinstance(source, str) or not source.strip():
+        return None
+    src = Path(source)
+    target = plan.target
+    try:
+        rel = ctx.cwd.relative_to(src)
+    except ValueError:
+        return target if ctx.cwd == src else None
+    return (target / rel).resolve()
 
 
 def _pick_url_source(url: str, git_hosts: dict[str, str]) -> str:
@@ -50,6 +98,8 @@ def _pick_url_source(url: str, git_hosts: dict[str, str]) -> str:
 def autodetect_source_key(
     raw_input: str | None,
     sources_cfg: dict[str, dict],
+    *,
+    cwd: Path | None = None,
 ) -> str | None:
     if raw_input is None:
         return None
@@ -59,7 +109,14 @@ def autodetect_source_key(
             sources_cfg.get("git", {}).get("config", {}).get("hosts") or {}
         )
         return _pick_url_source(raw_input, git_hosts)
-    return _SHAPE_TO_SOURCE.get(shape)
+    source_key = _SHAPE_TO_SOURCE.get(shape)
+    if source_key != "local" or raw_input is None:
+        return source_key
+    raw_path = Path(str(raw_input)).expanduser()
+    resolved = raw_path.resolve() if raw_path.is_absolute() else ((cwd or Path.cwd().resolve()) / raw_path).resolve()
+    if resolved.exists():
+        return "local"
+    return "local" if raw_path.is_absolute() else "empty"
 
 
 def _resolve_base_key(child_key: str, sources_cfg: dict[str, dict]) -> str | None:
@@ -129,8 +186,14 @@ def plan_and_apply_one(
     ``plan`` is the resolved plan (also returned on dry-run). The
     function never spawns shells — that's the caller's job.
     """
+    started = time.time()
+    _debug_log(f"start raw_input={raw_input!r} explicit_name={explicit_name!r}")
     mode = getattr(ns, "mode", None)
     child_key = getattr(ns, "child_key", None)
+    if mode == "auto":
+        mode = None
+    if child_key == "auto":
+        child_key = None
     forced = bool(mode) or bool(child_key)
 
     if child_key:
@@ -138,7 +201,7 @@ def plan_and_apply_one(
     elif mode:
         source_key = str(mode)
     else:
-        source_key = autodetect_source_key(raw_input, sources_cfg) or ""
+        source_key = autodetect_source_key(raw_input, sources_cfg, cwd=ctx.cwd) or ""
 
     if getattr(ns, "ask_source", False) and not forced:
         try:
@@ -156,6 +219,7 @@ def plan_and_apply_one(
         return 2, None, None
 
     base_key = _resolve_base_key(source_key, sources_cfg)
+    _debug_log(f"resolved source source_key={source_key!r} base_key={base_key!r}")
     if base_key is None:
         print(f"b new: invalid source: {source_key}", file=sys.stderr)
         return 2, None, None
@@ -196,6 +260,10 @@ def plan_and_apply_one(
         explicit_name = explicit_name if explicit_name is not None else raw_input
         raw_input = None
 
+    if base_key == "empty" and raw_input and classify_input(raw_input) == "path":
+        explicit_name = explicit_name or Path(str(raw_input).rstrip("/\\")).name
+        raw_input = None
+
     if options.ask_name:
         if explicit_name is not None:
             print(
@@ -220,7 +288,9 @@ def plan_and_apply_one(
         return 2, None, None
 
     try:
+        _debug_log(f"plan start source={base_key}")
         plan = source.plan(raw_input, name, options, ctx)
+        _debug_log(f"plan done target={plan.target}")
     except ValueError as exc:
         print(f"b new: {exc}", file=sys.stderr)
         return 1, None, None
@@ -244,7 +314,10 @@ def plan_and_apply_one(
             return 1, None, plan
 
     try:
+        _debug_log(f"apply start source={base_key} target={plan.target}")
         result = source.apply(plan, ctx)
+        elapsed = max(0.0, time.time() - started)
+        _debug_log(f"apply done target={result.target} elapsed={elapsed:.3f}s")
     except ValueError as exc:
         print(f"b new: {exc}", file=sys.stderr)
         return 1, None, plan
@@ -282,11 +355,26 @@ def _process_item(
             post_create_hook(result, plan, raw_input, explicit_name)
         if plan is not None:
             print(format_summary(plan))
+            moved_cwd = _local_move_contains_cwd(plan, ctx)
+            if moved_cwd:
+                suggested_cd = _local_move_handoff_target(plan, ctx) or result.target
+                wrapper_handoff = bool(os.environ.get("HOMEBASE_CD_FILE", "")) and not bool(result.open_shell)
+                if wrapper_handoff:
+                    from ...tmux.flow import open_shell_in_dir
+
+                    _debug_log("moved cwd detected; writing wrapper cd handoff")
+                    _ = open_shell_in_dir(suggested_cd)
+                else:
+                    print(
+                        f"warning: moved current working directory; run `cd {suggested_cd}` (or use `b shell-init`)",
+                        file=sys.stderr,
+                    )
         else:
             print(f"created: {result.target}")
         if result.open_shell:
             from ...tmux.flow import open_shell_in_dir
 
+            _debug_log("opening shell in target")
             return open_shell_in_dir(result.target)
     return rc
 

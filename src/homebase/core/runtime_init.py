@@ -22,6 +22,7 @@ class RuntimeConfig:
     reconcile_config: dict[str, dict[str, object]]
     cache_profile_table: dict[str, dict[str, dict[str, object]]]
     hook_specs: dict[tuple[str, str], list[Any]]
+    hook_refresh_config: Any
     archive_tz_name: str
     archive_tz: Any
 
@@ -43,6 +44,7 @@ def load_runtime_config(
     load_reconcile_config: Callable[[Path], dict[str, dict[str, object]]],
     load_cache_profile_table: Callable[[Path], dict[str, dict[str, dict[str, object]]]],
     load_hook_specs: Callable[[Path], dict[tuple[str, str], list[Any]]],
+    load_hook_refresh_config: Callable[[Path], Any],
     load_archive_timezone_name: Callable[[Path], str],
 ) -> RuntimeConfig:
     archive_tz_name = load_archive_timezone_name(base_dir)
@@ -72,6 +74,7 @@ def load_runtime_config(
         reconcile_config=load_reconcile_config(base_dir),
         cache_profile_table=load_cache_profile_table(base_dir),
         hook_specs=load_hook_specs(base_dir),
+        hook_refresh_config=load_hook_refresh_config(base_dir),
         archive_tz_name=archive_tz_name,
         archive_tz=archive_tz,
     )

@@ -135,6 +135,22 @@ BUILTIN_ACTIONS: dict[str, BuiltinActionMeta] = {
         view_scope=("active", "archive"),
         default_confirm_prompt=None,
     ),
+    "hooks_refresh": BuiltinActionMeta(
+        id="hooks_refresh",
+        default_label="Refresh hooks on target",
+        help_text="Re-run refresh logic for refreshable post-hooks on the target rows",
+        scope="target",
+        view_scope=("active", "archive"),
+        default_confirm_prompt=None,
+    ),
+    "hooks_refresh_view": BuiltinActionMeta(
+        id="hooks_refresh_view",
+        default_label="Refresh hooks for current view",
+        help_text="Re-run refresh logic for refreshable post-hooks across all rows in view",
+        scope="workspace",
+        view_scope=("active", "archive"),
+        default_confirm_prompt=None,
+    ),
     "suffix_set": BuiltinActionMeta(
         id="suffix_set",
         default_label="Suffix...",
@@ -467,6 +483,7 @@ UI_TICK_RECONCILE_USAGE_FLUSH_S = 5.0
 UI_TICK_PANE_PROBE_S = 0.5
 UI_TICK_GIT_REFRESH_S = 0.8
 UI_TICK_MICRO_RECONCILE_S = 0.25
+UI_TICK_HOOK_REFRESH_S = 2.0
 BENCHMARK_SUITE_VERSION = 1
 BENCHMARK_SCORE_MODEL = "pow(day/elapsed, k)"
 BENCHMARK_SCORE_REF_SECONDS = 30.0

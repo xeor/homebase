@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import os
 import shutil
+import time
 from pathlib import Path
 
 from ....cache.api import cache_upsert_project_fast
@@ -9,12 +11,22 @@ from ....metadata.api import (
     append_base_log,
     ensure_base_marker,
     save_base_tags,
-    sync_tag_symlinks,
 )
 from ..base import NewContext, NewOptions, NewPlan, NewResult, Source
 from ..detect import classify_input
 from ..name import resolve_final_name
 from ..registry import register_source
+
+
+def _debug_enabled() -> bool:
+    raw = str(os.environ.get("HOMEBASE_DEBUG", "")).strip().lower()
+    return raw in {"1", "true", "yes", "on", "y"}
+
+
+def _debug_log(message: str) -> None:
+    if not _debug_enabled():
+        return
+    print(f"[debug] local: {message}", file=os.sys.stderr)
 
 
 @register_source
@@ -30,8 +42,9 @@ class LocalDirSource(Source):
     def infer_name(self, raw_input, ctx: NewContext) -> str | None:
         if not raw_input:
             return None
-        cleaned = str(raw_input).rstrip("/\\")
-        return Path(cleaned).name or None
+        raw = Path(str(raw_input)).expanduser()
+        src = raw.resolve() if raw.is_absolute() else (ctx.cwd / raw).resolve()
+        return src.name or None
 
     def plan(
         self,
@@ -62,6 +75,7 @@ class LocalDirSource(Source):
             ts_name=options.ts_name,
             alpha_name=options.alpha_name,
         )
+        open_shell = options.open and not is_under(ctx.cwd.resolve(), src)
         target = ctx.base_dir / final_name
         steps = [
             f"move {src} -> {target}",
@@ -84,27 +98,37 @@ class LocalDirSource(Source):
                 "destination": str(target),
             },
             input=raw_input,
-            open_shell=options.open,
+            open_shell=open_shell,
             signals=[str(src)],
         )
 
     def apply(self, plan: NewPlan, ctx: NewContext) -> NewResult:
+        started = time.time()
         target = plan.target
         if target.exists():
             raise ValueError(f"target already exists: {target}")
         src = Path(plan.log_payload["source"])
+        _debug_log(f"apply start src={src} target={target}")
         target.parent.mkdir(parents=True, exist_ok=True)
         try:
+            t0 = time.time()
             shutil.move(str(src), str(target))
+            _debug_log(f"move done elapsed={max(0.0, time.time() - t0):.3f}s")
         except (OSError, shutil.Error) as exc:
             raise ValueError(f"move failed: {exc}") from exc
         try:
+            t0 = time.time()
             ensure_base_marker(target)
+            _debug_log(f"marker done elapsed={max(0.0, time.time() - t0):.3f}s")
             if plan.tags:
                 clean = sorted({t.strip() for t in plan.tags if t.strip()})
                 if clean:
+                    t0 = time.time()
                     save_base_tags(ctx.base_dir, target, clean)
+                    _debug_log(f"save tags done elapsed={max(0.0, time.time() - t0):.3f}s")
+            t0 = time.time()
             append_base_log(target, plan.log_kind, plan.log_payload)
+            _debug_log(f"append log done elapsed={max(0.0, time.time() - t0):.3f}s")
         except (OSError, ValueError):
             # If marker/log fails, attempt to put src back.
             try:
@@ -112,6 +136,8 @@ class LocalDirSource(Source):
             except (OSError, shutil.Error):
                 pass
             raise
-        sync_tag_symlinks(ctx.base_dir)
+        t0 = time.time()
         cache_upsert_project_fast(ctx.base_dir, target)
+        _debug_log(f"cache upsert done elapsed={max(0.0, time.time() - t0):.3f}s")
+        _debug_log(f"apply done total_elapsed={max(0.0, time.time() - started):.3f}s")
         return NewResult(target=target, open_shell=plan.open_shell)

@@ -30,6 +30,7 @@ def test_load_runtime_config_uses_loaders(tmp_path: Path) -> None:
         load_reconcile_config=lambda _p: {},
         load_cache_profile_table=lambda _p: {},
         load_hook_specs=lambda _p: {},
+        load_hook_refresh_config=lambda _p: None,
         load_archive_timezone_name=lambda _p: "UTC",
     )
     assert cfg.property_defs == ["a"]

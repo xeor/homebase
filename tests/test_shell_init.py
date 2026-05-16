@@ -53,10 +53,24 @@ def test_parser_accepts_shell_init_subcommand() -> None:
     assert ns.shell == "fish"
 
 
+def test_parser_accepts_shell_init_without_shell_arg() -> None:
+    parser = cli_parser.build_cli_parser()
+    ns = parser.parse_args(["shell-init"])
+    assert ns.command == "shell-init"
+    assert ns.shell == ""
+
+
 def test_parser_rejects_unknown_shell_in_shell_init() -> None:
     parser = cli_parser.build_cli_parser()
     with pytest.raises(SystemExit):
         parser.parse_args(["shell-init", "powershell"])
+
+
+def test_shell_init_help_text_mentions_parent_shell_cd(monkeypatch) -> None:
+    monkeypatch.setenv("SHELL", "/bin/zsh")
+    text = shell_init.shell_init_help_text()
+    assert "parent-shell `cd`" in text
+    assert "b shell-init zsh" in text
 
 
 # ============================================================

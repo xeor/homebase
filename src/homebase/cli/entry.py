@@ -15,6 +15,7 @@ from ..commands.archive import (
     cmd_fix,
     cmd_rm,
 )
+from ..commands.hooks_cmd import cmd_hooks_refresh
 from ..commands.setup import (
     cmd_cache_warm,
     cmd_cd,
@@ -39,7 +40,7 @@ from ..workspace.startup_validation import run_startup_validations
 from .completion import completion_candidates, completion_script
 from .dispatch import dispatch_command
 from .parser import build_cli_parser
-from .shell_init import shell_init_script
+from .shell_init import shell_init_help_text, shell_init_script
 
 
 def resolve_base_dir(base_folder_arg: str | None) -> Path:
@@ -93,7 +94,7 @@ def _resolve_filter_expression(base_dir: Path, expr: str):
 
 def main(argv: list[str]) -> int:
     from ..config import prefs as app_prefs  # noqa: F401  (alias for clarity)
-    from ..config.hooks import HookConfigError, load_hook_specs
+    from ..config.hooks import HookConfigError, load_hook_refresh_config, load_hook_specs
     from ..config.prefs import (
         load_actions,
         load_archive_timezone_name,
@@ -135,7 +136,11 @@ def main(argv: list[str]) -> int:
     if ns.command == "completion":
         return _cmd_completion(str(ns.shell))
     if ns.command == "shell-init":
-        print(shell_init_script(str(ns.shell)), end="")
+        shell_name = str(getattr(ns, "shell", "") or "").strip()
+        if not shell_name:
+            print(shell_init_help_text())
+            return 0
+        print(shell_init_script(shell_name), end="")
         return 0
     if ns.command == "__complete":
         # Strip a leading ``--`` separator that newer shell wrappers
@@ -182,6 +187,7 @@ def main(argv: list[str]) -> int:
             load_reconcile_config=load_reconcile_config,
             load_cache_profile_table=load_cache_profile_table,
             load_hook_specs=load_hook_specs,
+            load_hook_refresh_config=load_hook_refresh_config,
             load_archive_timezone_name=load_archive_timezone_name,
         )
         verify_all_specs(runtime_cfg.hook_specs, base_dir)
@@ -224,6 +230,7 @@ def main(argv: list[str]) -> int:
             for scope, table in runtime_cfg.cache_profile_table.items()
         },
         hook_specs=dict(runtime_cfg.hook_specs),
+        hook_refresh_config=runtime_cfg.hook_refresh_config,
     )
 
     initial_filter_expr = runtime_init.resolve_initial_filter_expression(
@@ -303,7 +310,10 @@ def main(argv: list[str]) -> int:
         if source is not None:
             source_text = str(source).strip()
             builtin = {"empty", "local", "git", "download", "downloaded"}
-            if source_text in builtin:
+            if source_text == "auto":
+                ns_obj.mode = None
+                ns_obj.child_key = None
+            elif source_text in builtin:
                 ns_obj.mode = source_text
                 ns_obj.child_key = None
             elif source_text:
@@ -376,6 +386,11 @@ def main(argv: list[str]) -> int:
                 bd,
                 verbose=verbose,
                 debug=debug,
+            ),
+            cmd_hooks_refresh=lambda bd, **kw: cmd_hooks_refresh(
+                bd,
+                hook_specs=runtime_cfg.hook_specs,
+                **kw,
             ),
             cmd_utils=cmd_utils,
             cmd_archive_mv=cmd_archive_mv,

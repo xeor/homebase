@@ -276,75 +276,128 @@ reconcile:
     update_batch_size: 8
 
 # Hooks: pre/post event automation.
+#
+# Every entry below accepts these common fields (all optional except
+# name + source):
+#
+#   name: <str>                   required; module name
+#   source: bundled | custom      default custom
+#   enabled: bool                 default true
+#   views: [active, archive]      default both (empty list = both)
+#   slow_warn_s: number           default 30.0; min 1.0
+#   refresh_enabled: bool         default false; opt-in for the periodic
+#                                 refresh worker (manual triggers ignore)
+#   refresh_min_interval_s: num   default 60.0; per (project, hook) floor
+#   config: { ... }               per-hook keys; see below per entry
+#
+# Bundled hook reference (see docs/hooks.md for full prose):
+#
+#   pre/delete/confirm_delete         config.require_confirm: bool (default true)
+#   post/rename/notes_rename          no config keys (reads global notes:)
+#   post/rename/tag_symlink_sync      no config keys
+#   post/rename/notify                config.level: info|warn|error (default info)
+#   post/tag_change/tag_symlink_sync  no config keys
+#   post/tag_change/notify            config.level: info|warn|error (default info)
+#   post/tag_change/tag_files_sync    config.root: path|~|"" (default
+#                                       <base>/.homebase/tag-files/)
+#                                     config.dry_run: bool (default false)
+#                                     refreshable (worker eligible)
+#   post/new_project/tag_symlink_sync no config keys
+#   post/new_project/notify           config.level: info|warn|error (default info)
+#   post/delete/tag_symlink_sync      no config keys
+#   post/delete/notify                config.level: info|warn|error (default info)
+
 hooks_pre:
   delete:
-    # Bundled pre-hook example (disabled by default in runtime defaults).
+    # Pop a yes/no confirmation before delete proceeds.
     - name: confirm_delete
       source: bundled
       enabled: false
       views: [active, archive]
       config:
-        require_confirm: true
+        require_confirm: true       # bool; false makes the hook a no-op
 
 hooks_post:
   rename:
-    # Keep notes path in sync on rename.
+    # Keep the notes file in sync with the project rename.
+    # Uses global `notes:` config (rename.command etc.).
     - name: notes_rename
       source: bundled
       enabled: true
       views: [active, archive]
-      config: {}
+      config: {}                    # no per-hook keys
 
-    # Rebuild/repair _tags symlink index after rename.
+    # Rebuild/repair the <base>/_tags/<tag>/ symlink index.
     - name: tag_symlink_sync
       source: bundled
       enabled: true
       slow_warn_s: 30
-      config: {}
+      config: {}                    # no per-hook keys
 
-    # Minimal demo hook: shows a status notification.
-    # config.level: info|warn|error (default info).
+    # Reference hook: emits a toast describing the rename.
     - name: notify
       source: bundled
       enabled: false
       config:
-        level: info
+        level: info                 # info | warn | error
 
   tag_change:
     - name: tag_symlink_sync
       source: bundled
       enabled: true
-      config: {}
+      config: {}                    # no per-hook keys
 
     - name: notify
       source: bundled
       enabled: false
       config:
-        level: info
+        level: info                 # info | warn | error
+
+    # On tag add: symlinks files from <root>/<tag>/ into each project
+    # (never overwrites real files or other symlinks — warns instead).
+    # Edits to source files propagate automatically. On tag remove:
+    # only unlinks symlinks that still point to the recorded source;
+    # real files / repointed symlinks are kept with a warning.
+    #
+    # Also exposes refresh(ctx): re-links new source files and prunes
+    # orphan symlinks (source vanished). Invoke via `b hooks refresh`
+    # or enable the hooks_refresh worker below.
+    - name: tag_files_sync
+      source: bundled
+      enabled: false
+      refresh_enabled: false        # opt-in for the periodic worker
+      refresh_min_interval_s: 120   # per (project, hook) floor in s
+      config:
+        # root: override the source location.
+        #   omit / empty  -> <base>/.homebase/tag-files/  (default)
+        #   relative path -> resolved against base_dir
+        #   absolute / ~/ -> used as-is
+        # root: ~/sync/tag-overlays
+        dry_run: false              # preview without changes
 
   new_project:
     - name: tag_symlink_sync
       source: bundled
       enabled: true
-      config: {}
+      config: {}                    # no per-hook keys
 
     - name: notify
       source: bundled
       enabled: false
       config:
-        level: info
+        level: info                 # info | warn | error
 
   delete:
     - name: tag_symlink_sync
       source: bundled
       enabled: true
-      config: {}
+      config: {}                    # no per-hook keys
 
     - name: notify
       source: bundled
       enabled: false
       config:
-        level: info
+        level: info                 # info | warn | error
 
   # Custom hook example:
   # rename:
@@ -354,6 +407,17 @@ hooks_post:
   #     views: [active]
   #     config:
   #       dry_run: false
+
+# Periodic refresh worker. Re-runs refresh(ctx) for post-hooks marked
+# refresh_enabled: true on rows that haven't been refreshed in a
+# while. Manual triggers (`b hooks refresh`, TUI actions
+# hooks_refresh / hooks_refresh_view) run regardless of this section.
+hooks_refresh:
+  enabled: false
+  worker:
+    batch_size: 4                   # max (project, hook) jobs per tick
+    jitter_pct: 15                  # 0-100; spread tick alignment
+    skip_when_busy: true            # bail when cache/reconcile worker busy
 
 # Table behavior, columns, and date-color gradients.
 table:

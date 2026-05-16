@@ -107,7 +107,7 @@ def build_cli_parser() -> argparse.ArgumentParser:
         "shell-init",
         help="print shell-integration wrapper (cd handoff via HOMEBASE_CD_FILE)",
     )
-    p_shell_init.add_argument("shell", choices=["fish", "zsh", "bash"])
+    p_shell_init.add_argument("shell", nargs="?", choices=["fish", "zsh", "bash"], default="")
     p_internal_complete = sub.add_parser("__complete")
     p_internal_complete.add_argument("shell", choices=["fish", "zsh", "bash"])
     p_internal_complete.add_argument("cword", type=int)
@@ -129,6 +129,21 @@ def build_cli_parser() -> argparse.ArgumentParser:
     tags_sub = p_tags.add_subparsers(dest="tags_subcommand", required=True)
     p_tags_sync = tags_sub.add_parser("sync-_tags")
     p_tags_sync.add_argument("--debug", action="store_true")
+
+    p_hooks = sub.add_parser("hooks", help="hook administration commands")
+    hooks_sub = p_hooks.add_subparsers(dest="hooks_subcommand", required=True)
+    p_hooks_refresh = hooks_sub.add_parser(
+        "refresh",
+        help="re-run post-hook refresh logic without firing the underlying event",
+    )
+    p_hooks_refresh.add_argument("--all", dest="all_projects", action="store_true")
+    p_hooks_refresh.add_argument("--project", dest="projects", action="append", default=[])
+    p_hooks_refresh.add_argument("--tag", dest="tags", action="append", default=[])
+    p_hooks_refresh.add_argument("--filter", dest="filter_expr", default="")
+    p_hooks_refresh.add_argument("--hook", dest="hook_filter", action="append", default=[])
+    p_hooks_refresh.add_argument("--event", dest="event_filter", action="append", default=[])
+    p_hooks_refresh.add_argument("--archived", action="store_true")
+    p_hooks_refresh.add_argument("--dry-run", dest="dry_run", action="store_true")
 
     p_utils = sub.add_parser("utils")
     utils_sub = p_utils.add_subparsers(dest="utils_subcommand", required=True)

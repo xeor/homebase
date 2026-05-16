@@ -66,6 +66,8 @@ def dispatch_action(app: Any, action_id: str) -> None:
             "reconcile_all_cache",
             "edit_global_config",
             "reload_global_config",
+            "hooks_refresh",
+            "hooks_refresh_view",
         }:
             app._run_custom_action(aid)
             return

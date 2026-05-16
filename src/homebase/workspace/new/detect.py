@@ -15,6 +15,8 @@ def is_path_shaped(value: str) -> bool:
         return False
     if is_url(value):
         return False
+    if value in {".", ".."}:
+        return True
     if value.startswith(("./", "../", "/", "~")):
         return True
     if value.endswith(("/", "\\")):

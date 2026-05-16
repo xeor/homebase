@@ -9,7 +9,7 @@ from rich.text import Text
 from textual.events import Key
 from textual.widgets import DataTable, Static
 
-from ...config.hooks import load_hook_specs
+from ...config.hooks import load_hook_refresh_config, load_hook_specs
 from ...config.prefs import (
     load_actions,
     load_archive_timezone_name,
@@ -439,6 +439,7 @@ def reload_global_config(app: Any, *, base_dir: Path) -> None:
             load_reconcile_config=load_reconcile_config,
             load_cache_profile_table=load_cache_profile_table,
             load_hook_specs=load_hook_specs,
+            load_hook_refresh_config=load_hook_refresh_config,
             load_archive_timezone_name=load_archive_timezone_name,
         )
     except (OSError, TypeError, ValueError) as exc:
@@ -476,6 +477,7 @@ def reload_global_config(app: Any, *, base_dir: Path) -> None:
             for scope, table in runtime_cfg.cache_profile_table.items()
         },
         hook_specs=dict(runtime_cfg.hook_specs),
+        hook_refresh_config=runtime_cfg.hook_refresh_config,
     )
     app.actions = dict(app.ctx.actions)
     app.custom_actions = [

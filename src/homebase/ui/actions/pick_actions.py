@@ -171,6 +171,14 @@ def on_pick_actions(app: Any, value: str | None) -> None:
         app.push_screen(app._input_screen_cls("Set description (empty clears)", "short summary", initial), app._on_set_description)
         return True
 
+    def _handle_hooks_refresh() -> bool:
+        app._hooks_refresh_action(workspace_scope=False)
+        return True
+
+    def _handle_hooks_refresh_view() -> bool:
+        app._hooks_refresh_action(workspace_scope=True)
+        return True
+
     handlers: dict[str, Callable[[], bool]] = {
         "tags_set": _handle_tags_set,
         "suffix_set": _handle_suffix_set,
@@ -184,6 +192,8 @@ def on_pick_actions(app: Any, value: str | None) -> None:
         "review_meta": _handle_meta_actions,
         "rename_meta_ext": _handle_meta_actions,
         "set_desc": _handle_set_desc,
+        "hooks_refresh": _handle_hooks_refresh,
+        "hooks_refresh_view": _handle_hooks_refresh_view,
     }
     handler = handlers.get(value)
     if handler is not None and handler():

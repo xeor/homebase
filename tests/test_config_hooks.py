@@ -2,7 +2,11 @@ from __future__ import annotations
 
 import pytest
 
-from homebase.config.hooks import HookConfigError, load_hook_specs
+from homebase.config.hooks import (
+    HookConfigError,
+    load_hook_refresh_config,
+    load_hook_specs,
+)
 from homebase.config.store import save_global_config_dict
 
 
@@ -21,6 +25,11 @@ def test_load_hook_specs_empty_config_has_all_slots(tmp_path) -> None:
     assert specs[("pre", "tag_change")] == []
     assert specs[("pre", "new_project")] == []
     assert [spec.name for spec in specs[("pre", "delete")]] == ["confirm_delete"]
+    assert specs[("pre", "delete")][0].enabled is False
+    assert all(spec.enabled is False for spec in specs[("post", "rename")])
+    assert all(spec.enabled is False for spec in specs[("post", "tag_change")])
+    assert all(spec.enabled is False for spec in specs[("post", "new_project")])
+    assert all(spec.enabled is False for spec in specs[("post", "delete")])
 
 
 def test_load_hook_specs_parses_bundled_entry(tmp_path) -> None:
@@ -94,3 +103,77 @@ def test_load_hook_specs_default_slow_warn(tmp_path) -> None:
     save_global_config_dict(tmp_path, {"hooks_post": {"rename": [{"name": "x"}]}})
     specs = load_hook_specs(tmp_path)
     assert specs[("post", "rename")][0].slow_warn_s == 30.0
+
+
+def test_load_hook_specs_refresh_defaults(tmp_path) -> None:
+    save_global_config_dict(tmp_path, {"hooks_post": {"rename": [{"name": "x"}]}})
+    specs = load_hook_specs(tmp_path)
+    spec = specs[("post", "rename")][0]
+    assert spec.refresh_enabled is False
+    assert spec.refresh_min_interval_s == 60.0
+
+
+def test_load_hook_specs_refresh_fields(tmp_path) -> None:
+    save_global_config_dict(
+        tmp_path,
+        {
+            "hooks_post": {
+                "tag_change": [
+                    {
+                        "name": "tag_files_sync",
+                        "source": "bundled",
+                        "refresh_enabled": True,
+                        "refresh_min_interval_s": 120,
+                    }
+                ]
+            }
+        },
+    )
+    spec = load_hook_specs(tmp_path)[("post", "tag_change")][0]
+    assert spec.refresh_enabled is True
+    assert spec.refresh_min_interval_s == 120.0
+
+
+def test_load_hook_specs_invalid_refresh_min_raises(tmp_path) -> None:
+    save_global_config_dict(
+        tmp_path,
+        {"hooks_post": {"rename": [{"name": "x", "refresh_min_interval_s": "bad"}]}},
+    )
+    with pytest.raises(HookConfigError, match="invalid `refresh_min_interval_s`"):
+        load_hook_specs(tmp_path)
+
+
+def test_load_hook_refresh_config_defaults(tmp_path) -> None:
+    save_global_config_dict(tmp_path, {})
+    cfg = load_hook_refresh_config(tmp_path)
+    assert cfg.enabled is False
+    assert cfg.worker.batch_size == 4
+    assert cfg.worker.jitter_pct == 15.0
+    assert cfg.worker.skip_when_busy is True
+
+
+def test_load_hook_refresh_config_parses_section(tmp_path) -> None:
+    save_global_config_dict(
+        tmp_path,
+        {
+            "hooks_refresh": {
+                "enabled": True,
+                "worker": {
+                    "batch_size": 8,
+                    "jitter_pct": 30,
+                    "skip_when_busy": False,
+                },
+            }
+        },
+    )
+    cfg = load_hook_refresh_config(tmp_path)
+    assert cfg.enabled is True
+    assert cfg.worker.batch_size == 8
+    assert cfg.worker.jitter_pct == 30.0
+    assert cfg.worker.skip_when_busy is False
+
+
+def test_load_hook_refresh_config_non_mapping_raises(tmp_path) -> None:
+    save_global_config_dict(tmp_path, {"hooks_refresh": ["bad"]})
+    with pytest.raises(HookConfigError, match="must be a mapping"):
+        load_hook_refresh_config(tmp_path)

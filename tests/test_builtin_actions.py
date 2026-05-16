@@ -29,6 +29,8 @@ def test_builtin_actions_include_all_legacy_ids() -> None:
         "reconcile_all_cache",
         "edit_global_config",
         "reload_global_config",
+        "hooks_refresh",
+        "hooks_refresh_view",
     }
     assert expected_ids == set(BUILTIN_ACTIONS)
 

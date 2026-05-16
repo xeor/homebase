@@ -268,7 +268,10 @@ def _apply_pre_new_project_mutations(
     source = change.get("source")
     if source is not None:
         source_text = str(source).strip()
-        if source_text in set(builtin_keys()):
+        if source_text == "auto":
+            ns.mode = None
+            ns.child_key = None
+        elif source_text in set(builtin_keys()):
             ns.mode = source_text
             ns.child_key = None
         elif source_text:
