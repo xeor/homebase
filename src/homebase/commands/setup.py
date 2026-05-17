@@ -57,7 +57,10 @@ def print_help() -> None:
             "move directories into ~/base or _archive",
         ),
         ("b archive reorganize [--dry-run]", "move flat archive entries under year subdirs"),
-        ("b fix [path]", "interactive repairs for a directory"),
+        (
+            "b fix [path]",
+            "repair mode: add missing .base.yaml marker and fix archive timestamp names",
+        ),
         ("b a [path]", "alias for b archive mv [path]"),
     ]
     for cmd, desc in items:
@@ -88,6 +91,8 @@ def cmd_setup(
     completion_script_fn: Callable[[str], str] | None = None,
     shell_init_script_fn: Callable[[str], str] | None = None,
     dry_run: bool = False,
+    json_output: bool = False,
+    tui: bool = False,
 ) -> int:
     return setup_tools.cmd_setup(
         base_dir,
@@ -96,7 +101,10 @@ def cmd_setup(
         prompt_yes_no=_prompt_yes_no,
         completion_script_fn=completion_script_fn,
         shell_init_script_fn=shell_init_script_fn,
+        select_fix_ids_fn=None,
         dry_run=dry_run,
+        json_output=json_output,
+        tui=tui,
     )
 
 

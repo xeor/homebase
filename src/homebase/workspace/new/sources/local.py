@@ -6,6 +6,7 @@ import time
 from pathlib import Path
 
 from ....cache.api import cache_upsert_project_fast
+from ....core.logging import verbose_enabled
 from ....core.utils import is_under
 from ....metadata.api import (
     append_base_log,
@@ -19,6 +20,8 @@ from ..registry import register_source
 
 
 def _debug_enabled() -> bool:
+    if verbose_enabled(3):
+        return True
     raw = str(os.environ.get("HOMEBASE_DEBUG", "")).strip().lower()
     return raw in {"1", "true", "yes", "on", "y"}
 

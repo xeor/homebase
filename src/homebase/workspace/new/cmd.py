@@ -7,6 +7,7 @@ from argparse import Namespace
 from pathlib import Path
 from typing import Callable
 
+from ...core.logging import verbose_enabled
 from ..projects import cmd_new as legacy_cmd_new
 from .adapters import adapter_for_host, parse_url
 from .archive_mod import apply_archive_modifier
@@ -25,6 +26,8 @@ _SHAPE_TO_SOURCE = {
 
 
 def _debug_enabled() -> bool:
+    if verbose_enabled(3):
+        return True
     raw = str(os.environ.get("HOMEBASE_DEBUG", "")).strip().lower()
     return raw in {"1", "true", "yes", "on", "y"}
 

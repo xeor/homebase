@@ -12,6 +12,7 @@ license = { text = "Proprietary" }
 dependencies = [
   "textual>=0.88.1",
   "PyYAML>=6.0.2",
+  "loguru>=0.7.3",
 ]
 
 [project.scripts]

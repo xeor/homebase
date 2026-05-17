@@ -53,7 +53,14 @@ def _add_new_arguments(p: argparse.ArgumentParser) -> None:
 
 
 def _build_new_parser(sub) -> None:
-    p_new = sub.add_parser("new", help="create a new project")
+    p_new = sub.add_parser(
+        "new",
+        help="create a project from name/path/url",
+        description=(
+            "Create a new project under base. Input can be a bare name, local path,\n"
+            "or remote URL. Source is auto-detected unless you force one with flags."
+        ),
+    )
     _add_new_arguments(p_new)
     p_n = sub.add_parser("n", help="alias for `new`")
     _add_new_arguments(p_n)
@@ -63,6 +70,13 @@ def build_cli_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="b")
     parser.add_argument("--base-folder", dest="base_folder", default=None)
     parser.add_argument("--filter", dest="initial_filter", default="")
+    parser.add_argument(
+        "-v",
+        "--verbose",
+        action="count",
+        default=0,
+        help="increase verbosity (-v, -vv, -vvv)",
+    )
 
     sub = parser.add_subparsers(dest="command")
     p_help = sub.add_parser("help")
@@ -98,8 +112,11 @@ def build_cli_parser() -> argparse.ArgumentParser:
         help="list archived projects instead of active",
     )
     _build_new_parser(sub)
-    p_completion = sub.add_parser("completion")
-    p_completion.add_argument("shell", choices=["fish", "zsh", "bash"])
+    p_completion = sub.add_parser(
+        "completion",
+        help="print completion script for shell",
+    )
+    p_completion.add_argument("shell", choices=["fish", "zsh", "bash"], help="target shell")
     # `b shell-init <shell>` prints a wrapper function that lets the
     # parent shell `cd` into the new project / removed project's
     # parent / etc. See src/homebase/cli/shell_init.py.
@@ -107,28 +124,30 @@ def build_cli_parser() -> argparse.ArgumentParser:
         "shell-init",
         help="print shell-integration wrapper (cd handoff via HOMEBASE_CD_FILE)",
     )
-    p_shell_init.add_argument("shell", nargs="?", choices=["fish", "zsh", "bash"], default="")
-    p_internal_complete = sub.add_parser("__complete")
-    p_internal_complete.add_argument("shell", choices=["fish", "zsh", "bash"])
-    p_internal_complete.add_argument("cword", type=int)
+    p_shell_init.add_argument("shell", nargs="?", choices=["fish", "zsh", "bash"], default="", help="shell name (omit for usage help)")
+    p_internal_complete = sub.add_parser("__complete", help=argparse.SUPPRESS)
+    p_internal_complete.add_argument("shell", choices=["fish", "zsh", "bash"], help=argparse.SUPPRESS)
+    p_internal_complete.add_argument("cword", type=int, help=argparse.SUPPRESS)
     # REMAINDER so user words that look like options (e.g. ``--as``,
     # ``--no-tmp``) don't get re-parsed at the parent level. Newer
     # shell wrappers pass an explicit ``--`` separator (harmless and
     # filtered in dispatch); older installs that don't have ``--``
     # still work thanks to REMAINDER swallowing everything.
-    p_internal_complete.add_argument("words", nargs=argparse.REMAINDER)
-    sub.add_parser("recent")
-    p_setup = sub.add_parser("setup")
-    p_setup.add_argument("--dry-run", action="store_true")
+    p_internal_complete.add_argument("words", nargs=argparse.REMAINDER, help=argparse.SUPPRESS)
+    sub.add_parser("recent", help="list projects sorted by latest commit")
+    p_setup = sub.add_parser("setup", help="check and install recommended shell/tool setup")
+    p_setup.add_argument("--dry-run", action="store_true", help="print proposed changes without writing")
+    p_setup.add_argument("--json", dest="json_output", action="store_true", help="emit machine-readable report")
+    p_setup.add_argument("--tui", action="store_true", help="launch tabbed Textual setup app")
 
-    p_cache = sub.add_parser("cache")
+    p_cache = sub.add_parser("cache", help="cache maintenance commands")
     cache_sub = p_cache.add_subparsers(dest="cache_subcommand", required=True)
-    cache_sub.add_parser("warm")
+    cache_sub.add_parser("warm", help="pre-warm runtime/import cache")
 
-    p_tags = sub.add_parser("tags")
+    p_tags = sub.add_parser("tags", help="tag index maintenance commands")
     tags_sub = p_tags.add_subparsers(dest="tags_subcommand", required=True)
-    p_tags_sync = tags_sub.add_parser("sync-_tags")
-    p_tags_sync.add_argument("--debug", action="store_true")
+    p_tags_sync = tags_sub.add_parser("sync-_tags", help="rebuild _tags symlink index")
+    p_tags_sync.add_argument("--debug", action="store_true", help="print per-project debug output")
 
     p_hooks = sub.add_parser("hooks", help="hook administration commands")
     hooks_sub = p_hooks.add_subparsers(dest="hooks_subcommand", required=True)
@@ -136,81 +155,94 @@ def build_cli_parser() -> argparse.ArgumentParser:
         "refresh",
         help="re-run post-hook refresh logic without firing the underlying event",
     )
-    p_hooks_refresh.add_argument("--all", dest="all_projects", action="store_true")
-    p_hooks_refresh.add_argument("--project", dest="projects", action="append", default=[])
-    p_hooks_refresh.add_argument("--tag", dest="tags", action="append", default=[])
-    p_hooks_refresh.add_argument("--filter", dest="filter_expr", default="")
-    p_hooks_refresh.add_argument("--hook", dest="hook_filter", action="append", default=[])
-    p_hooks_refresh.add_argument("--event", dest="event_filter", action="append", default=[])
-    p_hooks_refresh.add_argument("--archived", action="store_true")
-    p_hooks_refresh.add_argument("--dry-run", dest="dry_run", action="store_true")
+    p_hooks_refresh.add_argument("--all", dest="all_projects", action="store_true", help="refresh all projects")
+    p_hooks_refresh.add_argument("--project", dest="projects", action="append", default=[], help="project path/name filter (repeatable)")
+    p_hooks_refresh.add_argument("--tag", dest="tags", action="append", default=[], help="only projects containing tag (repeatable)")
+    p_hooks_refresh.add_argument("--filter", dest="filter_expr", default="", help="filter expression")
+    p_hooks_refresh.add_argument("--hook", dest="hook_filter", action="append", default=[], help="hook name filter (repeatable)")
+    p_hooks_refresh.add_argument("--event", dest="event_filter", action="append", default=[], help="event filter (repeatable)")
+    p_hooks_refresh.add_argument("--archived", action="store_true", help="include archived view")
+    p_hooks_refresh.add_argument("--dry-run", dest="dry_run", action="store_true", help="show what would run")
 
-    p_utils = sub.add_parser("utils")
+    p_utils = sub.add_parser("utils", help="utility and migration helpers")
     utils_sub = p_utils.add_subparsers(dest="utils_subcommand", required=True)
-    utils_sub.add_parser("opt-in-nested-discovery")
+    utils_sub.add_parser("opt-in-nested-discovery", help="enable nested project discovery if safe")
 
-    p_a = sub.add_parser("a")
-    p_a.add_argument("path", nargs="?", default=".")
+    p_a = sub.add_parser("a", help="archive path (alias for `b archive mv`)")
+    p_a.add_argument("path", nargs="?", default=".", help="target directory (default: cwd)")
 
     p_cd = sub.add_parser(
         "cd",
         help="open a shell in a project under base (tab-completes names)",
     )
-    p_cd.add_argument("name", nargs="?", default="")
+    p_cd.add_argument("name", nargs="?", default="", help="project name under base")
 
-    p_rm = sub.add_parser("rm")
-    p_rm.add_argument("path", nargs="?", default=".")
-    p_rm.add_argument("--force-outside-base", action="store_true")
+    p_rm = sub.add_parser("rm", help="delete a directory recursively")
+    p_rm.add_argument("path", nargs="?", default=".", help="target path (default: cwd)")
+    p_rm.add_argument("--force-outside-base", action="store_true", help="allow deleting outside base root")
     # ``--force`` / ``-f`` skips the y/N confirmation prompt. It does
     # NOT bypass the outside-base safety net — that's still
     # ``--force-outside-base``.
-    p_rm.add_argument("--force", "-f", action="store_true")
+    p_rm.add_argument("--force", "-f", action="store_true", help="skip y/N confirmation")
 
-    p_fix = sub.add_parser("fix")
-    p_fix.add_argument("path", nargs="?", default=".")
+    p_fix = sub.add_parser(
+        "fix",
+        help="repair marker/timestamp issues for a project/archive directory",
+        description=(
+            "Inspect a directory and offer safe interactive repairs.\n"
+            "- creates missing .base.yaml marker when appropriate\n"
+            "- in archive, can normalize timestamp suffixes to canonical ISO form"
+        ),
+    )
+    p_fix.add_argument(
+        "path",
+        nargs="?",
+        default=".",
+        help="target directory (default: current directory)",
+    )
 
     # ``b archive`` with no subcommand → archive cwd (same as `b a`).
     # That's why ``archive_subcommand`` is not required.
-    p_archive = sub.add_parser("archive")
+    p_archive = sub.add_parser("archive", help="archive and restore operations")
     archive_sub = p_archive.add_subparsers(dest="archive_subcommand")
-    p_archive_mv = archive_sub.add_parser("mv")
-    p_archive_mv.add_argument("path", nargs="?", default=".")
-    p_archive_ls = archive_sub.add_parser("ls")
-    p_archive_ls.add_argument("path", nargs="?", default=".")
-    p_archive_undo = archive_sub.add_parser("undo")
-    p_archive_undo.add_argument("path", nargs="?", default=".")
-    p_archive_restore = archive_sub.add_parser("restore")
-    p_archive_restore.add_argument("archived_path")
-    p_archive_reorg = archive_sub.add_parser("reorganize")
-    p_archive_reorg.add_argument("--dry-run", action="store_true")
+    p_archive_mv = archive_sub.add_parser("mv", help="archive directory (same as bare `b archive`)")
+    p_archive_mv.add_argument("path", nargs="?", default=".", help="target directory (default: cwd)")
+    p_archive_ls = archive_sub.add_parser("ls", help="list archive matches for path")
+    p_archive_ls.add_argument("path", nargs="?", default=".", help="path/name to match")
+    p_archive_undo = archive_sub.add_parser("undo", help="restore most recent archive entry for path")
+    p_archive_undo.add_argument("path", nargs="?", default=".", help="path/name to restore")
+    p_archive_restore = archive_sub.add_parser("restore", help="restore exact archived path")
+    p_archive_restore.add_argument("archived_path", help="full archived entry path")
+    p_archive_reorg = archive_sub.add_parser("reorganize", help="reorganize archive entries under year dirs")
+    p_archive_reorg.add_argument("--dry-run", action="store_true", help="show actions without moving")
 
-    p_tmux = sub.add_parser("tmux")
+    p_tmux = sub.add_parser("tmux", help="tmux integration commands")
     tmux_sub = p_tmux.add_subparsers(dest="tmux_subcommand", required=True)
-    p_tmux_load = tmux_sub.add_parser("load")
-    p_tmux_load.add_argument("dir", nargs="?", default=".")
-    p_tmux_save = tmux_sub.add_parser("save")
-    p_tmux_save.add_argument("dir", nargs="?", default=".")
-    p_tmux_save.add_argument("--output", default="")
-    p_tmux_save.add_argument("--stdout", action="store_true")
-    p_tmux_save.add_argument("--debug", action="store_true")
-    p_tmux_save.add_argument("--pane-id", default="")
-    p_tmux_save.add_argument("--session-id", default="")
+    p_tmux_load = tmux_sub.add_parser("load", help="load .tmuxp.yaml for a project")
+    p_tmux_load.add_argument("dir", nargs="?", default=".", help="project directory (default: cwd)")
+    p_tmux_save = tmux_sub.add_parser("save", help="save current tmux window as .tmuxp.yaml")
+    p_tmux_save.add_argument("dir", nargs="?", default=".", help="project directory (default: cwd)")
+    p_tmux_save.add_argument("--output", default="", help="write profile to explicit file path")
+    p_tmux_save.add_argument("--stdout", action="store_true", help="print profile to stdout")
+    p_tmux_save.add_argument("--debug", action="store_true", help="include debug diagnostics")
+    p_tmux_save.add_argument("--pane-id", default="", help="tmux pane id hint")
+    p_tmux_save.add_argument("--session-id", default="", help="tmux session id hint")
 
-    p_bench = sub.add_parser("benchmark")
+    p_bench = sub.add_parser("benchmark", help="performance benchmark commands")
     bench_sub = p_bench.add_subparsers(dest="benchmark_subcommand", required=True)
-    p_bench_run = bench_sub.add_parser("run")
-    p_bench_run.add_argument("--comment", default="")
-    p_bench_run.add_argument("--keep-basefolder", action="store_true")
-    p_bench_results = bench_sub.add_parser("results")
-    p_bench_results.add_argument("--ignore-featureset", action="append", default=[])
+    p_bench_run = bench_sub.add_parser("run", help="run benchmark suite and store result")
+    p_bench_run.add_argument("--comment", default="", help="optional run annotation")
+    p_bench_run.add_argument("--keep-basefolder", action="store_true", help="reuse existing base fixture")
+    p_bench_results = bench_sub.add_parser("results", help="show benchmark history")
+    p_bench_results.add_argument("--ignore-featureset", action="append", default=[], help="ignore feature set id(s); repeat or comma-separate")
 
-    p_test = sub.add_parser("test")
-    p_test.add_argument("--comment", default="")
-    p_test.add_argument("--keep-basefolder", action="store_true")
+    p_test = sub.add_parser("test", help="run test/regression harness")
+    p_test.add_argument("--comment", default="", help="optional run annotation")
+    p_test.add_argument("--keep-basefolder", action="store_true", help="reuse existing base fixture")
     test_sub = p_test.add_subparsers(dest="test_subcommand")
-    p_test_reg = test_sub.add_parser("regression")
-    p_test_reg.add_argument("--list", action="store_true")
-    p_test_reg.add_argument("--case", action="append", default=[])
+    p_test_reg = test_sub.add_parser("regression", help="run regression cases")
+    p_test_reg.add_argument("--list", action="store_true", help="list available regression cases")
+    p_test_reg.add_argument("--case", action="append", default=[], help="run only named case (repeatable)")
 
     return parser
 

@@ -4,6 +4,7 @@ import argparse
 from pathlib import Path
 from typing import Any, Callable
 
+from ..core.logging import logger
 from .parser import parse_ignore_featureset_values
 
 
@@ -21,7 +22,7 @@ def dispatch_command(
     cmd_internal_complete: Callable[[str, int, list[str]], int],
     cmd_recent: Callable[[Path], int],
     cmd_help_actions: Callable[[str, str, str, bool], int],
-    cmd_setup: Callable[[Path, Path, bool], int],
+    cmd_setup: Callable[..., int],
     cmd_cache_warm: Callable[[], int],
     cmd_tags_sync: Callable[[Path, bool, bool], int],
     cmd_hooks_refresh: Callable[..., int],
@@ -41,6 +42,7 @@ def dispatch_command(
     cmd_test: Callable[[Path, Path, str, bool], int],
     initial_filter_expr: str,
 ) -> int:
+    logger.debug("dispatch command={} cwd={} base={}", ns.command, cwd, base_dir)
     if ns.command is None:
         return no_arg_flow(base_dir, cwd, initial_filter_expr)
     if ns.command == "help":
@@ -75,7 +77,13 @@ def dispatch_command(
     if ns.command == "recent":
         return cmd_recent(base_dir)
     if ns.command == "setup":
-        return cmd_setup(base_dir, bin_dir, bool(getattr(ns, "dry_run", False)))
+        return cmd_setup(
+            base_dir,
+            bin_dir,
+            bool(getattr(ns, "dry_run", False)),
+            json_output=bool(getattr(ns, "json_output", False)),
+            tui=bool(getattr(ns, "tui", False)),
+        )
     if ns.command == "cache":
         return cmd_cache_warm() if ns.cache_subcommand == "warm" else 1
     if ns.command == "tags":

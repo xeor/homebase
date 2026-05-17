@@ -33,6 +33,7 @@ from ..core.constants import (
     ENV_BASE_DIR,
     discover_tab_actions,
 )
+from ..core.logging import configure_logging, logger
 from ..ui import run_textual_ui as _run_textual_ui
 from ..ui.context import UIContext
 from ..workspace.projects import run_post_commands
@@ -123,6 +124,14 @@ def main(argv: list[str]) -> int:
         ns = parser.parse_args(argv)
     except SystemExit as exc:
         return int(exc.code)
+
+    verbosity = configure_logging(int(getattr(ns, "verbose", 0) or 0))
+    logger.debug(
+        "cli start command={} verbosity={} argv={}",
+        getattr(ns, "command", None),
+        verbosity,
+        argv,
+    )
 
     script = Path(__file__).resolve()
     bin_dir = script.parent.parent
@@ -374,12 +383,14 @@ def main(argv: list[str]) -> int:
                 view_filter=view,
                 show_defaults=show_defaults,
             ),
-            cmd_setup=lambda base_path, bin_path, dry_run: cmd_setup(
+            cmd_setup=lambda base_path, bin_path, dry_run, *, json_output=False, tui=False: cmd_setup(
                 base_path,
                 bin_path,
                 completion_script_fn=completion_script,
                 shell_init_script_fn=shell_init_script,
                 dry_run=dry_run,
+                json_output=json_output,
+                tui=tui,
             ),
             cmd_cache_warm=cmd_cache_warm,
             cmd_tags_sync=lambda bd, verbose, debug: cmd_tags_sync(
@@ -441,6 +452,8 @@ def main(argv: list[str]) -> int:
     except KeyboardInterrupt:
         print()
         return 130
+
+    logger.debug("cli done command={} rc={}", getattr(ns, "command", None), rc)
 
     if rc == 1 and ns.command not in {
         None,
