@@ -587,16 +587,6 @@ def cmd_rm(
     return rc
 
 
-def cmd_archive_reorganize(base_dir: Path, dry_run: bool = False) -> int:
-    return commands_workspace.cmd_archive_reorganize(
-        base_dir,
-        archive_dir_name=ARCHIVE_DIR_NAME,
-        year_from_name=core_utils.archive_year_from_name,
-        is_year_dir=lambda name: bool(ARCHIVE_YEAR_DIR_RE.match(name)),
-        normalize_name=core_utils.normalize_date_prefix,
-        confirm=confirm,
-        dry_run=dry_run,
-    )
 
 
 def suggest_project_root(path: Path) -> Path:
@@ -618,6 +608,7 @@ def cmd_fix(
     *,
     include: set[str] | None = None,
     yes: bool = False,
+    all_targets: bool = False,
 ) -> int:
     from ..archive import date_detect
 
@@ -633,6 +624,7 @@ def cmd_fix(
         list(paths) if paths is not None else ["."],
         include=selected,
         yes=yes,
+        all_targets=all_targets,
         env_base_dir_key=ENV_BASE_DIR,
         archive_dir_name=ARCHIVE_DIR_NAME,
         archive_year_re=ARCHIVE_YEAR_DIR_RE,

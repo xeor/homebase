@@ -99,4 +99,40 @@ def test_parse_user_date_strict() -> None:
 def test_strip_date_prefix() -> None:
     assert date_detect.strip_date_prefix("2024-03-15_foo") == "foo"
     assert date_detect.strip_date_prefix("foo") == "foo"
-    assert date_detect.strip_date_prefix("2024-03-15") == "2024-03-15"
+    # A date-only name returns an empty stem; callers fall back to
+    # using the original name.
+    assert date_detect.strip_date_prefix("2024-03-15") == ""
+
+
+def test_strip_date_prefix_handles_space_and_other_separators() -> None:
+    assert date_detect.strip_date_prefix("2024-03-15 foo") == "foo"
+    assert date_detect.strip_date_prefix("2024-03-15-foo") == "foo"
+    assert date_detect.strip_date_prefix("2024-03-15.foo") == "foo"
+    assert date_detect.strip_date_prefix("2024-03-15_b-rs") == "b-rs"
+
+
+def test_detect_with_space_separator(tmp_path: Path) -> None:
+    d = tmp_path / "2026-05-18 mappe"
+    d.mkdir()
+    out = date_detect.detect_folder_date(d, parse_timestamp=_parse_ts, archive_tz=_TZ)
+    assert out is not None
+    assert out.kind == "name-prefix"
+    assert datetime.fromtimestamp(out.ts, tz=_TZ).date().isoformat() == "2026-05-18"
+
+
+def test_detect_with_zero_segments_loose_pass(tmp_path: Path) -> None:
+    d = tmp_path / "2003-00-00_invisible"
+    d.mkdir()
+    out = date_detect.detect_folder_date(d, parse_timestamp=_parse_ts, archive_tz=_TZ)
+    assert out is not None
+    assert out.kind == "name-prefix-loose"
+    assert datetime.fromtimestamp(out.ts, tz=_TZ).date().isoformat() == "2003-01-01"
+
+
+def test_detect_tgz_suffix_is_stripped(tmp_path: Path) -> None:
+    f = tmp_path / "2024-05-01_old.tgz"
+    f.write_bytes(b"x")
+    out = date_detect.detect_folder_date(f, parse_timestamp=_parse_ts, archive_tz=_TZ)
+    assert out is not None
+    assert out.kind == "name-prefix"
+    assert datetime.fromtimestamp(out.ts, tz=_TZ).date().isoformat() == "2024-05-01"

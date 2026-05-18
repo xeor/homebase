@@ -40,7 +40,7 @@ def _check_archive_layout(base_dir: Path) -> list[StartupValidationIssue]:
                     key="archive.layout",
                     message=(
                         "unexpected entry directly under _archive; expected only "
-                        "YYYY/ subdirectories. Run `b archive reorganize`."
+                        "YYYY/ subdirectories"
                     ),
                     path=entry,
                 )

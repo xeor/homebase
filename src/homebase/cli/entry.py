@@ -9,7 +9,6 @@ from ..commands.actions import cmd_help_actions as cmd_help_actions_render
 from ..commands.archive import (
     cmd_archive_ls,
     cmd_archive_mv,
-    cmd_archive_reorganize,
     cmd_archive_restore_entry,
     cmd_archive_undo,
     cmd_fix,
@@ -173,14 +172,10 @@ def main(argv: list[str]) -> int:
         parser.print_help()
         return 0
 
-    # Repair commands must be able to run even when the workspace is
-    # malformed — they exist to fix exactly the issues startup
-    # validation surfaces. Print findings as warnings so the user can
-    # still see them.
-    skip_validation = ns.command == "fix" or (
-        ns.command == "archive"
-        and getattr(ns, "archive_subcommand", None) == "reorganize"
-    )
+    # ``b fix`` is the repair command — it must be able to run even
+    # when the workspace is malformed. Surface validation findings as
+    # warnings so the user still sees them.
+    skip_validation = ns.command == "fix"
     startup_issues = run_startup_validations(base_dir)
     if startup_issues:
         if skip_validation:
@@ -197,6 +192,10 @@ def main(argv: list[str]) -> int:
                     print(f"- {issue.message}: {issue.path}", file=sys.stderr)
                 else:
                     print(f"- {issue.message}", file=sys.stderr)
+            print(
+                "Run `b fix --all` to attempt repairs.",
+                file=sys.stderr,
+            )
             return 1
 
     try:
@@ -437,7 +436,6 @@ def main(argv: list[str]) -> int:
             cmd_archive_ls=cmd_archive_ls,
             cmd_archive_undo=cmd_archive_undo,
             cmd_archive_restore_entry=cmd_archive_restore_entry,
-            cmd_archive_reorganize=cmd_archive_reorganize,
             cmd_tmux_load=cmd_tmux_load,
             cmd_tmux_save=lambda bd, dir_path, output, to_stdout, debug, pane_id, session_id, *, pause=False: cmd_tmux_save(
                 bd,

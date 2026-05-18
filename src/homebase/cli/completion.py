@@ -208,6 +208,7 @@ def _subcommand_candidates(
         return [*_active_project_names(base_dir), "--force", "--force-outside-base"]
     if cmd == "fix":
         flags = [
+            "--all",
             "--yes",
             "--marker",
             "--no-marker",
@@ -224,7 +225,7 @@ def _subcommand_candidates(
     if cmd == "utils":
         return ["opt-in-nested-discovery"]
     if cmd == "archive":
-        return ["mv", "ls", "undo", "restore"]
+        return ["mv", "ls", "undo", "restore", "--autodate", "--yes"]
     if cmd == "tmux":
         if cword == 2:
             return ["load", "save"]

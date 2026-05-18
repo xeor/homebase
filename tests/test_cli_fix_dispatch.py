@@ -29,7 +29,6 @@ def _stub_kwargs(**overrides):
         cmd_archive_ls=lambda _a, _b: 0,
         cmd_archive_undo=lambda _a, _b: 0,
         cmd_archive_restore_entry=lambda _a, _b: 0,
-        cmd_archive_reorganize=lambda _a, _b: 0,
         cmd_tmux_load=lambda _a: 0,
         cmd_tmux_save=lambda _a, _b, _c, _d, _e, _f, _g: 0,
         cmd_benchmark=lambda _a, _b, _c, _d, _e, _f: 0,
@@ -58,7 +57,7 @@ def _run(args, capture):
 def test_fix_default_passes_all_kinds() -> None:
     seen: dict = {}
 
-    def _capture(paths, *, include, yes):
+    def _capture(paths, *, include, yes, all_targets=False):
         seen["paths"] = list(paths)
         seen["include"] = set(include)
         seen["yes"] = yes
@@ -74,7 +73,7 @@ def test_fix_default_passes_all_kinds() -> None:
 def test_fix_yes_flag_propagates() -> None:
     seen: dict = {}
 
-    def _capture(paths, *, include, yes):
+    def _capture(paths, *, include, yes, all_targets=False):
         seen["yes"] = yes
         return 0
 
@@ -86,7 +85,7 @@ def test_fix_yes_flag_propagates() -> None:
 def test_fix_marker_whitelist() -> None:
     seen: dict = {}
 
-    def _capture(paths, *, include, yes):
+    def _capture(paths, *, include, yes, all_targets=False):
         seen["include"] = set(include)
         return 0
 
@@ -98,7 +97,7 @@ def test_fix_marker_whitelist() -> None:
 def test_fix_no_marker_blacklist() -> None:
     seen: dict = {}
 
-    def _capture(paths, *, include, yes):
+    def _capture(paths, *, include, yes, all_targets=False):
         seen["include"] = set(include)
         return 0
 
@@ -116,10 +115,22 @@ def test_fix_conflicting_flags_error(capsys) -> None:
     assert "cannot combine" in capsys.readouterr().err
 
 
+def test_fix_all_flag_propagates() -> None:
+    seen: dict = {}
+
+    def _capture(paths, *, include, yes, all_targets=False):
+        seen["all_targets"] = all_targets
+        return 0
+
+    rc = _run(["fix", "--all"], _capture)
+    assert rc == 0
+    assert seen["all_targets"] is True
+
+
 def test_fix_multi_path_passes_all() -> None:
     seen: dict = {}
 
-    def _capture(paths, *, include, yes):
+    def _capture(paths, *, include, yes, all_targets=False):
         seen["paths"] = list(paths)
         return 0
 

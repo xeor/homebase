@@ -34,7 +34,6 @@ def dispatch_command(
     cmd_archive_ls: Callable[[Path, str], int],
     cmd_archive_undo: Callable[[Path, str], int],
     cmd_archive_restore_entry: Callable[[Path, str], int],
-    cmd_archive_reorganize: Callable[[Path, bool], int],
     cmd_tmux_load: Callable[[str], int],
     cmd_tmux_save: Callable[..., int],
     cmd_benchmark: Callable[[Path, Path, str, str, bool, set[str] | None], int],
@@ -151,6 +150,7 @@ def dispatch_command(
             paths,
             include=selected,
             yes=bool(getattr(ns, "yes", False)),
+            all_targets=bool(getattr(ns, "all_targets", False)),
         )
     if ns.command == "archive":
         sub = getattr(ns, "archive_subcommand", None)
@@ -171,8 +171,6 @@ def dispatch_command(
             return cmd_archive_undo(base_dir, str(ns.path))
         if sub == "restore":
             return cmd_archive_restore_entry(base_dir, str(ns.archived_path))
-        if sub == "reorganize":
-            return cmd_archive_reorganize(base_dir, bool(ns.dry_run))
         return 1
     if ns.command == "tmux":
         if ns.tmux_subcommand == "load":

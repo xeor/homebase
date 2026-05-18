@@ -56,10 +56,10 @@ def print_help() -> None:
             "b migrate [--archive] <path> [path ...]",
             "move directories into ~/base or _archive",
         ),
-        ("b archive reorganize [--dry-run]", "move flat archive entries under year subdirs"),
         (
-            "b fix [path]",
-            "repair mode: add missing .base.yaml marker and fix archive timestamp names",
+            "b fix [--all] [paths…]",
+            "repair: add missing markers, normalize archive entries, "
+            "relocate to <year>/ subdirs",
         ),
         ("b a [path]", "alias for b archive mv [path]"),
     ]

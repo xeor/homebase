@@ -36,7 +36,6 @@ def _stub_dispatch_kwargs(**overrides: object) -> dict[str, object]:
         cmd_archive_ls=lambda _a, _b: 0,
         cmd_archive_undo=lambda _a, _b: 0,
         cmd_archive_restore_entry=lambda _a, _b: 0,
-        cmd_archive_reorganize=lambda _a, _b: 0,
         cmd_tmux_load=lambda _a: 0,
         cmd_tmux_save=lambda _a, _b, _c, _d, _e, _f, _g: 0,
         cmd_benchmark=lambda _a, _b, _c, _d, _e, _f: 0,

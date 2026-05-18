@@ -207,20 +207,25 @@ def build_cli_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         description=(
             "Inspect one or more directories under base and apply safe repairs.\n"
-            "Only paths under base (including the archive) are accepted; other\n"
-            "underscore-prefixed roots (e.g. _tags) are skipped.\n"
+            "Valid targets: direct base projects (base/<name>) and archive\n"
+            "entries (base/_archive/<year>/<entry> or legacy entries directly\n"
+            "under _archive). Anything else is ignored.\n"
             "\n"
             "Available fixers (all run by default; each is contextual):\n"
             "  marker         create missing .base.yaml in active projects\n"
             "  archive-entry  for items under _archive, ensure canonical\n"
             "                 YYYY-MM-DD_<name> form and move into the right\n"
-            "                 year subdir. Date is detected from the name,\n"
-            "                 from a YYYY-MM-DD embedded substring, or from\n"
-            "                 the newest file mtime inside the folder; falls\n"
-            "                 back to a prompt (default: today, YYYY-MM-DD).\n"
+            "                 year subdir. Date is detected from the name\n"
+            "                 (also accepting space/hyphen/dot separators and\n"
+            "                 normalising 00→01 segments), from an embedded\n"
+            "                 YYYY-MM-DD, or from the newest file mtime;\n"
+            "                 falls back to a prompt (default: today,\n"
+            "                 YYYY-MM-DD). Handles dirs and .tgz files.\n"
             "\n"
-            "Targeting `_archive` itself fans out to its non-year direct\n"
-            "children. Year directories are skipped.\n"
+            "Targeting `_archive` itself fans out to every malformed entry\n"
+            "(legacy direct children + non-canonical entries inside year\n"
+            "subdirs). Pass `--all` to also sweep direct base projects in\n"
+            "the same pass.\n"
             "\n"
             "Selection: pass --<fixer> to run only those, or --no-<fixer>\n"
             "to skip a fixer. The two forms cannot be mixed for the same name."
@@ -231,6 +236,15 @@ def build_cli_parser() -> argparse.ArgumentParser:
         nargs="*",
         default=[],
         help="target directories (default: current directory)",
+    )
+    p_fix.add_argument(
+        "--all",
+        dest="all_targets",
+        action="store_true",
+        help=(
+            "sweep the whole workspace: every direct base project plus the "
+            "_archive root. Overrides any explicit paths."
+        ),
     )
     p_fix.add_argument(
         "--yes", "-y",
@@ -308,8 +322,6 @@ def build_cli_parser() -> argparse.ArgumentParser:
     p_archive_undo.add_argument("path", nargs="?", default=".", help="path/name to restore")
     p_archive_restore = archive_sub.add_parser("restore", help="restore exact archived path")
     p_archive_restore.add_argument("archived_path", help="full archived entry path")
-    p_archive_reorg = archive_sub.add_parser("reorganize", help="reorganize archive entries under year dirs")
-    p_archive_reorg.add_argument("--dry-run", action="store_true", help="show actions without moving")
 
     p_tmux = sub.add_parser("tmux", help="tmux integration commands")
     tmux_sub = p_tmux.add_subparsers(dest="tmux_subcommand", required=True)

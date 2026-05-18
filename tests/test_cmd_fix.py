@@ -386,6 +386,116 @@ def test_fix_archive_entry_prompt_rejects_invalid_then_accepts(tmp_path, monkeyp
     assert expected.is_dir()
 
 
+def test_fix_archive_entry_with_space_separator(tmp_path, monkeypatch):
+    """`2026-05-18 mappe` → `2026-05-18_mappe` (rename to underscore form)."""
+    base = tmp_path / "base"
+    src = base / "_archive" / "2026" / "2026-05-18 mappe"
+    src.mkdir(parents=True)
+    rc = _run(
+        base, monkeypatch,
+        paths=[str(src)],
+        include=set(commands_workspace.FIX_KINDS),
+        yes=True,
+    )
+    assert rc == 0
+    expected = base / "_archive" / "2026" / "2026-05-18_mappe"
+    assert expected.is_dir()
+    assert not src.exists()
+
+
+def test_fix_archive_entry_with_zero_segments(tmp_path, monkeypatch):
+    """Legacy `2003-00-00_invisible` → normalized to `2003-01-01_invisible`."""
+    base = tmp_path / "base"
+    src = base / "_archive" / "2003-00-00_invisible"
+    src.mkdir(parents=True)
+    rc = _run(
+        base, monkeypatch,
+        paths=[str(src)],
+        include=set(commands_workspace.FIX_KINDS),
+        yes=True,
+    )
+    assert rc == 0
+    expected = base / "_archive" / "2003" / "2003-01-01_invisible"
+    assert expected.is_dir()
+    assert not src.exists()
+
+
+def test_fix_archive_tgz_file(tmp_path, monkeypatch):
+    """A packed `.tgz` archive at the top of `_archive` gets moved
+    into the right year subdir."""
+    base = tmp_path / "base"
+    arch = base / "_archive"
+    arch.mkdir(parents=True)
+    tgz = arch / "2009-04-14_old.tgz"
+    tgz.write_bytes(b"x")
+    rc = _run(
+        base, monkeypatch,
+        paths=[str(tgz)],
+        include=set(commands_workspace.FIX_KINDS),
+        yes=True,
+    )
+    assert rc == 0
+    expected = base / "_archive" / "2009" / "2009-04-14_old.tgz"
+    assert expected.is_file()
+    assert not tgz.exists()
+
+
+def test_fix_all_walks_base_and_archive(tmp_path, monkeypatch):
+    base = tmp_path / "base"
+    # Active project missing marker
+    proj = base / "proj"
+    proj.mkdir(parents=True)
+    # Hidden + reserved roots shouldn't be touched
+    (base / "_tags").mkdir()
+    (base / ".homebase").mkdir()
+    # Malformed archive entry (space separator)
+    bad_arch = base / "_archive" / "2025" / "2025-04-01 stale"
+    bad_arch.mkdir(parents=True)
+
+    rc = _run(
+        base, monkeypatch,
+        paths=[],
+        include=set(commands_workspace.FIX_KINDS),
+        yes=True,
+        all_targets=True,
+    )
+    assert rc == 0
+    assert (proj / _MARKER).is_file()
+    assert (base / "_archive" / "2025" / "2025-04-01_stale").is_dir()
+    assert not (base / "_tags" / _MARKER).exists()
+    assert not (base / ".homebase" / _MARKER).exists()
+
+
+def test_fix_all_with_empty_base_is_noop(tmp_path, monkeypatch):
+    base = tmp_path / "base"
+    base.mkdir()
+    rc = _run(
+        base, monkeypatch,
+        paths=[],
+        include=set(commands_workspace.FIX_KINDS),
+        yes=True,
+        all_targets=True,
+    )
+    assert rc == 0
+
+
+def test_fix_all_overrides_explicit_paths(tmp_path, monkeypatch, capsys):
+    base = tmp_path / "base"
+    proj = base / "proj"
+    proj.mkdir(parents=True)
+    rc = _run(
+        base, monkeypatch,
+        paths=["/some/ignored/path"],
+        include=set(commands_workspace.FIX_KINDS),
+        yes=True,
+        all_targets=True,
+    )
+    assert rc == 0
+    err = capsys.readouterr().err
+    assert "overrides explicit paths" in err
+    assert (proj / _MARKER).is_file()
+
+
 def test_fix_empty_include_set_errors(tmp_path, monkeypatch, capsys):
     base = tmp_path / "base"
     base.mkdir()

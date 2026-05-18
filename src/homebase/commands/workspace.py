@@ -2,87 +2,10 @@ from __future__ import annotations
 
 import os
 import re
-import shutil
 import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Callable
-
-
-def cmd_archive_reorganize(
-    base_dir: Path,
-    *,
-    archive_dir_name: str,
-    year_from_name: Callable[[str], str | None],
-    is_year_dir: Callable[[str], bool],
-    normalize_name: Callable[[str], str],
-    confirm: Callable[[], None],
-    dry_run: bool,
-) -> int:
-    root = base_dir / archive_dir_name
-    if not root.is_dir():
-        print(f"no archive dir: {root}")
-        return 0
-
-    moves: list[tuple[Path, Path, bool]] = []
-    skipped: list[tuple[Path, str]] = []
-
-    def _plan(entry: Path) -> None:
-        name = entry.name
-        year = year_from_name(name)
-        if year is None:
-            skipped.append((entry, "no year prefix"))
-            return
-        new_name = normalize_name(name)
-        renamed = new_name != name
-        dest = root / year / new_name
-        if dest == entry:
-            return
-        if dest.exists():
-            skipped.append((entry, f"destination exists: {dest}"))
-            return
-        moves.append((entry, dest, renamed))
-
-    for entry in sorted(root.iterdir()):
-        if is_year_dir(entry.name) and entry.is_dir():
-            for child in sorted(entry.iterdir()):
-                _plan(child)
-            continue
-        _plan(entry)
-
-    print(f"archive root: {root}")
-    print(f"moves: {len(moves)}")
-    for src, dest, renamed in moves:
-        tag = " [normalized 00→01]" if renamed else ""
-        print(f"  {src.name} -> {dest.relative_to(root)}{tag}")
-    if skipped:
-        print("")
-        print(f"skipped: {len(skipped)}")
-        for src, reason in skipped:
-            print(f"  {src.name}: {reason}")
-    if not moves:
-        return 0
-    if dry_run:
-        print("")
-        print("dry-run: no changes made")
-        return 0
-
-    print("")
-    confirm()
-    moved = 0
-    failed = 0
-    for src, dest, _renamed in moves:
-        try:
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            shutil.move(str(src), str(dest))
-            moved += 1
-            print(f"moved: {src.name} -> {dest.relative_to(root)}")
-        except (OSError, shutil.Error) as exc:
-            failed += 1
-            print(f"failed: {src} -> {dest}: {exc}", file=sys.stderr)
-    print("")
-    print(f"done: moved={moved} failed={failed}")
-    return 0 if failed == 0 else 1
 
 
 def cmd_archive_mv_one(
@@ -274,11 +197,28 @@ _CANONICAL_ENTRY_NAME_RE = re.compile(
 )
 
 
+def _archive_entry_stem_name(name: str) -> str:
+    """Strip the ``.tgz`` suffix when classifying an archive entry —
+    canonical naming rules apply to the bare stem either way."""
+    return name[:-4] if name.endswith(".tgz") else name
+
+
+def _is_archive_entry_candidate(entry: Path) -> bool:
+    """Either a directory or a packed ``.tgz`` archive sitting inside
+    ``_archive``."""
+    if entry.is_dir():
+        return True
+    if entry.is_file() and entry.name.endswith(".tgz"):
+        return True
+    return False
+
+
 def _is_canonical_archive_entry(entry: Path, year_dir_name: str) -> bool:
     """An archive entry is canonical when it lives at
     ``_archive/<year>/<YYYY-MM-DD>_<stem>`` and the date matches its
     parent year directory."""
-    m = _CANONICAL_ENTRY_NAME_RE.match(entry.name)
+    bare = _archive_entry_stem_name(entry.name)
+    m = _CANONICAL_ENTRY_NAME_RE.match(bare)
     if not m:
         return False
     return m.group(1) == year_dir_name
@@ -290,13 +230,13 @@ def _list_archive_root_fixables(
 ) -> list[Path]:
     """Items under ``_archive`` that need fixing:
 
-    - Direct children that aren't year dirs (legacy malformed entries
-      sitting at the top level).
+    - Direct children (dirs or ``.tgz`` files) that aren't year dirs
+      — legacy malformed entries sitting at the top level.
     - Children inside year dirs whose name isn't canonical
       ``YYYY-MM-DD_<stem>`` or whose embedded year doesn't match the
       parent year directory.
 
-    Dotfile/underscore-prefixed roots are skipped.
+    Dotfile/underscore-prefixed entries are skipped.
     """
     out: list[Path] = []
     try:
@@ -304,23 +244,23 @@ def _list_archive_root_fixables(
     except OSError:
         return out
     for entry in entries:
-        if not entry.is_dir():
-            continue
         if entry.name.startswith(".") or entry.name.startswith("_"):
             continue
-        if _is_year_dir(entry.name, archive_year_re):
+        if entry.is_dir() and _is_year_dir(entry.name, archive_year_re):
             try:
                 year_children = sorted(entry.iterdir())
             except OSError:
                 continue
             for child in year_children:
-                if not child.is_dir():
-                    continue
                 if child.name.startswith(".") or child.name.startswith("_"):
+                    continue
+                if not _is_archive_entry_candidate(child):
                     continue
                 if _is_canonical_archive_entry(child, entry.name):
                     continue
                 out.append(child)
+            continue
+        if not _is_archive_entry_candidate(entry):
             continue
         out.append(entry)
     return out
@@ -495,9 +435,6 @@ def _fix_one(
     if not target.exists():
         print(f"skipping: not found ({target})", file=sys.stderr)
         return 0
-    if not target.is_dir():
-        print(f"skipping: not a directory ({target})", file=sys.stderr)
-        return 0
     if not is_under(target, base_dir) and target != base_dir:
         print(
             f"skipping: not under base ({base_dir}): {target}",
@@ -506,6 +443,15 @@ def _fix_one(
         return 0
 
     archive_root = (base_dir / archive_dir_name).resolve()
+    in_archive_subtree = is_under(target, archive_root)
+    is_packed_archive_file = (
+        target.is_file()
+        and target.name.endswith(".tgz")
+        and in_archive_subtree
+    )
+    if not target.is_dir() and not is_packed_archive_file:
+        print(f"skipping: not a directory ({target})", file=sys.stderr)
+        return 0
 
     # ``b fix _archive`` — fan out to every malformed entry, including
     # those inside year subdirs.
@@ -614,6 +560,26 @@ def _fix_one(
     )
 
 
+def _collect_all_targets(base_dir: Path, archive_dir_name: str) -> list[str]:
+    """``--all`` expansion: every direct base project plus the
+    ``_archive`` root (which the inner pipeline fans out further).
+    Hidden / underscore entries are skipped."""
+    out: list[str] = []
+    try:
+        entries = sorted(base_dir.iterdir())
+    except OSError:
+        entries = []
+    for entry in entries:
+        if entry.name.startswith(".") or entry.name.startswith("_"):
+            continue
+        if entry.is_dir():
+            out.append(str(entry))
+    archive_root = base_dir / archive_dir_name
+    if archive_root.is_dir():
+        out.append(str(archive_root))
+    return out
+
+
 def cmd_fix(
     paths: list[str],
     *,
@@ -634,13 +600,25 @@ def cmd_fix(
     ensure_base_marker: Callable[[Path], None],
     confirm: Callable[[], None],
     read_line: Callable[[str], str | None],
+    all_targets: bool = False,
 ) -> int:
     if not include:
         print("fix: no fixers selected", file=sys.stderr)
         return 2
-    targets = list(paths) if paths else ["."]
     base_dir = Path(os.environ.get(env_base_dir_key, ".")).resolve()
-    worst = 0
+    if all_targets:
+        if paths:
+            print(
+                "note: --all overrides explicit paths",
+                file=sys.stderr,
+            )
+        targets = _collect_all_targets(base_dir, archive_dir_name)
+        if not targets:
+            print("nothing to sweep under base")
+            return 0
+    else:
+        targets = list(paths) if paths else ["."]
+    worst: int = 0
     for idx, raw in enumerate(targets):
         if idx > 0:
             print("")
