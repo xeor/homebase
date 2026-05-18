@@ -188,6 +188,111 @@ FIX_ARCHIVE_ENTRY = "archive-entry"
 FIX_KINDS: tuple[str, ...] = (FIX_MARKER, FIX_ARCHIVE_ENTRY)
 
 
+# ---- display helpers for ``b fix`` ----------------------------------
+# ANSI styling: only emit when stdout is a real TTY so pytest capture
+# and pipe redirection stay plain text.
+
+
+def _fix_colors_on() -> bool:
+    try:
+        return sys.stdout.isatty()
+    except (OSError, ValueError):
+        return False
+
+
+def _c(text: object, code: str) -> str:
+    s = str(text)
+    if not _fix_colors_on():
+        return s
+    return f"\x1b[{code}m{s}\x1b[0m"
+
+
+def _bold(t: object) -> str: return _c(t, "1")
+def _dim(t: object) -> str: return _c(t, "2")
+def _red(t: object) -> str: return _c(t, "31")
+def _green(t: object) -> str: return _c(t, "32")
+def _yellow(t: object) -> str: return _c(t, "33")
+def _cyan(t: object) -> str: return _c(t, "36")
+def _b_yellow(t: object) -> str: return _c(t, "1;33")
+def _b_cyan(t: object) -> str: return _c(t, "1;36")
+
+
+_GLYPH_OK = _green("✓")
+_GLYPH_INFO = _cyan("•")
+_GLYPH_ACTION = _yellow("→")
+_GLYPH_WARN = _yellow("⚠")
+_GLYPH_FAIL = _red("✗")
+_GLYPH_SKIP = _dim("—")
+
+
+def _fmt_location(target: Path, base_dir: Path) -> str:
+    """A short hint shown next to the entry name in the header line."""
+    if target == base_dir:
+        return "base"
+    try:
+        rel = target.parent.relative_to(base_dir)
+    except ValueError:
+        return ""
+    s = str(rel)
+    return "" if s == "." else s
+
+
+def _print_item_header(
+    idx: int, total: int, name: str, location: str,
+) -> None:
+    counter = _b_yellow(f"[{idx}/{total}]")
+    label = _bold(name)
+    if location:
+        print(f"\n{counter} {label}  {_dim(location)}")
+    else:
+        print(f"\n{counter} {label}")
+
+
+def _print_top_header(base_dir: Path, total: int, all_targets: bool) -> None:
+    tag = " --all" if all_targets else ""
+    print(_b_cyan(f"fix{tag}: {base_dir}") + _dim(f"  ({total} item(s))"))
+
+
+def _print_ok(message: str) -> None:
+    print(f"  {_GLYPH_OK} {message}")
+
+
+def _print_info(label: str, value: str = "") -> None:
+    if value:
+        print(f"  {_GLYPH_INFO} {label}: {_yellow(value)}")
+    else:
+        print(f"  {_GLYPH_INFO} {label}")
+
+
+def _print_action(line: str, target: str | None = None) -> None:
+    print(f"  {_GLYPH_ACTION} {line}")
+    if target:
+        print(f"      {_dim(target)}")
+
+
+def _print_skip(message: str) -> None:
+    print(f"  {_GLYPH_SKIP} {_dim(message)}")
+
+
+def _print_warn(message: str) -> None:
+    print(f"  {_GLYPH_WARN} {message}")
+
+
+def _print_fail(message: str) -> None:
+    print(f"  {_GLYPH_FAIL} {message}", file=sys.stderr)
+
+
+def _print_summary(counts: dict[str, int]) -> None:
+    parts = [
+        f"{_green(counts['ok'])} ok",
+        f"{_b_yellow(counts['changed'])} changed",
+        f"{_dim(counts['skipped'])} skipped",
+        f"{_red(counts['failed'])} failed",
+    ]
+    print()
+    print(_bold("done.") + "  " + "  ".join(parts))
+
+
 def _is_year_dir(name: str, archive_year_re) -> bool:
     return bool(archive_year_re.match(name))
 
@@ -282,10 +387,9 @@ def _ask_for_archive_date(
     today_ts = int(today_dt.replace(hour=0, minute=0, second=0, microsecond=0).timestamp())
     if yes or not sys.stdin.isatty():
         return today_ts, f"today ({today_iso}) — fallback"
+    prompt = f"    {_yellow('date')} [YYYY-MM-DD, default {today_iso}]: "
     for _ in range(max_attempts):
-        raw = read_line(
-            f"  date for '{target.name}' [YYYY-MM-DD, default {today_iso}]: "
-        )
+        raw = read_line(prompt)
         if raw is None:
             return None
         text = raw.strip()
@@ -294,8 +398,8 @@ def _ask_for_archive_date(
         parsed = parse_user_date(text, archive_tz)
         if parsed is not None:
             return parsed, f"user input {text}"
-        print("  invalid date format, expected YYYY-MM-DD", file=sys.stderr)
-    print("  giving up: no valid date", file=sys.stderr)
+        _print_warn("invalid date, expected YYYY-MM-DD")
+    _print_fail("giving up: no valid date provided")
     return None
 
 
@@ -313,11 +417,11 @@ def _fix_archive_entry(
     strip_date_prefix: Callable[[str], str],
     prompt_yes_no: Callable[[str, bool], bool],
     read_line: Callable[[str], str | None],
-) -> int:
-    print(f"fix archive entry: {target}")
+) -> str:
+    """Returns one of: 'ok' | 'changed' | 'skipped' | 'failed'."""
     if FIX_ARCHIVE_ENTRY not in include:
-        print("archive-entry: skipped (--no-archive-entry)")
-        return 0
+        _print_skip("archive-entry fixer disabled (--no-archive-entry)")
+        return "skipped"
 
     detection = detect_folder_date(
         target,
@@ -328,6 +432,7 @@ def _fix_archive_entry(
         ts = detection.ts
         source = detection.source
     else:
+        _print_warn("no date found in name or content")
         resolved = _ask_for_archive_date(
             target,
             yes=yes,
@@ -336,8 +441,7 @@ def _fix_archive_entry(
             parse_user_date=parse_user_date,
         )
         if resolved is None:
-            print("aborted: no valid date", file=sys.stderr)
-            return 1
+            return "skipped"
         ts, source = resolved
 
     iso = archive_iso_from_ts(ts, archive_tz)
@@ -350,29 +454,25 @@ def _fix_archive_entry(
     canonical_path = (archive_root / year / canonical_name).resolve()
 
     if canonical_path == target:
-        print(f"already canonical: {target.name} ({source})")
-        return 0
-    print(f"  date source: {source}")
-    print(f"  move: {target}")
-    print(f"     -> {canonical_path}")
+        _print_ok(f"already canonical ({source})")
+        return "ok"
+    _print_info("date", f"{date_prefix}  ({source})")
+    _print_action(f"rename → {canonical_name}", f"_archive/{year}/")
     if canonical_path.exists():
-        print(
-            f"  refusing: destination exists: {canonical_path}",
-            file=sys.stderr,
-        )
-        return 1
+        _print_fail(f"destination already exists: {canonical_path}")
+        return "failed"
     if not yes:
-        if not prompt_yes_no("apply rename/move?", True):
-            print("  aborted")
-            return 1
+        if not prompt_yes_no(f"    {_bold('apply')}?", True):
+            _print_skip("declined")
+            return "skipped"
     try:
         canonical_path.parent.mkdir(parents=True, exist_ok=True)
         target.rename(canonical_path)
     except OSError as exc:
-        print(f"  move failed: {exc}", file=sys.stderr)
-        return 1
-    print(f"  done: {canonical_path}")
-    return 0
+        _print_fail(f"move failed: {exc}")
+        return "failed"
+    _print_ok(f"moved to {canonical_path}")
+    return "changed"
 
 
 def _fix_active_project(
@@ -383,172 +483,121 @@ def _fix_active_project(
     base_marker_file: str,
     prompt_yes_no: Callable[[str, bool], bool],
     ensure_base_marker: Callable[[Path], None],
-    confirm: Callable[[], None],
-) -> int:
-    print(f"fix project: {target}")
+) -> str:
+    """Returns one of: 'ok' | 'changed' | 'skipped' | 'failed'."""
     if FIX_MARKER not in include:
-        print("marker: skipped (--no-marker)")
-        return 0
+        _print_skip("marker fixer disabled (--no-marker)")
+        return "skipped"
     marker_file = target / base_marker_file
     if marker_file.exists():
-        print(f"marker: exists ({marker_file.name})")
-        return 0
-    create = yes or prompt_yes_no(
-        f"create {base_marker_file} in {target}?", True
-    )
-    if not create:
-        print("marker: skipped (declined)")
-        return 0
+        _print_ok(f"marker present ({base_marker_file})")
+        return "ok"
+    _print_warn(f"missing marker: {base_marker_file}")
     if not yes:
-        confirm()
+        if not prompt_yes_no(f"    {_bold('create')} {base_marker_file}?", True):
+            _print_skip("declined")
+            return "skipped"
     try:
         ensure_base_marker(target)
     except OSError as exc:
-        print(f"  marker create failed: {exc}", file=sys.stderr)
-        return 1
-    print(f"  created: {marker_file}")
-    return 0
+        _print_fail(f"create failed: {exc}")
+        return "failed"
+    _print_ok(f"created {marker_file.name}")
+    return "changed"
 
 
-def _fix_one(
+def _expand_target(
     raw_path: str,
     *,
-    include: set[str],
-    yes: bool,
     base_dir: Path,
     archive_dir_name: str,
     archive_year_re,
-    archive_tz,
     is_under: Callable[[Path, Path], bool],
-    base_marker_file: str,
-    prompt_yes_no: Callable[[str, bool], bool],
+) -> tuple[str, Path | list[Path] | None, str | None]:
+    """Resolve a raw user input into a category + payload.
+
+    Returns ``(kind, payload, reason)``:
+      - ("project", path, None)     → active base project, run marker fixer
+      - ("entry", path, None)       → archive entry, run archive-entry fixer
+      - ("sweep", [paths], None)    → ``_archive`` itself: fan out
+      - ("noop", None, reason_str)  → skip with a message
+    """
+    target = Path(raw_path).expanduser().resolve()
+    if not target.exists():
+        return "noop", None, f"not found: {target}"
+    if not is_under(target, base_dir) and target != base_dir:
+        return "noop", None, f"not under base: {target}"
+
+    archive_root = (base_dir / archive_dir_name).resolve()
+    in_archive = is_under(target, archive_root)
+    is_packed = (
+        target.is_file() and target.name.endswith(".tgz") and in_archive
+    )
+    if not target.is_dir() and not is_packed:
+        return "noop", None, f"not a directory: {target}"
+
+    if target == archive_root:
+        fixables = _list_archive_root_fixables(archive_root, archive_year_re)
+        return "sweep", fixables, None
+
+    if in_archive:
+        try:
+            parts = target.relative_to(archive_root).parts
+        except ValueError:
+            parts = ()
+        if len(parts) == 1:
+            if _is_year_dir(parts[0], archive_year_re):
+                return "noop", None, f"year directory: {target}"
+            return "entry", target, None
+        if len(parts) == 2 and _is_year_dir(parts[0], archive_year_re):
+            return "entry", target, None
+        return "noop", None, f"not a fixable archive target: {target}"
+
+    if target == base_dir:
+        return "noop", None, "pass a project path, not base itself"
+    if target.parent != base_dir:
+        return "noop", None, f"not a direct base entry: {target}"
+    if target.name.startswith("_") or target.name.startswith("."):
+        return "noop", None, f"reserved directory: {target.name}"
+
+    return "project", target, None
+
+
+def _process_target(
+    target: Path,
+    kind: str,
+    *,
+    base_dir: Path,
+    archive_dir_name: str,
+    include: set[str],
+    yes: bool,
+    archive_tz,
     parse_archive_timestamp: Callable[[str], int],
     archive_iso_from_ts: Callable[[int, object], str],
     detect_folder_date,
     parse_user_date: Callable[[str, object], int | None],
     strip_date_prefix: Callable[[str], str],
+    prompt_yes_no: Callable[[str, bool], bool],
+    base_marker_file: str,
     ensure_base_marker: Callable[[Path], None],
-    confirm: Callable[[], None],
     read_line: Callable[[str], str | None],
-) -> int:
-    target = Path(raw_path).expanduser().resolve()
-    if not target.exists():
-        print(f"skipping: not found ({target})", file=sys.stderr)
-        return 0
-    if not is_under(target, base_dir) and target != base_dir:
-        print(
-            f"skipping: not under base ({base_dir}): {target}",
-            file=sys.stderr,
+) -> str:
+    if kind == "entry":
+        archive_root = (base_dir / archive_dir_name).resolve()
+        return _fix_archive_entry(
+            target,
+            archive_root=archive_root,
+            include=include,
+            yes=yes,
+            archive_tz=archive_tz,
+            parse_archive_timestamp=parse_archive_timestamp,
+            archive_iso_from_ts=archive_iso_from_ts,
+            detect_folder_date=detect_folder_date,
+            parse_user_date=parse_user_date,
+            strip_date_prefix=strip_date_prefix,
+            prompt_yes_no=prompt_yes_no,
+            read_line=read_line,
         )
-        return 0
-
-    archive_root = (base_dir / archive_dir_name).resolve()
-    in_archive_subtree = is_under(target, archive_root)
-    is_packed_archive_file = (
-        target.is_file()
-        and target.name.endswith(".tgz")
-        and in_archive_subtree
-    )
-    if not target.is_dir() and not is_packed_archive_file:
-        print(f"skipping: not a directory ({target})", file=sys.stderr)
-        return 0
-
-    # ``b fix _archive`` — fan out to every malformed entry, including
-    # those inside year subdirs.
-    if target == archive_root:
-        fixables = _list_archive_root_fixables(archive_root, archive_year_re)
-        if not fixables:
-            print("nothing to fix under _archive")
-            return 0
-        print(f"fanning out {len(fixables)} entry/entries under _archive")
-        worst = 0
-        for child in fixables:
-            print("")
-            rc = _fix_archive_entry(
-                child,
-                archive_root=archive_root,
-                include=include,
-                yes=yes,
-                archive_tz=archive_tz,
-                parse_archive_timestamp=parse_archive_timestamp,
-                archive_iso_from_ts=archive_iso_from_ts,
-                detect_folder_date=detect_folder_date,
-                parse_user_date=parse_user_date,
-                strip_date_prefix=strip_date_prefix,
-                prompt_yes_no=prompt_yes_no,
-                read_line=read_line,
-            )
-            if rc != 0 and (worst == 0 or rc > worst):
-                worst = rc
-        return worst
-
-    # Anything under ``_archive``.
-    if is_under(target, archive_root):
-        try:
-            rel_parts = target.relative_to(archive_root).parts
-        except ValueError:
-            rel_parts = ()
-        if len(rel_parts) == 1:
-            # ``_archive/<X>``: either a year dir (skip) or a legacy
-            # malformed entry sitting at the top level (fix).
-            if _is_year_dir(rel_parts[0], archive_year_re):
-                print(
-                    f"skipping: year directory has no fix at this level ({target})"
-                )
-                return 0
-            return _fix_archive_entry(
-                target,
-                archive_root=archive_root,
-                include=include,
-                yes=yes,
-                archive_tz=archive_tz,
-                parse_archive_timestamp=parse_archive_timestamp,
-                archive_iso_from_ts=archive_iso_from_ts,
-                detect_folder_date=detect_folder_date,
-                parse_user_date=parse_user_date,
-                strip_date_prefix=strip_date_prefix,
-                prompt_yes_no=prompt_yes_no,
-                read_line=read_line,
-            )
-        if len(rel_parts) == 2 and _is_year_dir(rel_parts[0], archive_year_re):
-            # Canonical position: ``_archive/<year>/<entry>``.
-            return _fix_archive_entry(
-                target,
-                archive_root=archive_root,
-                include=include,
-                yes=yes,
-                archive_tz=archive_tz,
-                parse_archive_timestamp=parse_archive_timestamp,
-                archive_iso_from_ts=archive_iso_from_ts,
-                detect_folder_date=detect_folder_date,
-                parse_user_date=parse_user_date,
-                strip_date_prefix=strip_date_prefix,
-                prompt_yes_no=prompt_yes_no,
-                read_line=read_line,
-            )
-        print(
-            f"skipping: not a fixable archive target ({target})",
-            file=sys.stderr,
-        )
-        return 0
-
-    # Outside ``_archive``: must be a direct base entry, not reserved.
-    if target == base_dir:
-        print(
-            f"skipping: pass a project path, not base itself ({target})",
-            file=sys.stderr,
-        )
-        return 0
-    if target.parent != base_dir:
-        print(
-            f"skipping: not a direct base entry ({target})",
-            file=sys.stderr,
-        )
-        return 0
-    if target.name.startswith("_") or target.name.startswith("."):
-        print(f"skipping: reserved directory ({target})")
-        return 0
-
     return _fix_active_project(
         target,
         include=include,
@@ -556,7 +605,6 @@ def _fix_one(
         base_marker_file=base_marker_file,
         prompt_yes_no=prompt_yes_no,
         ensure_base_marker=ensure_base_marker,
-        confirm=confirm,
     )
 
 
@@ -598,7 +646,6 @@ def cmd_fix(
     parse_user_date: Callable[[str, object], int | None],
     strip_date_prefix: Callable[[str], str],
     ensure_base_marker: Callable[[Path], None],
-    confirm: Callable[[], None],
     read_line: Callable[[str], str | None],
     all_targets: bool = False,
 ) -> int:
@@ -608,42 +655,73 @@ def cmd_fix(
     base_dir = Path(os.environ.get(env_base_dir_key, ".")).resolve()
     if all_targets:
         if paths:
-            print(
-                "note: --all overrides explicit paths",
-                file=sys.stderr,
-            )
-        targets = _collect_all_targets(base_dir, archive_dir_name)
-        if not targets:
+            print(_dim("note: --all overrides explicit paths"), file=sys.stderr)
+        raw_targets = _collect_all_targets(base_dir, archive_dir_name)
+        if not raw_targets:
             print("nothing to sweep under base")
             return 0
     else:
-        targets = list(paths) if paths else ["."]
-    worst: int = 0
-    for idx, raw in enumerate(targets):
-        if idx > 0:
-            print("")
-        if len(targets) > 1:
-            print(f"== {raw} ==")
-        rc = _fix_one(
+        raw_targets = list(paths) if paths else ["."]
+
+    # First pass: classify each top-level target and flatten any
+    # ``_archive`` sweeps so the final list is a flat sequence of
+    # items to process. Skip notes are stashed as ``("noop", reason)``
+    # so we can render them in order.
+    flat: list[tuple[str, object]] = []
+    for raw in raw_targets:
+        kind, payload, reason = _expand_target(
             raw,
-            include=include,
-            yes=yes,
             base_dir=base_dir,
             archive_dir_name=archive_dir_name,
             archive_year_re=archive_year_re,
-            archive_tz=archive_tz,
             is_under=is_under,
-            base_marker_file=base_marker_file,
-            prompt_yes_no=prompt_yes_no,
+        )
+        if kind == "noop":
+            flat.append(("noop", reason or "skipped"))
+            continue
+        if kind == "sweep":
+            entries = payload or []
+            if not entries:
+                flat.append(("noop", "nothing to fix under _archive"))
+                continue
+            for entry in entries:
+                flat.append(("entry", entry))
+            continue
+        flat.append((kind, payload))
+
+    total = len(flat)
+    _print_top_header(base_dir, total, all_targets)
+
+    counts = {"ok": 0, "changed": 0, "skipped": 0, "failed": 0}
+    for idx, (kind, payload) in enumerate(flat, start=1):
+        if kind == "noop":
+            _print_item_header(idx, total, _dim("(skipped)"), "")
+            _print_skip(str(payload))
+            counts["skipped"] += 1
+            continue
+        target = payload
+        assert isinstance(target, Path)
+        location = _fmt_location(target, base_dir)
+        _print_item_header(idx, total, target.name, location)
+        result = _process_target(
+            target,
+            kind,
+            base_dir=base_dir,
+            archive_dir_name=archive_dir_name,
+            include=include,
+            yes=yes,
+            archive_tz=archive_tz,
             parse_archive_timestamp=parse_archive_timestamp,
             archive_iso_from_ts=archive_iso_from_ts,
             detect_folder_date=detect_folder_date,
             parse_user_date=parse_user_date,
             strip_date_prefix=strip_date_prefix,
+            prompt_yes_no=prompt_yes_no,
+            base_marker_file=base_marker_file,
             ensure_base_marker=ensure_base_marker,
-            confirm=confirm,
             read_line=read_line,
         )
-        if rc != 0 and (worst == 0 or rc > worst):
-            worst = rc
-    return worst
+        counts[result] = counts.get(result, 0) + 1
+
+    _print_summary(counts)
+    return 1 if counts["failed"] else 0

@@ -12,7 +12,7 @@ _YEAR_RE = re.compile(r"^\d{4}$")
 _MARKER = ".base.yaml"
 
 
-def _stub_deps(*, prompt_yes_no=None, read_line=None, confirm=None) -> dict:
+def _stub_deps(*, prompt_yes_no=None, read_line=None) -> dict:
     return dict(
         env_base_dir_key="HOMEBASE_FIX_TEST_BASE",
         archive_dir_name="_archive",
@@ -27,7 +27,6 @@ def _stub_deps(*, prompt_yes_no=None, read_line=None, confirm=None) -> dict:
         parse_user_date=date_detect.parse_user_date,
         strip_date_prefix=date_detect.strip_date_prefix,
         ensure_base_marker=lambda p: (p / _MARKER).touch(),
-        confirm=confirm or (lambda: None),
         read_line=read_line or (lambda _q: ""),
     )
 
@@ -63,7 +62,7 @@ def test_fix_skips_outside_base(tmp_path, monkeypatch, capsys):
         yes=False,
     )
     assert rc == 0
-    assert "not under base" in capsys.readouterr().err
+    assert "not under base" in capsys.readouterr().out
     assert not (outside / _MARKER).exists()
 
 
@@ -92,11 +91,8 @@ def test_fix_yes_skips_prompt(tmp_path, monkeypatch):
     def _no_prompt(_q, _d):
         raise AssertionError("prompt should not run with --yes")
 
-    def _no_confirm():
-        raise AssertionError("confirm should not run with --yes")
-
     monkeypatch.setenv("HOMEBASE_FIX_TEST_BASE", str(base))
-    deps = _stub_deps(prompt_yes_no=_no_prompt, confirm=_no_confirm)
+    deps = _stub_deps(prompt_yes_no=_no_prompt)
     rc = commands_workspace.cmd_fix(
         paths=[str(proj)],
         include=set(commands_workspace.FIX_KINDS),
@@ -104,6 +100,31 @@ def test_fix_yes_skips_prompt(tmp_path, monkeypatch):
         **deps,
     )
     assert rc == 0
+    assert (proj / _MARKER).is_file()
+
+
+def test_fix_marker_uses_only_one_prompt(tmp_path, monkeypatch):
+    """No double-confirm: only the y/n question runs; there's no
+    follow-up press-enter gate."""
+    base = tmp_path / "base"
+    proj = base / "proj"
+    proj.mkdir(parents=True)
+    prompt_calls: list[str] = []
+
+    def _prompt(q, d):
+        prompt_calls.append(q)
+        return True
+
+    monkeypatch.setenv("HOMEBASE_FIX_TEST_BASE", str(base))
+    deps = _stub_deps(prompt_yes_no=_prompt)
+    rc = commands_workspace.cmd_fix(
+        paths=[str(proj)],
+        include=set(commands_workspace.FIX_KINDS),
+        yes=False,
+        **deps,
+    )
+    assert rc == 0
+    assert len(prompt_calls) == 1
     assert (proj / _MARKER).is_file()
 
 
@@ -206,7 +227,7 @@ def test_fix_skips_subdir_of_archive_entry(tmp_path, monkeypatch, capsys):
         yes=True,
     )
     assert rc == 0
-    assert "not a fixable archive target" in capsys.readouterr().err
+    assert "not a fixable archive target" in capsys.readouterr().out
 
 
 def test_fix_skips_subdir_inside_project(tmp_path, monkeypatch, capsys):
@@ -221,7 +242,7 @@ def test_fix_skips_subdir_inside_project(tmp_path, monkeypatch, capsys):
         yes=True,
     )
     assert rc == 0
-    assert "not a direct base entry" in capsys.readouterr().err
+    assert "not a direct base entry" in capsys.readouterr().out
     assert not (proj_sub / _MARKER).exists()
 
 
@@ -332,7 +353,7 @@ def test_fix_archive_entry_dest_conflict_returns_error(tmp_path, monkeypatch, ca
         yes=True,
     )
     assert rc == 1
-    assert "destination exists" in capsys.readouterr().err
+    assert "destination already exists" in capsys.readouterr().err
     assert src.is_dir()
 
 

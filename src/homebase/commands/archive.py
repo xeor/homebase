@@ -610,34 +610,53 @@ def cmd_fix(
     yes: bool = False,
     all_targets: bool = False,
 ) -> int:
+    import sys
+
     from ..archive import date_detect
 
-    def _read_line(question: str) -> str | None:
-        return _prompt_readline(question, default="", non_interactive_default="")
+    # ``b fix`` prompts should let Ctrl-C abort the whole sweep, not
+    # just decline the current item. Use the strict readline variant
+    # that re-raises KeyboardInterrupt instead of swallowing it.
+    def _read_line_strict(question: str) -> str | None:
+        return prompting.prompt_readline(
+            question,
+            default="",
+            non_interactive_default="",
+            abort_on_interrupt=True,
+        )
+
+    def _prompt_yes_no_strict(question: str, default: bool) -> bool:
+        return prompting.prompt_yes_no(
+            question, default=default, read=_read_line_strict,
+        )
 
     selected = (
         set(include)
         if include is not None
         else set(commands_workspace.FIX_KINDS)
     )
-    return commands_workspace.cmd_fix(
-        list(paths) if paths is not None else ["."],
-        include=selected,
-        yes=yes,
-        all_targets=all_targets,
-        env_base_dir_key=ENV_BASE_DIR,
-        archive_dir_name=ARCHIVE_DIR_NAME,
-        archive_year_re=ARCHIVE_YEAR_DIR_RE,
-        archive_tz=ARCHIVE_TZ,
-        is_under=core_utils.is_under,
-        base_marker_file=BASE_MARKER_FILE,
-        prompt_yes_no=_prompt_yes_no,
-        parse_archive_timestamp=try_parse_archive_suffix_loose,
-        archive_iso_from_ts=core_utils.archive_iso_from_ts,
-        detect_folder_date=date_detect.detect_folder_date,
-        parse_user_date=date_detect.parse_user_date,
-        strip_date_prefix=date_detect.strip_date_prefix,
-        ensure_base_marker=ensure_base_marker,
-        confirm=confirm,
-        read_line=_read_line,
-    )
+    try:
+        return commands_workspace.cmd_fix(
+            list(paths) if paths is not None else ["."],
+            include=selected,
+            yes=yes,
+            all_targets=all_targets,
+            env_base_dir_key=ENV_BASE_DIR,
+            archive_dir_name=ARCHIVE_DIR_NAME,
+            archive_year_re=ARCHIVE_YEAR_DIR_RE,
+            archive_tz=ARCHIVE_TZ,
+            is_under=core_utils.is_under,
+            base_marker_file=BASE_MARKER_FILE,
+            prompt_yes_no=_prompt_yes_no_strict,
+            parse_archive_timestamp=try_parse_archive_suffix_loose,
+            archive_iso_from_ts=core_utils.archive_iso_from_ts,
+            detect_folder_date=date_detect.detect_folder_date,
+            parse_user_date=date_detect.parse_user_date,
+            strip_date_prefix=date_detect.strip_date_prefix,
+            ensure_base_marker=ensure_base_marker,
+            read_line=_read_line_strict,
+        )
+    except KeyboardInterrupt:
+        print()
+        print("aborted by user (^C)", file=sys.stderr)
+        return 130
