@@ -126,6 +126,19 @@ class SetupContext:
 
 
 @dataclass
+class ApplyOutcome:
+    """Returned from the Textual app to ``cmd_setup``.
+
+    - ``action="exit"``: user wants to close setup completely
+    - ``action="continue"``: user wants to keep editing — caller should
+      refresh state and re-launch the app
+    - ``action="cancel"``: user cancelled without applying anything
+    """
+    action: str
+    results: list["FixResult"] = field(default_factory=list)
+
+
+@dataclass
 class SetupSummary:
     pass_count: int
     warn_count: int
@@ -145,6 +158,7 @@ class SetupSummary:
 
 
 __all__ = [
+    "ApplyOutcome",
     "FixResult",
     "INTENT_ABSENT",
     "INTENT_CANNOT_CREATE",

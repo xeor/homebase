@@ -28,7 +28,6 @@ from .setup_render import (
     render_checks,
     render_summary,
 )
-from .setup_select import SetupSelectableFix, select_fix_ids_textual
 
 
 def find_executable(name: str, extra_candidates: tuple[str, ...] = ()) -> str | None:
@@ -42,14 +41,20 @@ def find_executable(name: str, extra_candidates: tuple[str, ...] = ()) -> str | 
     return None
 
 
-def recommended_tmux_save_binding(script_path: Path, uv_bin: str, tmux_bin: str) -> str:
-    uv_q = shlex.quote(str(uv_bin))
-    tmux_q = shlex.quote(str(tmux_bin))
+def recommended_tmux_save_binding(script_path: Path, tmux_bin: str = "") -> str:
+    """Suggested tmux binding to save the current window as ``.tmuxp.yaml``.
+
+    Uses ``display-popup`` with ``--pause`` so the popup shows
+    progress, the final filename + a "review manually" hint, and waits
+    for Enter before closing. Invokes the ``b`` entry-point directly:
+    ``uv run --script`` is unnecessary and the previous form
+    occasionally failed silently."""
+    _ = tmux_bin  # kept for back-compat with callers; no longer used
     script_q = shlex.quote(str(script_path))
     return (
-        "bind-key t run-shell -b "
-        f"'TMUX_BIN={tmux_q} {uv_q} run --script {script_q} tmux save "
-        '--pane-id "#{pane_id}" --session-id "#{q:session_id}"\''
+        "bind-key t display-popup -w 70% -h 30% "
+        f"{script_q} tmux save --pause --pane-id '#{{pane_id}}' "
+        "--session-id '#{q:session_id}'"
     )
 
 
@@ -66,19 +71,70 @@ def binding_display_lines(binding: str, width: int = 88) -> list[str]:
     return textwrap.wrap(compact, width=width, break_long_words=False, break_on_hyphens=False) or [compact]
 
 
-def has_recommended_tmux_binding(tmux_conf_text: str, expected_line: str) -> bool:
-    expected = expected_line.strip()
-    return any(str(line).strip() == expected for line in tmux_conf_text.splitlines())
+def _is_tmux_bind_line(line: str) -> bool:
+    stripped = str(line).strip()
+    if not stripped or stripped.startswith("#"):
+        return False
+    return stripped.startswith("bind-key ") or stripped.startswith("bind ")
+
+
+def is_acceptable_tmux_save_binding(line: str) -> bool:
+    """Returns True if `line` defines a working ``b tmux save`` binding.
+
+    Parser-style: tolerates whitespace, quoting, and path variation;
+    only checks that the essential pieces are present. Used so the
+    binding doesn't read as "stale" because of a trivial difference."""
+    if not _is_tmux_bind_line(line):
+        return False
+    stripped = str(line).strip()
+    if "tmux save" not in stripped:
+        return False
+    if "#{pane_id}" not in stripped:
+        return False
+    if "session_id" not in stripped:
+        return False
+    # The legacy form invoked the entry-point via `uv run --script`,
+    # which sometimes failed silently. Treat it as stale so setup can
+    # offer the rewrite.
+    if "uv run --script" in stripped:
+        return False
+    return True
+
+
+def _normalize_binding(line: str) -> str:
+    """Strip whitespace and collapse interior runs so trivial spacing
+    differences don't mark a binding as stale."""
+    return " ".join(str(line).strip().split())
+
+
+def has_recommended_tmux_binding(tmux_conf_text: str, expected_line: str = "") -> bool:
+    """True only when an existing binding line normalizes to the
+    *current* recommended binding. A loosely-acceptable binding that
+    doesn't match (e.g. missing the new ``--pause`` flag) reads as
+    stale — matching the diff the preview pane shows.
+    """
+    expected_norm = _normalize_binding(expected_line)
+    if not expected_norm:
+        return False
+    return any(
+        _normalize_binding(line) == expected_norm
+        for line in tmux_conf_text.splitlines()
+    )
 
 
 def has_any_tmux_save_binding(tmux_conf_text: str) -> bool:
+    """True if there's ANY `b tmux save` binding (acceptable or
+    legacy). Used to detect "present" state for the fix."""
     for raw in tmux_conf_text.splitlines():
+        if not _is_tmux_bind_line(raw):
+            continue
         line = str(raw).strip()
-        if not line or line.startswith("#"):
+        if "tmux save" not in line:
             continue
-        if "b tmux save" not in line:
-            continue
-        if "bind-key" in line or line.startswith("bind "):
+        # The line must actually invoke `b tmux save`; the legacy form
+        # has 'tmux save' as a sub-command after a path ending in /b,
+        # which still satisfies the loose check.
+        if " save" in line:
             return True
     return False
 
@@ -86,13 +142,12 @@ def has_any_tmux_save_binding(tmux_conf_text: str) -> bool:
 def tmux_save_binding_lines(tmux_conf_text: str) -> list[str]:
     out: list[str] = []
     for raw in tmux_conf_text.splitlines():
+        if not _is_tmux_bind_line(raw):
+            continue
         line = str(raw).strip()
-        if not line or line.startswith("#"):
+        if "tmux save" not in line:
             continue
-        if "b tmux save" not in line:
-            continue
-        if "bind-key" in line or line.startswith("bind "):
-            out.append(line)
+        out.append(line)
     return out
 
 
@@ -105,13 +160,7 @@ def write_tmux_binding(tmux_conf_path: Path, expected_line: str) -> None:
     out_lines: list[str] = []
     for raw in lines:
         line = str(raw)
-        stripped = line.strip()
-        if (
-            stripped
-            and not stripped.startswith("#")
-            and "b tmux save" in stripped
-            and ("bind-key" in stripped or stripped.startswith("bind "))
-        ):
+        if _is_tmux_bind_line(line) and "tmux save" in line.strip():
             if not replaced:
                 out_lines.append(expected_line)
                 replaced = True
@@ -187,16 +236,9 @@ def _remove_tmux_binding(path: Path) -> None:
         return
     out_lines: list[str] = []
     for raw in path.read_text().splitlines():
-        line = str(raw)
-        stripped = line.strip()
-        if (
-            stripped
-            and not stripped.startswith("#")
-            and "b tmux save" in stripped
-            and ("bind-key" in stripped or stripped.startswith("bind "))
-        ):
+        if _is_tmux_bind_line(raw) and "tmux save" in str(raw).strip():
             continue
-        out_lines.append(line)
+        out_lines.append(str(raw))
     text = "\n".join(out_lines).rstrip("\n")
     if text:
         text += "\n"
@@ -367,9 +409,7 @@ def _gather_context(
         tmux_conf_text = tmux_conf_path.read_text() if tmux_conf_path.exists() else ""
     except OSError:
         tmux_conf_text = ""
-    active_tmux_bin = tmux_bin or "/opt/homebrew/bin/tmux"
-    active_uv_bin = uv_bin or "/opt/homebrew/bin/uv"
-    expected_tmux_binding = recommended_tmux_save_binding(target, active_uv_bin, active_tmux_bin)
+    expected_tmux_binding = recommended_tmux_save_binding(target)
     existing_tmux_binding_lines = tuple(tmux_save_binding_lines(tmux_conf_text))
 
     active_shell = _current_shell_name()
@@ -733,28 +773,151 @@ def _build_checks(ctx: SetupContext) -> list[SetupCheck]:
 # --- fix building ----------------------------------------------------
 
 
-def _gitignore_preview(path: Path) -> tuple[str, ...]:
-    if path.is_file():
-        return (
-            f"current: {path} (cache.sqlite3 missing)",
-            f"desired: append 'cache.sqlite3' to {path}",
+def _color_diff_lines(
+    current_lines: list[str],
+    desired_lines: list[str],
+    *,
+    header: str = "",
+    max_lines: int = 80,
+) -> tuple[str, ...]:
+    """Return a coloured unified-diff representation as Rich-markup lines.
+
+    - Removed lines are coloured red, added lines green, hunk headers
+      cyan, and unchanged context dim.
+    - Truncates the body at ``max_lines`` with a trailing summary so
+      the preview pane never grows unbounded.
+    - When both sides are identical, returns a single dim ``(no
+      differences)`` line.
+    """
+    import difflib
+
+    diff = list(
+        difflib.unified_diff(
+            current_lines,
+            desired_lines,
+            fromfile="current",
+            tofile="desired",
+            lineterm="",
+            n=2,
         )
-    return (
-        f"current: {path} (does not exist)",
-        f"desired: create {path} with 'cache.sqlite3'",
     )
+    if not diff:
+        return ((f"{header}\n" if header else "") + "[dim](no differences)[/]",)
+
+    out: list[str] = []
+    if header:
+        out.append(f"[dim]{header}[/]")
+    for line in diff:
+        if line.startswith("---") or line.startswith("+++"):
+            out.append(f"[dim]{line}[/]")
+        elif line.startswith("@@"):
+            out.append(f"[bright_cyan]{line}[/]")
+        elif line.startswith("+"):
+            out.append(f"[bright_green]{line}[/]")
+        elif line.startswith("-"):
+            out.append(f"[bright_red]{line}[/]")
+        else:
+            out.append(f"[dim]{line}[/]")
+    if len(out) > max_lines:
+        truncated = len(out) - max_lines
+        out = out[:max_lines]
+        out.append(f"[dim]… (diff truncated; {truncated} more line(s))[/]")
+    return tuple(out)
 
 
-def _tmux_preview(existing: tuple[str, ...], expected: str) -> tuple[str, ...]:
-    if existing:
+def _gitignore_preview_create(path: Path) -> tuple[str, ...]:
+    current = _read_text_lines(path)
+    desired = list(current)
+    if "cache.sqlite3" not in [line.strip() for line in desired]:
+        if desired and desired[-1].strip() != "":
+            desired.append("")
+        desired.append("cache.sqlite3")
+    return _color_diff_lines(current, desired, header=f"# {path}")
+
+
+def _gitignore_preview_remove(path: Path) -> tuple[str, ...]:
+    current = _read_text_lines(path)
+    desired = [line for line in current if line.strip() != "cache.sqlite3"]
+    return _color_diff_lines(current, desired, header=f"# {path}")
+
+
+def _inline_char_diff_pair(old: str, new: str) -> tuple[str, str]:
+    """Return (old_markup, new_markup) where character spans that
+    differ get Rich markup:
+
+    - chars in ``old`` not in ``new`` → red strikethrough
+    - chars in ``new`` not in ``old`` → bold green
+    - matching chars are left as-is
+
+    The output is intended for side-by-side display of a single-line
+    config change (e.g. a tmux ``bind-key`` line).
+    """
+    import difflib
+
+    from rich.markup import escape
+
+    matcher = difflib.SequenceMatcher(None, old, new, autojunk=False)
+    old_out: list[str] = []
+    new_out: list[str] = []
+    for op, i1, i2, j1, j2 in matcher.get_opcodes():
+        a, b = old[i1:i2], new[j1:j2]
+        if op == "equal":
+            old_out.append(escape(a))
+            new_out.append(escape(b))
+            continue
+        if a:
+            old_out.append(f"[bold strike bright_red]{escape(a)}[/]")
+        if b:
+            new_out.append(f"[bold bright_green]{escape(b)}[/]")
+    return "".join(old_out), "".join(new_out)
+
+
+def _tmux_preview_create(
+    existing: tuple[str, ...], expected: str
+) -> tuple[str, ...]:
+    from rich.markup import escape
+
+    if not existing:
         return (
-            f"current: {existing[0]}",
-            f"desired: {expected}",
+            "[dim]# tmux save binding[/]",
+            "[dim](no current binding)[/]",
+            f"[bold bright_green]+ {escape(expected)}[/]",
         )
-    return (
-        "current: <no homebase tmux save binding>",
-        f"desired: {expected}",
-    )
+    old_markup, new_markup = _inline_char_diff_pair(existing[0], expected)
+    out = [
+        "[dim]# tmux save binding[/]",
+        f"[bright_red]- {old_markup}[/]",
+        f"[bright_green]+ {new_markup}[/]",
+    ]
+    if len(existing) > 1:
+        out.append("")
+        out.append(
+            f"[dim]({len(existing) - 1} additional existing binding(s) "
+            "will be removed)[/]"
+        )
+    return tuple(out)
+
+
+def _tmux_preview_remove(existing: tuple[str, ...]) -> tuple[str, ...]:
+    from rich.markup import escape
+
+    if not existing:
+        return ("[dim](nothing to remove)[/]",)
+    out = ["[dim]# tmux save binding (remove)[/]"]
+    for line in existing:
+        out.append(f"[bold strike bright_red]- {escape(line)}[/]")
+    return tuple(out)
+
+
+def _read_text_lines(path: Path) -> list[str]:
+    """Read file as a list of lines (without trailing newlines).
+    Returns ``[]`` if the file doesn't exist or can't be read."""
+    if not path.is_file():
+        return []
+    try:
+        return path.read_text().splitlines()
+    except OSError:
+        return []
 
 
 def _build_fixes(ctx: SetupContext) -> list[SetupFix]:
@@ -880,6 +1043,17 @@ def _build_fixes(ctx: SetupContext) -> list[SetupFix]:
     def _fix_launcher(
         dest: Path = launcher_dest, target: Path = launcher_target
     ) -> None:
+        # Refuse to create a symlink pointing at something that
+        # doesn't exist or isn't executable — that's the bug that
+        # bricked the user's `b` command when bin_dir was wrong.
+        if not target.exists():
+            raise OSError(
+                f"refusing to symlink {dest} → {target}: target does not exist"
+            )
+        if not target.is_file() or not os.access(target, os.X_OK):
+            raise OSError(
+                f"refusing to symlink {dest} → {target}: target is not executable"
+            )
         if dest.exists() and not dest.is_symlink():
             ts = datetime.now().strftime("%Y%m%d%H%M%S")
             backup = dest.with_name(f"{dest.name}.bak-{ts}")
@@ -943,11 +1117,8 @@ def _build_fixes(ctx: SetupContext) -> list[SetupFix]:
             apply_create=_fix_gitignore,
             apply_remove=_remove_gitignore,
             requires=("homebase_dir",),
-            preview_create=_gitignore_preview(ctx.homebase_gitignore),
-            preview_remove=(
-                f"current: {ctx.homebase_gitignore} (has cache.sqlite3 rule)",
-                "remove: drop the cache.sqlite3 rule (or delete the file if no other rules remain)",
-            ),
+            preview_create=_gitignore_preview_create(ctx.homebase_gitignore),
+            preview_remove=_gitignore_preview_remove(ctx.homebase_gitignore),
             current_state_text=(
                 "rule present" if gi_correct
                 else ("file exists but rule missing" if gi_present else "file does not exist")
@@ -982,12 +1153,8 @@ def _build_fixes(ctx: SetupContext) -> list[SetupFix]:
             recommended=True,
             apply_create=_fix_tmux,
             apply_remove=_remove_tmux,
-            preview_create=_tmux_preview(ctx.existing_tmux_binding_lines, ctx.expected_tmux_binding),
-            preview_remove=(
-                f"current: {ctx.existing_tmux_binding_lines[0]}" if ctx.existing_tmux_binding_lines
-                else "current: <no binding>",
-                f"remove from {ctx.tmux_conf_path}",
-            ),
+            preview_create=_tmux_preview_create(ctx.existing_tmux_binding_lines, ctx.expected_tmux_binding),
+            preview_remove=_tmux_preview_remove(ctx.existing_tmux_binding_lines),
             current_state_text=(
                 "recommended binding present" if tmux_correct
                 else (f"stale binding: {ctx.existing_tmux_binding_lines[0]}" if ctx.existing_tmux_binding_lines
@@ -1021,13 +1188,15 @@ def _build_fixes(ctx: SetupContext) -> list[SetupFix]:
                 recommended=True,
                 apply_create=_fix_completion,
                 apply_remove=_remove_completion,
-                preview_create=(
-                    f"current: {ctx.completion_target} ({'stale' if comp_present else 'missing'})",
-                    f"desired: write {len(comp_body)} bytes",
+                preview_create=_color_diff_lines(
+                    _read_text_lines(comp_path),
+                    comp_body.splitlines(),
+                    header=f"# {comp_path}",
                 ),
-                preview_remove=(
-                    f"current: {ctx.completion_target} (present)",
-                    f"delete: {ctx.completion_target}",
+                preview_remove=_color_diff_lines(
+                    _read_text_lines(comp_path),
+                    [],
+                    header=f"# delete {comp_path}",
                 ),
                 current_state_text=(
                     "installed" if comp_correct
@@ -1079,18 +1248,49 @@ def _build_fixes(ctx: SetupContext) -> list[SetupFix]:
             source_line = _shell_init_source_line(shell, path)
             _remove_shell_init_source_line(rc, source_line)
 
-        preview_create = [
-            f"current: {ctx.shell_init_target} ({'stale' if init_present else 'missing'})",
-            f"desired: write {len(init_body)} bytes",
-        ]
+        preview_create_lines = list(
+            _color_diff_lines(
+                _read_text_lines(init_path),
+                init_body.splitlines(),
+                header=f"# {init_path}",
+                max_lines=40,
+            )
+        )
+        preview_remove_lines = list(
+            _color_diff_lines(
+                _read_text_lines(init_path),
+                [],
+                header=f"# delete {init_path}",
+                max_lines=40,
+            )
+        )
         if ctx.shell_init_rc is not None:
-            preview_create.append(f"desired: ensure source line in {ctx.shell_init_rc}")
-        preview_remove = [
-            f"current: {ctx.shell_init_target} (present)",
-            f"delete: {ctx.shell_init_target}",
-        ]
-        if ctx.shell_init_rc is not None:
-            preview_remove.append(f"remove source line from {ctx.shell_init_rc}")
+            source_line = _shell_init_source_line(init_shell, init_path)
+            rc_current = _read_text_lines(ctx.shell_init_rc)
+            rc_desired_create = (
+                rc_current if source_line in rc_current else rc_current + [source_line]
+            )
+            rc_desired_remove = [line for line in rc_current if line.strip() != source_line.strip()]
+            preview_create_lines.append("")
+            preview_create_lines.extend(
+                _color_diff_lines(
+                    rc_current,
+                    rc_desired_create,
+                    header=f"# {ctx.shell_init_rc}",
+                    max_lines=10,
+                )
+            )
+            preview_remove_lines.append("")
+            preview_remove_lines.extend(
+                _color_diff_lines(
+                    rc_current,
+                    rc_desired_remove,
+                    header=f"# {ctx.shell_init_rc}",
+                    max_lines=10,
+                )
+            )
+        preview_create = preview_create_lines
+        preview_remove = preview_remove_lines
 
         fixes.append(
             SetupFix(
@@ -1147,31 +1347,26 @@ def _order_fixes(fixes: list[SetupFix]) -> list[SetupFix]:
 def _select_fix_ids(
     fixes: list[SetupFix],
     *,
-    select_fix_ids_fn: Callable[[list[SetupSelectableFix]], set[str] | None] | None,
+    select_fix_ids_fn: Callable[[list[SetupFix]], set[str] | None] | None,
     prompt_yes_no: Callable[[str, bool], bool],
-) -> set[str]:
+) -> set[str] | None:
+    """Decide which fix ids the user wants present.
+
+    - If ``select_fix_ids_fn`` is provided (test injection), it is
+      called with the fix list and may return ``None`` to cancel.
+    - Otherwise prompts via ``prompt_yes_no(question, default)`` once
+      per fix, using ``fix.selected_default`` as the default answer.
+
+    Returns the set of selected ids, or ``None`` when the caller
+    signalled cancel. The TTY-interactive Textual app does **not**
+    go through this code path — it runs inside ``run_setup_app`` —
+    so there is no fallback that could land the user in a stale
+    selector with empty defaults."""
     if not fixes:
         return set()
-    use_selector = select_fix_ids_fn is not None or (
-        sys.stdin.isatty() and sys.stdout.isatty()
-    )
-    if use_selector:
-        picker = select_fix_ids_fn or select_fix_ids_textual
-        chosen = picker(
-            [
-                SetupSelectableFix(
-                    id=fx.id,
-                    title=("[required] " if fx.required else "[optional] ") + fx.title,
-                    selected=fx.selected_default,
-                    status="present" if fx.currently_correct else "absent",
-                    details=fx.description,
-                    changes=fx.current_state_text,
-                    preview="\n".join(fx.preview_create) if fx.preview_create else "",
-                )
-                for fx in fixes
-            ]
-        )
-        return set() if chosen is None else set(chosen)
+    if select_fix_ids_fn is not None:
+        chosen = select_fix_ids_fn(fixes)
+        return None if chosen is None else set(chosen)
     selected_ids: set[str] = set()
     for fix in fixes:
         if prompt_yes_no(f"{fix.title}?", fix.selected_default):
@@ -1184,7 +1379,14 @@ def _apply_intents(
     selected_ids: set[str],
     *,
     dry_run: bool,
+    log_fn: Callable[[str, bool], None] | None = None,
 ) -> list[FixResult]:
+    """Run create/remove transitions for the selected fixes.
+
+    ``log_fn(line, is_error)`` receives every progress message; default
+    routes to stdout/stderr so the non-interactive prompt loop keeps
+    its current output. The Textual modal overrides ``log_fn`` to
+    stream the log into its RichLog widget."""
     from .setup_model import (
         INTENT_ABSENT,
         INTENT_CANNOT_CREATE,
@@ -1192,6 +1394,12 @@ def _apply_intents(
         INTENT_CREATE,
         INTENT_KEEP,
     )
+
+    def _emit(line: str, err: bool = False) -> None:
+        if log_fn is not None:
+            log_fn(line, err)
+            return
+        print(line, file=sys.stderr if err else sys.stdout)
 
     results: list[FixResult] = []
     for fix in fixes:
@@ -1203,7 +1411,7 @@ def _apply_intents(
             continue
         if intent == INTENT_CANNOT_CREATE:
             err = "no apply_create available; cannot create"
-            print(f"- skip ({fix.id}): {err}", file=sys.stderr)
+            _emit(f"- skip ({fix.id}): {err}", err=True)
             results.append(
                 FixResult(
                     id=fix.id, title=fix.title, intent=intent,
@@ -1213,7 +1421,7 @@ def _apply_intents(
             continue
         if intent == INTENT_CANNOT_REMOVE:
             err = "no apply_remove available; cannot uninstall via setup"
-            print(f"- skip ({fix.id}): {err}", file=sys.stderr)
+            _emit(f"- skip ({fix.id}): {err}", err=True)
             results.append(
                 FixResult(
                     id=fix.id, title=fix.title, intent=intent,
@@ -1223,7 +1431,7 @@ def _apply_intents(
             continue
         action_label = "create" if intent == INTENT_CREATE else "remove"
         if dry_run:
-            print(f"- would {action_label}: {fix.title}")
+            _emit(f"- would {action_label}: {fix.title}")
             results.append(
                 FixResult(id=fix.id, title=fix.title, intent=intent, success=True)
             )
@@ -1232,16 +1440,16 @@ def _apply_intents(
         try:
             assert callback is not None
             callback()
-            print(f"- {action_label}d: {fix.title}")
+            _emit(f"- {action_label}d: {fix.title}")
             if fix.id == "tmux_binding" and intent == INTENT_CREATE:
-                print("  run now: tmux source-file ~/.tmux.conf")
+                _emit("  run now: tmux source-file ~/.tmux.conf")
             if fix.id == "shell_init" and intent == INTENT_CREATE:
-                print("- open a NEW shell for the wrapper to take effect")
+                _emit("- open a NEW shell for the wrapper to take effect")
             results.append(
                 FixResult(id=fix.id, title=fix.title, intent=intent, success=True)
             )
         except (OSError, ValueError) as exc:
-            print(f"- {action_label} failed ({fix.id}): {exc}", file=sys.stderr)
+            _emit(f"- {action_label} failed ({fix.id}): {exc}", err=True)
             results.append(
                 FixResult(
                     id=fix.id, title=fix.title, intent=intent,
@@ -1254,11 +1462,15 @@ def _apply_intents(
 def _run_fix_loop(
     fixes: list[SetupFix],
     *,
-    select_fix_ids_fn: Callable[[list[SetupSelectableFix]], set[str] | None] | None,
+    select_fix_ids_fn: Callable[[list[SetupFix]], set[str] | None] | None,
     prompt_yes_no: Callable[[str, bool], bool],
     dry_run: bool,
     allow_rerun_failed: bool,
 ) -> list[FixResult]:
+    """Non-TTY / test fix loop. The TTY-interactive path is the
+    Textual app inside :func:`_run_app_loop`; this function exists
+    only for the prompt fallback (``b setup`` piped, CI, or tests
+    that inject ``select_fix_ids_fn``)."""
     if not fixes:
         return []
     selected_ids = _select_fix_ids(
@@ -1266,6 +1478,10 @@ def _run_fix_loop(
         select_fix_ids_fn=select_fix_ids_fn,
         prompt_yes_no=prompt_yes_no,
     )
+    if selected_ids is None:
+        # Caller cancelled (callback returned None). Don't apply
+        # anything — explicitly safe.
+        return []
     results = _apply_intents(fixes, selected_ids, dry_run=dry_run)
     if dry_run or not allow_rerun_failed:
         return results
@@ -1285,6 +1501,8 @@ def _run_fix_loop(
         select_fix_ids_fn=select_fix_ids_fn,
         prompt_yes_no=prompt_yes_no,
     )
+    if rerun_selected is None:
+        return results
     rerun_results = _apply_intents(rerun, rerun_selected, dry_run=dry_run)
     rerun_by_id = {r.id: r for r in rerun_results}
     return [rerun_by_id.get(r.id, r) if not r.success else r for r in results]
@@ -1467,6 +1685,79 @@ def _persist_report(homebase_dir: Path, payload: dict) -> None:
         print(f"- could not persist setup report: {exc}", file=sys.stderr)
 
 
+def _run_app_loop(
+    base_dir: Path,
+    bin_dir: Path,
+    *,
+    tmux_bin_candidates: tuple[str, ...],
+    completion_script_fn: Callable[[str], str] | None,
+    shell_init_script_fn: Callable[[str], str] | None,
+    initial_ctx: SetupContext,
+    initial_checks: list[SetupCheck],
+    initial_fixes: list[SetupFix],
+    dry_run: bool,
+    prompt_yes_no: Callable[[str, bool], bool],
+    allow_rerun_failed: bool,
+) -> list[FixResult]:
+    """Run the Textual app in a loop, refreshing state when the user
+    chooses "Back to setup" after applying. Returns the accumulated
+    list of FixResults from all apply rounds.
+
+    If the Textual app can't start (import fails, no terminal), aborts
+    and returns whatever results were already collected — it does
+    **not** fall back to anything that could apply changes with an
+    empty selection set."""
+    _ = prompt_yes_no  # kept in signature for back-compat; unused
+
+    try:
+        from .setup_app import run_setup_app
+    except ImportError as exc:
+        print(
+            f"- setup app unavailable: {exc}; aborting without changes.",
+            file=sys.stderr,
+        )
+        return []
+
+    all_results: list[FixResult] = []
+    current_ctx = initial_ctx
+    current_checks = initial_checks
+    current_fixes = initial_fixes
+
+    while True:
+        outcome = run_setup_app(
+            current_ctx,
+            current_checks,
+            current_fixes,
+            apply_fn=_apply_intents,
+            dry_run=dry_run,
+        )
+        if outcome is None:
+            # Either Textual import failed inside run_setup_app, or
+            # the user cancelled via Ctrl+Q / window-close. In every
+            # case the safe answer is "no further changes" — never
+            # fall through to a legacy selector with empty defaults
+            # (that's how user data was wiped previously).
+            print(
+                "- setup app cancelled; "
+                f"{len(all_results)} action(s) already applied.",
+                file=sys.stderr,
+            )
+            return all_results
+        all_results.extend(outcome.results)
+        if outcome.action in {"exit", "cancel"}:
+            return all_results
+        # action == "continue" → refresh state and re-launch
+        current_ctx = _gather_context(
+            base_dir,
+            bin_dir,
+            tmux_bin_candidates=tmux_bin_candidates,
+            completion_script_fn=completion_script_fn,
+            shell_init_script_fn=shell_init_script_fn,
+        )
+        current_checks = _build_checks(current_ctx)
+        current_fixes = _build_fixes(current_ctx)
+
+
 # --- entry point -----------------------------------------------------
 
 
@@ -1478,10 +1769,9 @@ def cmd_setup(
     prompt_yes_no: Callable[[str, bool], bool],
     completion_script_fn: Callable[[str], str] | None = None,
     shell_init_script_fn: Callable[[str], str] | None = None,
-    select_fix_ids_fn: Callable[[list[SetupSelectableFix]], set[str] | None] | None = None,
+    select_fix_ids_fn: Callable[[list[SetupFix]], set[str] | None] | None = None,
     dry_run: bool = False,
     json_output: bool = False,
-    tui: bool = False,
     allow_rerun_failed: bool = True,
 ) -> int:
     ctx = _gather_context(
@@ -1504,8 +1794,8 @@ def cmd_setup(
         print("validation:")
         render_checks(initial_checks)
         print("")
-        print("fix proposals:")
 
+    results: list[FixResult]
     if json_output:
         # JSON mode is informational only. Skip fix prompts entirely so
         # stdout stays valid JSON; users invoke setup without --json to
@@ -1517,20 +1807,21 @@ def cmd_setup(
             for fx in fixes
         ]
     elif select_fix_ids_fn is None and (
-        tui or (sys.stdin.isatty() and sys.stdout.isatty())
+        sys.stdin.isatty() and sys.stdout.isatty()
     ):
-        from .setup_app import run_setup_app
-        from .setup_model import INTENT_KEEP
-
-        selected = run_setup_app(ctx, initial_checks, fixes)
-        if selected is None:
-            print("- setup app: cancelled")
-            results = [
-                FixResult(id=fx.id, title=fx.title, intent=INTENT_KEEP, success=True)
-                for fx in fixes
-            ]
-        else:
-            results = _apply_intents(fixes, selected, dry_run=dry_run)
+        results = _run_app_loop(
+            base_dir,
+            bin_dir,
+            tmux_bin_candidates=tmux_bin_candidates,
+            completion_script_fn=completion_script_fn,
+            shell_init_script_fn=shell_init_script_fn,
+            initial_ctx=ctx,
+            initial_checks=initial_checks,
+            initial_fixes=fixes,
+            dry_run=dry_run,
+            prompt_yes_no=prompt_yes_no,
+            allow_rerun_failed=allow_rerun_failed,
+        )
     else:
         results = _run_fix_loop(
             fixes,

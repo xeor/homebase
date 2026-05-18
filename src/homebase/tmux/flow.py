@@ -215,6 +215,7 @@ def cmd_tmux_save(
     debug: bool = False,
     pane_id_hint: str = "",
     session_id_hint: str = "",
+    pause: bool = False,
 ) -> int:
     return tmux_commands.cmd_tmux_save(
         base_dir,
@@ -224,6 +225,7 @@ def cmd_tmux_save(
         debug,
         pane_id_hint,
         session_id_hint,
+        pause=pause,
         tmux_list_sessions=_tmux_list_sessions,
         tmux_resolve_session_window=_tmux_resolve_session_window,
         tmux_list_panes=_tmux_list_panes,

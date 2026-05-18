@@ -138,7 +138,6 @@ def build_cli_parser() -> argparse.ArgumentParser:
     p_setup = sub.add_parser("setup", help="check and install recommended shell/tool setup")
     p_setup.add_argument("--dry-run", action="store_true", help="print proposed changes without writing")
     p_setup.add_argument("--json", dest="json_output", action="store_true", help="emit machine-readable report")
-    p_setup.add_argument("--tui", action="store_true", help="launch tabbed Textual setup app")
 
     p_cache = sub.add_parser("cache", help="cache maintenance commands")
     cache_sub = p_cache.add_subparsers(dest="cache_subcommand", required=True)
@@ -227,6 +226,11 @@ def build_cli_parser() -> argparse.ArgumentParser:
     p_tmux_save.add_argument("--debug", action="store_true", help="include debug diagnostics")
     p_tmux_save.add_argument("--pane-id", default="", help="tmux pane id hint")
     p_tmux_save.add_argument("--session-id", default="", help="tmux session id hint")
+    p_tmux_save.add_argument(
+        "--pause",
+        action="store_true",
+        help="print progress and wait for Enter at the end (useful from tmux display-popup)",
+    )
 
     p_bench = sub.add_parser("benchmark", help="performance benchmark commands")
     bench_sub = p_bench.add_subparsers(dest="benchmark_subcommand", required=True)

@@ -92,7 +92,6 @@ def cmd_setup(
     shell_init_script_fn: Callable[[str], str] | None = None,
     dry_run: bool = False,
     json_output: bool = False,
-    tui: bool = False,
 ) -> int:
     return setup_tools.cmd_setup(
         base_dir,
@@ -104,7 +103,6 @@ def cmd_setup(
         select_fix_ids_fn=None,
         dry_run=dry_run,
         json_output=json_output,
-        tui=tui,
     )
 
 

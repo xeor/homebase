@@ -133,8 +133,14 @@ def main(argv: list[str]) -> int:
         argv,
     )
 
-    script = Path(__file__).resolve()
-    bin_dir = script.parent.parent
+    # The launcher symlink should point at the executable `b` script
+    # that the venv installed (next to the running Python), not at the
+    # package source directory. Using ``__file__`` here breaks for
+    # editable installs because it resolves to the git checkout.
+    # ``sys.executable`` is left unresolved so the parent stays inside
+    # the venv bin dir (where the ``b`` script is); resolving follows
+    # the symlink out to the system Python where no ``b`` exists.
+    bin_dir = Path(sys.executable).parent
 
     base_dir = resolve_base_dir(ns.base_folder)
     os.environ[ENV_BASE_DIR] = str(base_dir)
@@ -383,14 +389,13 @@ def main(argv: list[str]) -> int:
                 view_filter=view,
                 show_defaults=show_defaults,
             ),
-            cmd_setup=lambda base_path, bin_path, dry_run, *, json_output=False, tui=False: cmd_setup(
+            cmd_setup=lambda base_path, bin_path, dry_run, *, json_output=False: cmd_setup(
                 base_path,
                 bin_path,
                 completion_script_fn=completion_script,
                 shell_init_script_fn=shell_init_script,
                 dry_run=dry_run,
                 json_output=json_output,
-                tui=tui,
             ),
             cmd_cache_warm=cmd_cache_warm,
             cmd_tags_sync=lambda bd, verbose, debug: cmd_tags_sync(
@@ -418,7 +423,7 @@ def main(argv: list[str]) -> int:
             cmd_archive_restore_entry=cmd_archive_restore_entry,
             cmd_archive_reorganize=cmd_archive_reorganize,
             cmd_tmux_load=cmd_tmux_load,
-            cmd_tmux_save=lambda bd, dir_path, output, to_stdout, debug, pane_id, session_id: cmd_tmux_save(
+            cmd_tmux_save=lambda bd, dir_path, output, to_stdout, debug, pane_id, session_id, *, pause=False: cmd_tmux_save(
                 bd,
                 dir_path,
                 output=output,
@@ -426,6 +431,7 @@ def main(argv: list[str]) -> int:
                 debug=debug,
                 pane_id_hint=pane_id,
                 session_id_hint=session_id,
+                pause=pause,
             ),
             cmd_benchmark=lambda bd, cwd_path, action, comment, keep_basefolder, ignore: cmd_benchmark(
                 bd,

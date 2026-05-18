@@ -36,7 +36,7 @@ def dispatch_command(
     cmd_archive_restore_entry: Callable[[Path, str], int],
     cmd_archive_reorganize: Callable[[Path, bool], int],
     cmd_tmux_load: Callable[[str], int],
-    cmd_tmux_save: Callable[[Path, str, str, bool, bool, str, str], int],
+    cmd_tmux_save: Callable[..., int],
     cmd_benchmark: Callable[[Path, Path, str, str, bool, set[str] | None], int],
     cmd_test_regression: Callable[[Path, Path, bool, list[str]], int],
     cmd_test: Callable[[Path, Path, str, bool], int],
@@ -82,7 +82,6 @@ def dispatch_command(
             bin_dir,
             bool(getattr(ns, "dry_run", False)),
             json_output=bool(getattr(ns, "json_output", False)),
-            tui=bool(getattr(ns, "tui", False)),
         )
     if ns.command == "cache":
         return cmd_cache_warm() if ns.cache_subcommand == "warm" else 1
@@ -145,6 +144,7 @@ def dispatch_command(
                 bool(ns.debug),
                 str(ns.pane_id),
                 str(ns.session_id),
+                pause=bool(getattr(ns, "pause", False)),
             )
         return 1
     if ns.command == "benchmark":

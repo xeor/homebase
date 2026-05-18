@@ -85,9 +85,47 @@ def test_tmux_save_binding_lines_returns_only_binding_lines() -> None:
 
 
 def test_recommended_tmux_save_binding_contains_expected_parts() -> None:
-    line = setup_tools.recommended_tmux_save_binding(Path("/tmp/b"), "/usr/bin/uv", "/usr/bin/tmux")
-    assert "TMUX_BIN=" in line
+    line = setup_tools.recommended_tmux_save_binding(Path("/tmp/b"))
     assert "tmux save" in line
+    assert "--pause" in line
+    assert "/tmp/b" in line
+    assert "display-popup" in line
+    assert "#{pane_id}" in line
+    assert "session_id" in line
+
+
+def test_acceptable_tmux_save_binding_recognises_recommended_form() -> None:
+    line = setup_tools.recommended_tmux_save_binding(Path("/usr/local/bin/b"))
+    assert setup_tools.is_acceptable_tmux_save_binding(line)
+
+
+def test_acceptable_tmux_save_binding_rejects_legacy_uv_run_script() -> None:
+    legacy = (
+        "bind-key t run-shell -b "
+        "'TMUX_BIN=/opt/homebrew/bin/tmux /opt/homebrew/bin/uv run --script "
+        "/Users/x/.local/share/uv/tools/homebase/bin/b tmux save "
+        "--pane-id \"#{pane_id}\" --session-id \"#{q:session_id}\"'"
+    )
+    assert not setup_tools.is_acceptable_tmux_save_binding(legacy)
+
+
+def test_acceptable_tmux_save_binding_tolerates_whitespace_and_quoting() -> None:
+    variants = [
+        "bind-key  t  display-popup -E -w 80% -h 50% '/path/to/b tmux save --pane-id \"#{pane_id}\" --session-id \"#{q:session_id}\"'",
+        "bind t display-popup -E /opt/homebase/b tmux save --pane-id '#{pane_id}' --session-id '#{q:session_id}'",
+    ]
+    for line in variants:
+        assert setup_tools.is_acceptable_tmux_save_binding(line), line
+
+
+def test_acceptable_tmux_save_binding_rejects_unrelated_lines() -> None:
+    for line in (
+        "",
+        "# comment",
+        "bind-key x run-shell 'echo hi'",
+        "bind-key t run-shell 'tmux save'",  # missing pane_id + session_id
+    ):
+        assert not setup_tools.is_acceptable_tmux_save_binding(line), line
 
 
 def test_state_text_labels() -> None:
@@ -125,6 +163,84 @@ def test_remove_tmux_binding_keeps_other_lines(tmp_path: Path) -> None:
     assert "set -g mouse on" in text
     assert "bind-key x" in text
     assert "b tmux save" not in text
+
+
+def test_color_diff_lines_marks_removed_and_added() -> None:
+    diff = setup_tools._color_diff_lines(
+        ["alpha", "beta", "gamma"],
+        ["alpha", "BETA", "gamma"],
+    )
+    joined = "\n".join(diff)
+    assert "bright_red" in joined
+    assert "bright_green" in joined
+    assert "-beta" in joined
+    assert "+BETA" in joined
+
+
+def test_color_diff_lines_handles_identical_inputs() -> None:
+    diff = setup_tools._color_diff_lines(["alpha"], ["alpha"])
+    assert any("no differences" in line for line in diff)
+
+
+def test_color_diff_lines_truncates_long_diffs() -> None:
+    current = [f"line{i}" for i in range(200)]
+    desired = [f"line{i}+" for i in range(200)]
+    diff = setup_tools._color_diff_lines(current, desired, max_lines=20)
+    assert len(diff) <= 21
+    assert any("truncated" in line for line in diff)
+
+
+def test_tmux_preview_create_uses_char_level_inline_diff() -> None:
+    old = ("bind-key t display-popup -E -w 80% -h 50% /b tmux save",)
+    new = "bind-key t display-popup    -w 70% -h 30% /b tmux save --pause"
+    diff = setup_tools._tmux_preview_create(old, new)
+    joined = "\n".join(diff)
+    # both old and new lines are present
+    assert "- " in joined
+    assert "+ " in joined
+    # the differing chunks get strike (old) and green (new) markup
+    assert "strike bright_red" in joined
+    assert "bright_green" in joined
+    # the unchanged shared prefix is *not* inside the strike/green spans
+    assert "bind-key t display-popup" in joined
+
+
+def test_tmux_preview_create_when_no_current_binding() -> None:
+    diff = setup_tools._tmux_preview_create((), "bind-key t display-popup -w 70% -h 30% /b tmux save --pause")
+    joined = "\n".join(diff)
+    assert "(no current binding)" in joined
+    assert "bright_green" in joined
+
+
+def test_has_recommended_tmux_binding_tolerates_whitespace() -> None:
+    expected = "bind-key t display-popup -w 70% -h 30% /b tmux save --pause"
+    conf = "set -g mouse on\nbind-key  t   display-popup -w 70%   -h 30%  /b tmux save --pause\n"
+    assert setup_tools.has_recommended_tmux_binding(conf, expected)
+
+
+def test_has_recommended_tmux_binding_flags_missing_pause_as_stale() -> None:
+    expected = "bind-key t display-popup -w 70% -h 30% /b tmux save --pause"
+    conf = "bind-key t display-popup -w 70% -h 30% /b tmux save\n"  # no --pause
+    assert not setup_tools.has_recommended_tmux_binding(conf, expected)
+
+
+def test_has_recommended_tmux_binding_ignores_unrelated_bindings() -> None:
+    expected = "bind-key t display-popup -w 70% -h 30% /b tmux save --pause"
+    conf = (
+        "bind-key x run-shell 'echo hi'\n"
+        "bind-key t display-popup -w 70% -h 30% /b tmux save --pause\n"
+        "bind-key y run-shell 'echo bye'\n"
+    )
+    assert setup_tools.has_recommended_tmux_binding(conf, expected)
+
+
+def test_gitignore_preview_create_adds_cache_rule(tmp_path: Path) -> None:
+    p = tmp_path / ".gitignore"
+    p.write_text("foo.log\n")
+    diff = setup_tools._gitignore_preview_create(p)
+    joined = "\n".join(diff)
+    assert "+cache.sqlite3" in joined
+    assert "bright_green" in joined
 
 
 def test_remove_shell_init_source_line_drops_line(tmp_path: Path) -> None:
@@ -217,6 +333,99 @@ def test_select_fix_ids_prompt_fallback_selects_expected() -> None:
     assert selected == {"a"}
 
 
+def test_select_fix_ids_callback_returning_none_is_cancel() -> None:
+    """Regression: if the injected callback returns None (cancel),
+    _select_fix_ids must signal cancel — NOT return an empty set
+    that the apply phase would interpret as "remove everything"."""
+    fixes = [_make_fix("a", currently_present=True, currently_correct=True)]
+    result = setup_tools._select_fix_ids(
+        fixes,
+        select_fix_ids_fn=lambda _: None,
+        prompt_yes_no=lambda _q, d: d,
+    )
+    assert result is None
+
+
+def test_run_fix_loop_with_cancelling_callback_does_no_work() -> None:
+    """Regression: when select_fix_ids_fn cancels, _run_fix_loop must
+    return [] without ever invoking apply_create / apply_remove."""
+    creates = {"a": 0}
+    removes = {"a": 0}
+
+    def _bump_create() -> None:
+        creates["a"] += 1
+
+    def _bump_remove() -> None:
+        removes["a"] += 1
+
+    fixes = [
+        _make_fix(
+            "a",
+            currently_present=True,
+            currently_correct=True,
+            apply_create=_bump_create,
+            apply_remove=_bump_remove,
+        )
+    ]
+    results = setup_tools._run_fix_loop(
+        fixes,
+        select_fix_ids_fn=lambda _: None,
+        prompt_yes_no=lambda _q, d: d,
+        dry_run=False,
+        allow_rerun_failed=False,
+    )
+    assert results == []
+    assert creates["a"] == 0
+    assert removes["a"] == 0
+
+
+def test_run_app_loop_treats_none_outcome_as_cancel(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """CRITICAL regression: ``run_setup_app`` returning ``None``
+    (Textual unavailable OR user pressed Ctrl+Q) must abort cleanly
+    WITHOUT falling through to the legacy textual selector — that
+    fallback used to default to an empty selection and remove all
+    currently-installed config."""
+    ctx = _ctx_for_fixes(tmp_path)
+    fixes = setup_tools._build_fixes(ctx)
+    checks = setup_tools._build_checks(ctx)
+
+    # Stub run_setup_app to always return None
+    from homebase.core import setup_app
+
+    monkeypatch.setattr(
+        setup_app, "run_setup_app",
+        lambda *a, **kw: None,
+    )
+
+    # Track that apply is never invoked
+    apply_calls: list = []
+    real_apply = setup_tools._apply_intents
+
+    def _spy_apply(*args, **kwargs):
+        apply_calls.append((args, kwargs))
+        return real_apply(*args, **kwargs)
+
+    monkeypatch.setattr(setup_tools, "_apply_intents", _spy_apply)
+
+    results = setup_tools._run_app_loop(
+        ctx.base_dir, ctx.bin_dir,
+        tmux_bin_candidates=(),
+        completion_script_fn=None,
+        shell_init_script_fn=None,
+        initial_ctx=ctx,
+        initial_checks=checks,
+        initial_fixes=fixes,
+        dry_run=False,
+        prompt_yes_no=lambda _q, d: d,
+        allow_rerun_failed=False,
+    )
+    assert results == []
+    # Apply must NEVER be called during cancel-from-None
+    assert apply_calls == []
+
+
 def test_apply_intents_runs_create_for_absent_recommended_selected(capsys) -> None:
     calls = {"a": 0}
 
@@ -247,6 +456,58 @@ def test_apply_intents_runs_remove_for_present_unselected(capsys) -> None:
     assert results[0].intent == INTENT_REMOVE
     assert results[0].success is True
     assert calls["a"] == 1
+
+
+def test_default_selection_for_fully_configured_env_results_in_no_removes(
+    tmp_path: Path,
+) -> None:
+    """Regression: running ``b setup`` on a fully-configured machine
+    and applying without touching anything must NOT delete config.
+    Bug pattern: empty/wrong ``selected_ids`` led to REMOVE intents
+    for every present item."""
+    ctx = _ctx_for_fixes(tmp_path)
+    # Make every relevant fix currently_correct by laying down the
+    # expected state on disk.
+    ctx.homebase_dir.mkdir(parents=True, exist_ok=True)
+    ctx.homebase_gitignore.write_text("cache.sqlite3\n")
+    ctx.dest.parent.mkdir(parents=True, exist_ok=True)
+    ctx.dest.symlink_to(ctx.target)
+    ctx.tmux_conf_path.write_text(
+        setup_tools.recommended_tmux_save_binding(ctx.target) + "\n"
+    )
+    ctx.completion_target.parent.mkdir(parents=True, exist_ok=True)
+    ctx.completion_target.write_text(ctx.expected_completion)
+    ctx.shell_init_target.parent.mkdir(parents=True, exist_ok=True)
+    ctx.shell_init_target.write_text(ctx.expected_shell_init)
+    src_line = setup_tools._shell_init_source_line(
+        ctx.completion_shell, ctx.shell_init_target
+    )
+    ctx.shell_init_rc.write_text(src_line + "\n")
+
+    ctx = replace(
+        ctx,
+        completion_ok=True,
+        shell_init_ok=True,
+        existing_tmux_binding_lines=(
+            setup_tools.recommended_tmux_save_binding(ctx.target),
+        ),
+        tmux_conf_text=ctx.tmux_conf_path.read_text(),
+    )
+    fixes = setup_tools._build_fixes(ctx)
+    selected_ids = {fx.id for fx in fixes if fx.selected_default}
+
+    results = setup_tools._apply_intents(fixes, selected_ids, dry_run=False)
+
+    bad = [r for r in results if r.intent == INTENT_REMOVE]
+    assert not bad, (
+        "default apply on a configured env removed items: "
+        f"{[(r.id, r.intent) for r in bad]}"
+    )
+    # And every file we just laid down still exists
+    assert ctx.dest.is_symlink()
+    assert ctx.homebase_gitignore.is_file()
+    assert ctx.completion_target.is_file()
+    assert ctx.shell_init_target.is_file()
 
 
 def test_apply_intents_keeps_correct_items_as_noop(capsys) -> None:
@@ -456,6 +717,27 @@ def test_launcher_symlink_fix_supports_remove(tmp_path: Path) -> None:
     assert fixes["launcher_symlink"].apply_remove is not None
 
 
+def test_launcher_symlink_refuses_to_link_missing_target(tmp_path: Path) -> None:
+    """Regression: setup must not link `b` to a non-existent file.
+    Previously bin_dir was derived from __file__ and pointed at the
+    source tree, where no `b` script exists — applying the fix bricked
+    the user's launcher."""
+    ctx = _ctx_for_fixes(tmp_path)
+    # break the target on purpose
+    ctx.target.unlink()
+    fixes = {fx.id: fx for fx in setup_tools._build_fixes(ctx)}
+    with pytest.raises(OSError, match="does not exist"):
+        fixes["launcher_symlink"].apply_create()
+
+
+def test_launcher_symlink_refuses_to_link_non_executable_target(tmp_path: Path) -> None:
+    ctx = _ctx_for_fixes(tmp_path)
+    ctx.target.chmod(0o600)  # readable/writable but not executable
+    fixes = {fx.id: fx for fx in setup_tools._build_fixes(ctx)}
+    with pytest.raises(OSError, match="not executable"):
+        fixes["launcher_symlink"].apply_create()
+
+
 def test_build_fixes_apply_targets_are_isolated(tmp_path: Path) -> None:
     """Regression: each fix's apply_create must touch only its own
     target. An earlier refactor accidentally shared closure variables
@@ -509,6 +791,7 @@ def test_cmd_setup_return_code_warns_do_not_fail(monkeypatch: pytest.MonkeyPatch
     base_dir.mkdir()
     bin_dir.mkdir()
     (bin_dir / "b").write_text("#!/bin/sh\n")
+    (bin_dir / "b").chmod(0o755)
     (base_dir / ".homebase").mkdir()
     (base_dir / ".homebase" / ".gitignore").write_text("cache.sqlite3\n")
 
@@ -542,6 +825,7 @@ def test_cmd_setup_return_code_missing_required_fails(monkeypatch: pytest.Monkey
     base_dir.mkdir()
     bin_dir.mkdir()
     (bin_dir / "b").write_text("#!/bin/sh\n")
+    (bin_dir / "b").chmod(0o755)
 
     home = tmp_path / "home"
     home.mkdir()
@@ -565,6 +849,7 @@ def test_cmd_setup_uses_selected_fix_ids_callback(monkeypatch: pytest.MonkeyPatc
     base_dir.mkdir()
     bin_dir.mkdir()
     (bin_dir / "b").write_text("#!/bin/sh\n")
+    (bin_dir / "b").chmod(0o755)
 
     home = tmp_path / "home"
     home.mkdir()
@@ -606,6 +891,7 @@ def test_cmd_setup_returns_fail_when_selected_fix_fails(
     base_dir.mkdir()
     bin_dir.mkdir()
     (bin_dir / "b").write_text("#!/bin/sh\n")
+    (bin_dir / "b").chmod(0o755)
     (base_dir / ".homebase").mkdir()
     (base_dir / ".homebase" / ".gitignore").write_text("cache.sqlite3\n")
 
@@ -647,6 +933,7 @@ def test_cmd_setup_offers_to_install_shell_init(
     base_dir.mkdir()
     bin_dir.mkdir()
     (bin_dir / "b").write_text("#!/bin/sh\n")
+    (bin_dir / "b").chmod(0o755)
     (base_dir / ".homebase").mkdir()
     (base_dir / ".homebase" / ".gitignore").write_text("cache.sqlite3\n")
 
@@ -693,7 +980,9 @@ def test_cmd_setup_fixes_wrong_symlink_target(monkeypatch: pytest.MonkeyPatch, t
     bin_dir.mkdir()
     old_bin_dir.mkdir()
     (bin_dir / "b").write_text("#!/bin/sh\n")
+    (bin_dir / "b").chmod(0o755)
     (old_bin_dir / "b").write_text("#!/bin/sh\n")
+    (old_bin_dir / "b").chmod(0o755)
     (base_dir / ".homebase").mkdir()
     (base_dir / ".homebase" / ".gitignore").write_text("cache.sqlite3\n")
 
@@ -732,6 +1021,7 @@ def test_cmd_setup_renames_plain_launcher_file_before_symlink(
     base_dir.mkdir()
     bin_dir.mkdir()
     (bin_dir / "b").write_text("#!/bin/sh\n")
+    (bin_dir / "b").chmod(0o755)
     (base_dir / ".homebase").mkdir()
     (base_dir / ".homebase" / ".gitignore").write_text("cache.sqlite3\n")
 
@@ -769,6 +1059,7 @@ def test_cmd_setup_dry_run_does_not_modify_files(monkeypatch: pytest.MonkeyPatch
     base_dir.mkdir()
     bin_dir.mkdir()
     (bin_dir / "b").write_text("#!/bin/sh\n")
+    (bin_dir / "b").chmod(0o755)
 
     home = tmp_path / "home"
     home.mkdir()
@@ -804,6 +1095,7 @@ def test_cmd_setup_missing_config_is_warning_not_failure(
     base_dir.mkdir()
     bin_dir.mkdir()
     (bin_dir / "b").write_text("#!/bin/sh\n")
+    (bin_dir / "b").chmod(0o755)
     (base_dir / ".homebase").mkdir()
     (base_dir / ".homebase" / ".gitignore").write_text("cache.sqlite3\n")
 
@@ -842,6 +1134,7 @@ def test_cmd_setup_json_output_is_pure_json(
     base_dir.mkdir()
     bin_dir.mkdir()
     (bin_dir / "b").write_text("#!/bin/sh\n")
+    (bin_dir / "b").chmod(0o755)
     (base_dir / ".homebase").mkdir()
     (base_dir / ".homebase" / ".gitignore").write_text("cache.sqlite3\n")
 
@@ -888,6 +1181,7 @@ def test_cmd_setup_persists_report(
     base_dir.mkdir()
     bin_dir.mkdir()
     (bin_dir / "b").write_text("#!/bin/sh\n")
+    (bin_dir / "b").chmod(0o755)
     (base_dir / ".homebase").mkdir()
     (base_dir / ".homebase" / ".gitignore").write_text("cache.sqlite3\n")
 
@@ -970,6 +1264,7 @@ def _ctx_for_fixes(tmp_path: Path) -> SetupContext:
     target = tmp_path / "target-b"
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text("#!/bin/sh\n")
+    target.chmod(0o755)
     return SetupContext(
         base_dir=base,
         bin_dir=dest_dir,

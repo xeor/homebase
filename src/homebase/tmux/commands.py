@@ -336,6 +336,15 @@ def tmux_save_debug_snapshot(
     return out
 
 
+def _wait_for_enter() -> None:
+    print("")
+    print("Press Enter to close…", flush=True)
+    try:
+        input()
+    except (EOFError, KeyboardInterrupt):
+        return
+
+
 def cmd_tmux_save(
     base_dir: Path,
     dir_path: str = ".",
@@ -345,6 +354,7 @@ def cmd_tmux_save(
     pane_id_hint: str = "",
     session_id_hint: str = "",
     *,
+    pause: bool = False,
     tmux_list_sessions: Callable[[], list[dict[str, str]]],
     tmux_resolve_session_window: Callable[[str, str], tuple[dict[str, str], dict[str, str]]],
     tmux_list_panes: Callable[[str], list[dict[str, str]]],
@@ -356,17 +366,27 @@ def cmd_tmux_save(
     tmux_notify: Callable[[str, str, int], None],
     format_error: Callable[[Exception], str],
 ) -> int:
+    def _step(msg: str) -> None:
+        if pause:
+            print(f"… {msg}", flush=True)
+
     if not os.getenv("TMUX"):
         print("not inside a tmux session", file=sys.stderr)
+        if pause:
+            _wait_for_enter()
         return 1
 
     try:
+        _step("listing tmux sessions")
         sessions = tmux_list_sessions()
+        _step("resolving active session + window")
         session, window = tmux_resolve_session_window(str(pane_id_hint), str(session_id_hint))
         wid = window.get("window_id", "")
+        _step("listing panes")
         panes = tmux_list_panes(wid)
         if not panes:
             raise RuntimeError("resolved active window has no panes")
+        _step(f"found {len(panes)} pane(s); resolving project root")
 
         pane_start_dirs = [pane.get("pane_current_path", "") for pane in panes]
         project_root, project_debug = resolve_project_root_from_panes(pane_start_dirs, base_dir.resolve())
@@ -420,6 +440,7 @@ def cmd_tmux_save(
             output or (legacy_output if legacy_output and legacy_output != "." else ""),
             project_root,
         )
+        _step(f"writing profile to {output_path}")
 
         output_path.parent.mkdir(parents=True, exist_ok=True)
         with tempfile.NamedTemporaryFile(
@@ -440,6 +461,16 @@ def cmd_tmux_save(
         if to_stdout:
             print(text)
         tmux_notify(f"b tmux save: saved {output_path}", str(pane_id_hint), 4000)
+        if pause:
+            print("")
+            print(f"✓ saved profile: {output_path}")
+            print(f"  session: {session.get('session_name', '')}, "
+                  f"window: {window.get('window_name', '')}, "
+                  f"panes: {len(panes)}")
+            print("")
+            print("Take a look at the file before committing — pane")
+            print("commands are best-effort and may need a tweak.")
+            _wait_for_enter()
         return 0
     except (
         subprocess.SubprocessError,
@@ -451,4 +482,26 @@ def cmd_tmux_save(
         detail = format_error(exc)
         print(f"b tmux save failed: {detail}", file=sys.stderr)
         tmux_notify(f"b tmux save failed: {detail}", str(pane_id_hint), 6000)
+        if pause:
+            print("")
+            print(f"✗ failed: {detail}")
+            _wait_for_enter()
+        return 1
+    except Exception as exc:  # noqa: BLE001 - top-level error boundary for the tmux key binding
+        # The binding runs detached from any visible terminal; a bare
+        # traceback to stderr is invisible. Force the actual error to
+        # surface via tmux display-message so the user sees it.
+        import traceback
+
+        traceback.print_exc(file=sys.stderr)
+        tmux_notify(
+            f"b tmux save crashed: {type(exc).__name__}: {exc}",
+            str(pane_id_hint),
+            8000,
+        )
+        if pause:
+            print("")
+            print(f"✗ crashed: {type(exc).__name__}: {exc}")
+            print("(full traceback above)")
+            _wait_for_enter()
         return 1

@@ -5,6 +5,7 @@ import subprocess
 import sys
 import threading
 from pathlib import Path
+from typing import Callable
 
 from .setup_model import (
     INTENT_ABSENT,
@@ -17,6 +18,8 @@ from .setup_model import (
     STATUS_PASS,
     STATUS_SKIP,
     STATUS_WARN,
+    ApplyOutcome,
+    FixResult,
     SetupCheck,
     SetupContext,
     SetupFix,
@@ -46,17 +49,85 @@ def _status_badge(status: str) -> str:
     return f"[bold {color}]{status}[/]"
 
 
-def _fix_state_marker(fix: SetupFix) -> str:
-    """Marker shown for a fix item indicating its current state."""
+_ACTION_COL_WIDTH = 7
+_STATE_COL_WIDTH = 7
+_TAG_COL_WIDTH = 11
+
+
+def _fix_state_word(fix: SetupFix) -> tuple[str, str]:
+    """(word, color) describing the current on-disk state."""
     if fix.currently_correct:
-        return "[bold bright_green]●[/]"  # configured
+        return "ok", "bright_green"
     if fix.currently_present:
-        return "[bold bright_yellow]●[/]"  # present but stale/wrong
-    if fix.required:
-        return "[bold bright_red]●[/]"  # missing required
-    if fix.recommended:
-        return "[bold bright_yellow]○[/]"  # missing recommended
-    return "[bold bright_cyan]○[/]"  # missing optional
+        return "stale", "bright_yellow"
+    color = (
+        "bright_red" if fix.required
+        else ("bright_yellow" if fix.recommended else "bright_cyan")
+    )
+    return "missing", color
+
+
+def _action_word_for_intent(intent: str) -> tuple[str, str]:
+    """(word, color) for the action that ``intent`` represents."""
+    return {
+        INTENT_KEEP: ("keep", "bright_green"),
+        INTENT_CREATE: ("add", "bright_green"),
+        INTENT_REMOVE: ("remove", "bright_red"),
+        INTENT_ABSENT: ("skip", "bright_black"),
+        INTENT_CANNOT_CREATE: ("can't", "bright_red"),
+        INTENT_CANNOT_REMOVE: ("can't", "bright_red"),
+    }.get(intent, (intent, "white"))
+
+
+def _right_pane_for_intent(
+    fix: SetupFix, intent: str
+) -> tuple[str, str]:
+    """Return ``(title, body_markup)`` for the right-hand info pane.
+
+    - For KEEP / ABSENT / CANNOT_* intents nothing will happen on
+      apply, so the pane shows a status / verified message rather
+      than a misleading "preview" diff.
+    - For CREATE / REMOVE intents the pane shows the create / remove
+      diff — what will actually change."""
+    if intent == INTENT_KEEP:
+        body_lines = [
+            "[bold bright_green]✓ Already configured — nothing to change.[/]",
+            "",
+            "[bold]What was verified:[/]",
+            f"  {fix.current_state_text or '<state unknown>'}",
+        ]
+        if fix.description:
+            body_lines.append("")
+            body_lines.append(fix.description)
+        return "Verified", "\n".join(body_lines)
+    if intent == INTENT_ABSENT:
+        body_lines = [
+            "[dim]· Not installed and not selected — no action.[/]",
+            "",
+            f"[bold]Current:[/] {fix.current_state_text or '<unknown>'}",
+        ]
+        if fix.description:
+            body_lines.append("")
+            body_lines.append(fix.description)
+        return "Status", "\n".join(body_lines)
+    if intent == INTENT_CANNOT_CREATE:
+        return "Status", (
+            "[bright_red]No installer wired up — this item must be "
+            "configured manually.[/]"
+        )
+    if intent == INTENT_CANNOT_REMOVE:
+        return "Status", (
+            "[bright_red]Setup cannot uninstall this — remove it by "
+            "hand if you really want to.[/]\n\n"
+            f"[bold]Current:[/] {fix.current_state_text or '<unknown>'}"
+        )
+    if intent == INTENT_CREATE:
+        body = "\n".join(fix.preview_create) if fix.preview_create else "<no preview available>"
+        return "Preview · install", body
+    if intent == INTENT_REMOVE:
+        body = "\n".join(fix.preview_remove) if fix.preview_remove else "<no preview available>"
+        return "Preview · remove", body
+    return "Status", fix.current_state_text or ""
 
 
 def _fix_state_text(fix: SetupFix) -> str:
@@ -177,18 +248,38 @@ def _format_diagnostics(ctx: SetupContext) -> str:
     return "\n".join(lines)
 
 
-def _fix_row_label(fix: SetupFix) -> str:
-    marker = _fix_state_marker(fix)
-    tag_color = "bright_red" if fix.required else (
-        "bright_yellow" if fix.recommended else "bright_cyan"
+def _fix_row_label(fix: SetupFix, *, selected: bool) -> str:
+    """Build the per-row label shown in the Fixes SelectionList.
+
+    Layout: ``<action>  <tag> [<state>]  <title>``. The action column
+    is the user-visible reflection of the SelectionList's selected
+    state — replaces the previous [x]/[ ] checkbox glyph (which the
+    user found too easy to misread)."""
+    intent = fix.intent(selected=selected)
+    action_word, action_color = _action_word_for_intent(intent)
+    action = f"[bold {action_color}]{action_word:<{_ACTION_COL_WIDTH}}[/]"
+
+    tag_text = (
+        "required" if fix.required
+        else ("recommended" if fix.recommended else "optional")
     )
-    tag_text = "required" if fix.required else ("recommended" if fix.recommended else "optional")
-    tag = f"[{tag_color}]{tag_text:>11}[/]"
-    return f"{marker} {tag}  {fix.title}"
+    tag_color = (
+        "bright_red" if fix.required
+        else ("bright_yellow" if fix.recommended else "bright_cyan")
+    )
+    state_word, state_color = _fix_state_word(fix)
+    state_chunk = f"[bold {state_color}]\\[{state_word}][/]"
+    tag_chunk = f"[{tag_color}]{tag_text}[/] {state_chunk}"
+
+    # Manual width math because Rich markup tags don't count as visible
+    # chars but f-string padding does — give the label a fixed visible
+    # prefix so the titles line up.
+    visible_tag_width = len(tag_text) + 1 + len(state_word) + 2  # tag + " [" + word + "]"
+    pad_len = max(0, _TAG_COL_WIDTH + 2 + _STATE_COL_WIDTH + 2 - visible_tag_width)
+    return f"{action} {tag_chunk}{' ' * pad_len}  {fix.title}"
 
 
 def _ordered_fixes(fixes: list[SetupFix]) -> list[SetupFix]:
-    """Required first, then recommended, then optional."""
     def _rank(fx: SetupFix) -> int:
         if fx.required:
             return 0
@@ -244,19 +335,30 @@ def run_setup_app(
     ctx: SetupContext,
     checks: list[SetupCheck],
     fixes: list[SetupFix],
-) -> set[str] | None:
+    *,
+    apply_fn: Callable[..., list[FixResult]],
+    dry_run: bool = False,
+) -> ApplyOutcome | None:
     """Launch the tabbed Textual setup app.
 
-    Returns the set of selected fix ids the user wants present after
-    apply, or None on cancel. Selected = present (keep or install);
-    unselected = absent (skip or remove).
-    """
+    Returns an ``ApplyOutcome`` describing how the user ended the
+    session (cancel / continue / exit), or ``None`` when Textual
+    itself isn't importable. Callers MUST treat ``None`` as cancel —
+    never as a signal to fall back to a legacy selector with empty
+    defaults (that's how the destructive bug used to be reached)."""
     try:
         from rich.text import Text
         from textual.app import App, ComposeResult
         from textual.binding import Binding
-        from textual.containers import Horizontal, Vertical
+        from textual.containers import (
+            Container,
+            Horizontal,
+            Vertical,
+            VerticalScroll,
+        )
+        from textual.screen import ModalScreen
         from textual.widgets import (
+            Button,
             Header,
             RichLog,
             SelectionList,
@@ -269,28 +371,250 @@ def run_setup_app(
     except ImportError:
         return None
 
-    # Render the SelectionList checkbox as "[x]" / "[ ]". CSS below
-    # makes the inner color match the row background when unselected,
-    # so it visually reads as "[ ]" in that case.
-    ToggleButton.BUTTON_LEFT = "["
-    ToggleButton.BUTTON_INNER = "x"
-    ToggleButton.BUTTON_RIGHT = "]"
+    # Hide the SelectionList checkbox entirely — selection state is
+    # shown via the leading "keep / add / remove / skip" word in each
+    # row's label instead, which the row-refresh hook updates on every
+    # toggle. Empty BUTTON chars render as zero-width segments.
+    ToggleButton.BUTTON_LEFT = ""
+    ToggleButton.BUTTON_INNER = ""
+    ToggleButton.BUTTON_RIGHT = ""
 
     fix_order = _ordered_fixes(fixes)
     fix_by_id = {fx.id: fx for fx in fix_order}
-    total_fixes = len(fix_order)
 
-    class _SetupApp(App[set[str] | None]):
+    class ApplyDialog(ModalScreen[ApplyOutcome]):
+        """Modal log dialog shown while apply runs.
+
+        Streams each step into a RichLog, prints a summary at the end,
+        and lets the user pick "Back to setup" (return with action=
+        ``continue``) or "Close & quit" (action=``exit``)."""
+
+        BINDINGS = [
+            Binding("escape", "back", "Back", show=False),
+        ]
+
+        def __init__(
+            self,
+            fix_list: list[SetupFix],
+            selected_ids: set[str],
+            dry_run_flag: bool,
+        ) -> None:
+            super().__init__()
+            self._fix_list = fix_list
+            self._selected_ids = selected_ids
+            self._dry_run = dry_run_flag
+            self._results: list[FixResult] = []
+            self._done = False
+
+        def compose(self) -> ComposeResult:
+            with Vertical(id="dialog_box", classes="-done"):
+                yield Static("Completed actions", id="dialog_title")
+                yield RichLog(
+                    highlight=False, markup=True, wrap=True, id="apply_log"
+                )
+                with Horizontal(id="dialog_buttons"):
+                    # "Back to setup" is intentionally not rendered — Esc
+                    # still works (see action_back). One visible button
+                    # keeps the dialog uncluttered after a run finishes.
+                    yield Button(
+                        "Quit",
+                        id="btn_apply_close",
+                        variant="warning",
+                        disabled=True,
+                    )
+
+        def on_mount(self) -> None:
+            # Apply file-I/O operations finish in well under a second.
+            # Running them synchronously on the next frame avoids the
+            # worker-thread complexity that previously caused the
+            # dialog to "hang" with disabled buttons.
+            self.call_after_refresh(self._do_apply)
+
+        def _emit(self, line: str) -> None:
+            self.query_one("#apply_log", RichLog).write(line)
+
+        def _do_apply(self) -> None:
+            from rich.markup import escape
+
+            def log_fn(line: str, err: bool) -> None:
+                color = "bright_red" if err else "white"
+                self._emit(f"[{color}]{escape(line)}[/]")
+
+            self._emit(
+                f"[bold]Applying {len(self._selected_ids)} selected item(s)"
+                + (" (dry-run)" if self._dry_run else "")
+                + "…[/]"
+            )
+            results: list[FixResult] = []
+            try:
+                results = apply_fn(
+                    self._fix_list,
+                    self._selected_ids,
+                    dry_run=self._dry_run,
+                    log_fn=log_fn,
+                )
+            except Exception as exc:  # noqa: BLE001 - dialog-level error boundary
+                import traceback
+
+                self._emit(
+                    f"[bright_red bold]apply crashed: "
+                    f"{type(exc).__name__}: {escape(str(exc))}[/]"
+                )
+                for line in traceback.format_exc().splitlines():
+                    self._emit(f"[bright_red]{escape(line)}[/]")
+            self._results = results
+            self._summarize()
+            self._finish()
+
+        def _summarize(self) -> None:
+            log = self.query_one("#apply_log", RichLog)
+            creates = [
+                r for r in self._results if r.intent == INTENT_CREATE and r.success
+            ]
+            removes = [
+                r for r in self._results if r.intent == INTENT_REMOVE and r.success
+            ]
+            keeps = [r for r in self._results if r.intent == INTENT_KEEP]
+            failures = [r for r in self._results if not r.success]
+            log.write("")
+            log.write("[bold underline]Summary[/]")
+            log.write(
+                f"  [bright_green]installed: {len(creates)}[/]   "
+                f"[bright_red]removed: {len(removes)}[/]   "
+                f"[dim]kept: {len(keeps)}[/]"
+            )
+            if failures:
+                log.write(
+                    f"  [bold bright_red]failed: {len(failures)}[/]"
+                )
+                for r in failures:
+                    log.write(
+                        f"    [bright_red]- {r.title}: {r.error or '<unknown>'}[/]"
+                    )
+            log.write("")
+            log.write(
+                "[bold]Esc[/] [dim]to keep editing,[/]  "
+                "[bold]Enter / Quit[/] [dim]to exit setup.[/]"
+            )
+
+        def _finish(self) -> None:
+            self.query_one("#btn_apply_close", Button).disabled = False
+            self.query_one("#btn_apply_close", Button).focus()
+            self._done = True
+
+        def on_button_pressed(self, event: Button.Pressed) -> None:
+            if not self._done:
+                return
+            if event.button.id == "btn_apply_close":
+                # Tear the whole app down so the underlying screen
+                # doesn't render in a transient state before exit.
+                self.app.exit(
+                    ApplyOutcome(action="exit", results=self._results)
+                )
+
+        def action_back(self) -> None:
+            if not self._done:
+                return
+            self.dismiss(ApplyOutcome(action="continue", results=self._results))
+
+    class ConfirmApplyDialog(ModalScreen[bool]):
+        """Pre-apply confirmation modal. Lists what will change and
+        gates the actual apply behind an explicit Enter / button press.
+
+        Same dialog regardless of whether the apply is destructive —
+        only the border colour changes (red when any REMOVE is in the
+        plan, blue otherwise). The "Apply changes" button is focused
+        by default so Enter triggers it directly."""
+
+        BINDINGS = [
+            Binding("escape", "cancel", "Cancel", show=False),
+        ]
+
+        def __init__(
+            self,
+            creates: list[str],
+            removes: list[str],
+        ) -> None:
+            super().__init__()
+            self._creates = creates
+            self._removes = removes
+            self._destructive = bool(removes)
+
+        def compose(self) -> ComposeResult:
+            border_class = "-confirm-destructive" if self._destructive else "-confirm"
+            with Vertical(id="dialog_box", classes=border_class):
+                title = (
+                    "Confirm destructive apply"
+                    if self._destructive
+                    else "Confirm apply"
+                )
+                title_color = "bright_red" if self._destructive else "bright_cyan"
+                yield Static(
+                    f"[bold {title_color}]{title}[/]",
+                    id="dialog_title",
+                )
+                lines: list[str] = []
+                if self._removes:
+                    lines.append(
+                        f"[bold bright_red]REMOVE {len(self._removes)} "
+                        "item(s) from your system:[/]"
+                    )
+                    for title in self._removes:
+                        lines.append(f"  [bright_red]- {title}[/]")
+                    if self._creates:
+                        lines.append("")
+                if self._creates:
+                    lines.append(
+                        f"[bold bright_green]INSTALL {len(self._creates)} "
+                        "item(s):[/]"
+                    )
+                    for title in self._creates:
+                        lines.append(f"  [bright_green]+ {title}[/]")
+                lines.append("")
+                lines.append(
+                    "[bold]Press Enter to apply, Esc to cancel.[/]"
+                )
+                yield Static(
+                    Text.from_markup("\n".join(lines)),
+                    id="apply_log",
+                )
+                with Horizontal(id="dialog_buttons"):
+                    yield Button("Cancel (Esc)", id="btn_confirm_cancel")
+                    yield Button(
+                        "Apply changes",
+                        id="btn_confirm_ok",
+                        variant="error" if self._destructive else "success",
+                    )
+
+        def on_mount(self) -> None:
+            # Default focus on Apply changes so Enter triggers it —
+            # explicit user request. Esc still cancels.
+            self.query_one("#btn_confirm_ok", Button).focus()
+
+        def on_button_pressed(self, event: Button.Pressed) -> None:
+            bid = event.button.id
+            if bid == "btn_confirm_ok":
+                self.dismiss(True)
+            elif bid == "btn_confirm_cancel":
+                self.dismiss(False)
+
+        def action_cancel(self) -> None:
+            self.dismiss(False)
+
+    class _SetupApp(App[ApplyOutcome | None]):
         TITLE = "Homebase Setup"
         CSS = """
         Screen { align: center middle; }
-        #panel { width: 100%; height: 100%; }
+
         TabbedContent { height: 1fr; }
 
+        /* --- SelectionList checkbox glyphs ----------------------- */
         SelectionList {
             height: 1fr;
             text-wrap: nowrap;
             text-overflow: ellipsis;
+            border: round $panel;
+            padding: 0 1;
         }
         SelectionList > .selection-list--button {
             color: $panel;
@@ -311,95 +635,123 @@ def run_setup_app(
             text-style: bold;
         }
 
-        #fixes_grid { height: 1fr; }
-        #fix_body { height: 2fr; }
-        #fixes_bottom { height: 1fr; max-height: 24; min-height: 12; }
-        #fix_left { width: 6fr; border: round $panel; }
-        #fix_right { width: 5fr; border: round $panel; padding: 0 1; }
+        /* --- Fixes tab (asymmetric "cross" grid) ----------------- */
+        /* Row-span layout: the inner horizontal divider on the left
+         * column sits ABOVE the one on the right column, so SL is
+         * shortest, fix details is tallest, plan is mid-tall, apply
+         * controls is shortest. */
+        #fixes_grid {
+            layout: grid;
+            grid-size: 2 3;
+            grid-columns: 3fr 2fr;
+            grid-rows: 2fr 1fr 1fr;
+            grid-gutter: 1 1;
+            padding: 1 1 0 1;
+        }
+        #fix_right {
+            row-span: 2;
+            border: round $panel;
+            padding: 0 1;
+        }
+        #plan_box {
+            row-span: 2;
+            border: round $accent;
+            padding: 0 1;
+        }
         #detail_title { text-style: bold; padding: 0 0 1 0; }
         #detail_block { padding: 0 0 1 0; }
         #preview_title { text-style: bold; padding: 1 0 0 0; }
         #preview_block { padding: 0 0 1 0; color: $text-muted; }
         .pane_text { padding: 1 2; }
-
-        #apply_controls { width: 6fr; padding: 0 1; }
-        #btn_apply_fixes {
-            height: 3fr;
-            border: round $success;
-            background: $success-darken-2;
-            color: $text;
-            text-style: bold;
-            content-align: center middle;
-            margin: 0 0 1 0;
-        }
-        #btn_apply_fixes.-disabled {
-            background: $surface-darken-2;
-            color: $text-muted;
-            border: round $surface;
-            text-style: none;
-        }
-        #apply_secondary { height: 1fr; }
-        #apply_secondary Static {
-            background: $surface;
-            color: $text-muted;
-            border: round $surface-lighten-1;
-            content-align: center middle;
-            margin: 0 1 0 0;
-            height: 1fr;
-        }
-
-        #plan_box {
-            width: 5fr;
-            border: round $accent;
-            padding: 0 1;
-        }
         #plan_title { text-style: bold; padding: 0 0 1 0; }
-        #plan_block { padding: 0; }
+        #plan_block { padding: 0; height: auto; }
 
-        #self_update_body { height: 1fr; padding: 1 2; }
+        /* apply controls cell (bottom-right, smallest)
+         * Single horizontal row of three Buttons: Apply prominent
+         * (success variant + wider) plus the two secondary actions.
+         * Letting Button keep its natural 3-line height keeps the
+         * label vertically centered. */
+        #apply_controls {
+            layout: horizontal;
+            align: center middle;
+        }
+        #btn_apply {
+            width: 2fr;
+            margin: 0 1 0 0;
+        }
+        #btn_all, #btn_none {
+            width: 1fr;
+            margin: 0 1 0 0;
+        }
+
+        /* --- Self-update tab ------------------------------------- */
+        #self_update_body { padding: 1 2; }
         #self_update_info { height: auto; padding: 0 0 1 0; }
-        #self_update_button {
-            background: $success-darken-2;
-            color: $text;
-            text-style: bold;
-            content-align: center middle;
-            width: 40;
-            height: 5;
-            border: round $success;
-            margin: 1 0;
-        }
-        #self_update_button.-disabled {
-            background: $surface-darken-1;
-            color: $text-muted;
-            border: round $surface;
-            text-style: none;
-        }
+        #btn_run_update { margin: 0 0 1 0; min-width: 30; }
         #self_update_log {
             height: 1fr;
             border: round $accent;
             background: $surface;
         }
 
+        /* --- bottom cancel bar (overview only) -------------------
+         * action_bar height matches the natural Button height (3)
+         * so the label sits vertically centered. margin-bottom keeps
+         * the bar away from the screen edge without affecting the
+         * label position the way bottom padding did. */
         #action_bar {
             dock: bottom;
-            height: 5;
-            padding: 1 2 2 2;
+            height: 3;
+            margin: 0 2 2 2;
         }
-        #action_bar Static { padding: 1 2; content-align: center middle; }
-        #btn_cancel {
-            background: $warning-darken-2;
-            color: $text;
-            min-width: 14;
-            border: round $warning;
+        #btn_cancel { width: 100%; }
+
+        /* --- Modal dialogs (Confirm + Completed actions) ---------
+         * Same structural CSS for both; the border colour is the
+         * only thing that varies, set via classes on #dialog_box. */
+        ApplyDialog, ConfirmApplyDialog {
+            align: center middle;
         }
+        #dialog_box {
+            width: 80%;
+            height: 70%;
+            background: $boost;
+            padding: 1 2;
+        }
+        #dialog_box.-done { border: round $success; }
+        #dialog_box.-confirm { border: round $accent; }
+        #dialog_box.-confirm-destructive { border: round $error; }
+        #dialog_title {
+            text-style: bold;
+            padding: 0 0 1 0;
+        }
+        #apply_log {
+            height: 1fr;
+            border: round $panel;
+            background: $surface;
+            padding: 0 1;
+            margin: 0 0 1 0;
+        }
+        #dialog_buttons { height: 3; align-horizontal: right; }
+        #dialog_buttons Button { margin: 0 0 0 1; min-width: 18; }
         """
         TAB_ORDER = ("overview", "fixes", "self_update", "diagnostics")
         BINDINGS = [
             Binding("ctrl+s", "apply", "Apply"),
             Binding("q", "cancel", "Cancel"),
             Binding("escape", "cancel", "Cancel", show=False),
-            Binding("a", "all", "Select all"),
-            Binding("n", "none", "Select none"),
+            # Override Textual's default ctrl+q → app.quit (which
+            # returns None and used to fall through to the legacy
+            # selector with empty defaults — the destructive bug).
+            Binding("ctrl+q", "cancel", "Cancel", show=False),
+            # Same story for ctrl+c.
+            Binding("ctrl+c", "cancel", "Cancel", show=False),
+            # `a` and `n` were the wipe-everything footguns. Replaced
+            # with Ctrl-modified chords so a stray keystroke can't
+            # deselect every fix (which would otherwise trigger a
+            # REMOVE for each currently-installed item on apply).
+            Binding("ctrl+a", "all", "Select all"),
+            Binding("ctrl+n", "none", "Select none"),
             Binding("u", "run_self_update", "Run update"),
             Binding("left", "prev_tab", "Prev tab"),
             Binding("right", "next_tab", "Next tab"),
@@ -416,72 +768,73 @@ def run_setup_app(
 
         def compose(self) -> ComposeResult:
             yield Header(show_clock=False)
-            with Vertical(id="panel"):
-                with TabbedContent(initial="fixes"):
-                    with TabPane("Overview", id="overview"):
+            with TabbedContent(initial="fixes"):
+                with TabPane("Overview", id="overview"):
+                    with VerticalScroll():
                         yield Static(
                             Text.from_markup(_format_overview(checks)),
                             classes="pane_text",
                         )
-                    with TabPane("Fixes", id="fixes"):
-                        with Vertical(id="fixes_grid"):
-                            with Horizontal(id="fix_body"):
-                                with Vertical(id="fix_left"):
-                                    rows = []
-                                    for fx in fix_order:
-                                        rows.append(
-                                            (
-                                                Text.from_markup(_fix_row_label(fx)),
-                                                fx.id,
-                                                fx.selected_default,
-                                            )
-                                        )
-                                    yield SelectionList[str](*rows, id="fixes_list")
-                                with Vertical(id="fix_right"):
-                                    yield Static("Fix details", id="detail_title")
-                                    yield Static("", id="detail_block")
-                                    yield Static("Preview", id="preview_title")
-                                    yield Static("", id="preview_block")
-                            with Horizontal(id="fixes_bottom"):
-                                with Vertical(id="apply_controls"):
-                                    yield Static(
-                                        f"[^s] Apply (0/{total_fixes})",
-                                        id="btn_apply_fixes",
-                                    )
-                                    with Horizontal(id="apply_secondary"):
-                                        yield Static("[a] Select all", id="btn_all")
-                                        yield Static("[n] Select none", id="btn_none")
-                                with Vertical(id="plan_box"):
-                                    yield Static("Apply plan", id="plan_title")
-                                    yield Static("", id="plan_block")
-                    with TabPane("Self-update", id="self_update"):
-                        with Vertical(id="self_update_body"):
-                            yield Static(
-                                Text.from_markup(_format_self_update_static(ctx)),
-                                id="self_update_info",
+                with TabPane("Fixes", id="fixes"):
+                    with Container(id="fixes_grid"):
+                        rows = [
+                            (
+                                Text.from_markup(
+                                    _fix_row_label(fx, selected=fx.selected_default)
+                                ),
+                                fx.id,
+                                fx.selected_default,
                             )
-                            yield Static(
-                                "[bold]Press 'u' or click below to run.[/]",
-                                id="self_update_hint",
+                            for fx in fix_order
+                        ]
+                        # row-major placement with row-span on
+                        # fix_right and plan_box gives the desired
+                        # asymmetric "cross" layout (see CSS comment).
+                        yield SelectionList[str](*rows, id="fixes_list")
+                        with VerticalScroll(id="fix_right"):
+                            yield Static("Fix details", id="detail_title")
+                            yield Static("", id="detail_block")
+                            yield Static("Preview", id="preview_title")
+                            yield Static("", id="preview_block")
+                        with VerticalScroll(id="plan_box"):
+                            yield Static("Apply plan", id="plan_title")
+                            yield Static("", id="plan_block")
+                        with Horizontal(id="apply_controls"):
+                            yield Button(
+                                "Apply (Ctrl+S)",
+                                id="btn_apply",
+                                variant="success",
                             )
-                            yield Static(
-                                "▶ Run update (u)" if ctx.update_cmd else "Run update — unavailable",
-                                id="self_update_button",
-                                classes="" if ctx.update_cmd else "-disabled",
-                            )
-                            yield RichLog(
-                                highlight=True,
-                                markup=True,
-                                wrap=True,
-                                id="self_update_log",
-                            )
-                    with TabPane("Diagnostics", id="diagnostics"):
+                            yield Button("Select all (Ctrl+A)", id="btn_all")
+                            yield Button("Select none (Ctrl+N)", id="btn_none")
+                with TabPane("Self-update", id="self_update"):
+                    with Vertical(id="self_update_body"):
+                        yield Static(
+                            Text.from_markup(_format_self_update_static(ctx)),
+                            id="self_update_info",
+                        )
+                        yield Button(
+                            "Run update (u)" if ctx.update_cmd else "Run update — unavailable",
+                            id="btn_run_update",
+                            variant="success" if ctx.update_cmd else "default",
+                            disabled=not ctx.update_cmd,
+                        )
+                        yield RichLog(
+                            highlight=True,
+                            markup=True,
+                            wrap=True,
+                            id="self_update_log",
+                        )
+                with TabPane("Diagnostics", id="diagnostics"):
+                    with VerticalScroll():
                         yield Static(
                             Text.from_markup(_format_diagnostics(ctx)),
                             classes="pane_text",
                         )
             with Horizontal(id="action_bar"):
-                yield Static("[q] Cancel", id="btn_cancel")
+                yield Button(
+                    "Cancel & Quit (q)", id="btn_cancel", variant="warning"
+                )
 
         # --- lifecycle ----------------------------------------------
 
@@ -501,17 +854,50 @@ def run_setup_app(
         def on_selection_list_selection_toggled(self, _event) -> None:
             self._refresh_detail()
             self._refresh_action_bar()
+            self._refresh_row_labels()
+
+        def on_selection_list_selected_changed(self, _event) -> None:
+            # Catches programmatic changes too (Select all / Select
+            # none, restored state on tab activation, etc.).
+            self._refresh_row_labels()
+            self._refresh_action_bar()
+
+        def _refresh_row_labels(self) -> None:
+            """Update the action word at the start of every Fix row so
+            it always reflects the current selection state."""
+            from textual.css.query import NoMatches
+
+            try:
+                sl = self.query_one("#fixes_list", SelectionList)
+            except NoMatches:
+                return
+            selected = self._selected_set()
+            for idx, fx in enumerate(fix_order):
+                label = _fix_row_label(fx, selected=fx.id in selected)
+                sl.replace_option_prompt_at_index(idx, Text.from_markup(label))
+
+        def on_button_pressed(self, event: "Button.Pressed") -> None:
+            bid = event.button.id
+            if bid == "btn_apply":
+                self.action_apply()
+            elif bid == "btn_cancel":
+                self.action_cancel()
+            elif bid == "btn_all":
+                self.action_all()
+            elif bid == "btn_none":
+                self.action_none()
+            elif bid == "btn_run_update":
+                self.action_run_self_update()
 
         # --- bindings ----------------------------------------------
 
         def check_action(self, action: str, parameters):
             _ = parameters
-            on_fixes = self._active_tab_id() == "fixes"
-            on_self_update = self._active_tab_id() == "self_update"
+            active = self._active_tab_id()
             if action in ("all", "none", "apply"):
-                return on_fixes
+                return active == "fixes"
             if action == "run_self_update":
-                return on_self_update
+                return active == "self_update"
             return True
 
         # --- helpers -----------------------------------------------
@@ -565,22 +951,20 @@ def run_setup_app(
             total_changes = create_count + remove_count
 
             try:
-                apply_btn = self.query_one("#btn_apply_fixes", Static)
+                apply_btn = self.query_one("#btn_apply", Button)
                 if total_changes == 0 and cannot_count == 0:
-                    apply_btn.update(
-                        Text.from_markup("[^s] Apply (no changes)")
-                    )
-                    apply_btn.add_class("-disabled")
+                    apply_btn.label = "Apply (no changes)"
+                    apply_btn.disabled = True
                 else:
-                    apply_btn.update(
-                        Text.from_markup(
-                            f"[^s] Apply "
-                            f"[bright_green]+{create_count}[/]"
-                            f" [bright_red]-{remove_count}[/]"
-                            + (f"  [bright_red]!{cannot_count}[/]" if cannot_count else "")
-                        )
-                    )
-                    apply_btn.remove_class("-disabled")
+                    pieces: list[str] = []
+                    if create_count:
+                        pieces.append(f"+{create_count}")
+                    if remove_count:
+                        pieces.append(f"-{remove_count}")
+                    if cannot_count:
+                        pieces.append(f"!{cannot_count}")
+                    apply_btn.label = "Apply " + " ".join(pieces) + "  (Ctrl+S)"
+                    apply_btn.disabled = False
                 self.query_one("#plan_block", Static).update(
                     Text.from_markup(_format_action_plan(fix_order, selected))
                 )
@@ -666,23 +1050,68 @@ def run_setup_app(
                 lines.append(fix.description)
             detail.update(Text.from_markup("\n".join(lines)))
 
-            preview_lines = (
-                fix.preview_create if intent in {INTENT_CREATE, INTENT_KEEP, INTENT_CANNOT_CREATE, INTENT_ABSENT}
-                else fix.preview_remove
-            )
-            preview.update(
-                "\n".join(preview_lines) if preview_lines else "<no preview available>"
-            )
+            pane_title, pane_body = _right_pane_for_intent(fix, intent)
+            self.query_one("#preview_title", Static).update(pane_title)
+            preview.update(Text.from_markup(pane_body))
 
         # --- actions ----------------------------------------------
 
         def action_apply(self) -> None:
             widget = self.query_one("#fixes_list", SelectionList)
             selected = {str(value) for value in widget.selected}
-            self.exit(selected)
+            intents = _compute_intents(fix_order, selected)
+            create_ids = [
+                fid for fid, i in intents.items() if i == INTENT_CREATE
+            ]
+            remove_ids = [
+                fid for fid, i in intents.items() if i == INTENT_REMOVE
+            ]
+            if not create_ids and not remove_ids:
+                return  # nothing to apply
+
+            # Safety net: refuse to apply if it would remove every
+            # currently-installed item at once. That's never a valid
+            # outcome of normal use; it's the destructive bug pattern
+            # that wiped a user's config.
+            installed = [fx for fx in fix_order if fx.currently_present]
+            if installed and len(remove_ids) == len(installed):
+                self.notify(
+                    f"Refusing to apply: this would REMOVE every "
+                    f"installed item ({len(remove_ids)}). Re-check "
+                    f"your selections (Ctrl+A to select all, then "
+                    f"un-check only what you want to remove).",
+                    title="Setup blocked",
+                    severity="error",
+                    timeout=12,
+                )
+                return
+
+            def _proceed() -> None:
+                def _on_dismiss(outcome: ApplyOutcome | None) -> None:
+                    self.exit(outcome or ApplyOutcome(action="continue"))
+
+                self.push_screen(
+                    ApplyDialog(fix_order, selected, dry_run),
+                    _on_dismiss,
+                )
+
+            # Always show the confirmation dialog so the user gets to
+            # see the plan and explicitly approve via Enter / Apply
+            # changes. Destructive plans use a red border + variant;
+            # creates-only use a blue border + green button.
+            def _on_confirm(confirmed: bool | None) -> None:
+                if confirmed:
+                    _proceed()
+
+            creates = [fix_by_id[fid].title for fid in create_ids]
+            removes = [fix_by_id[fid].title for fid in remove_ids]
+            self.push_screen(
+                ConfirmApplyDialog(creates, removes),
+                _on_confirm,
+            )
 
         def action_cancel(self) -> None:
-            self.exit(None)
+            self.exit(ApplyOutcome(action="cancel"))
 
         def action_all(self) -> None:
             self.query_one("#fixes_list", SelectionList).select_all()
@@ -721,7 +1150,7 @@ def run_setup_app(
             log = self.query_one("#self_update_log", RichLog)
             log.write(f"[bold]$ {ctx.update_cmd}[/]")
             try:
-                proc = subprocess.Popen(  # noqa: S603 - command came from ctx
+                proc = subprocess.Popen(  # noqa: S603 - command comes from ctx
                     shlex.split(ctx.update_cmd),
                     stdout=subprocess.PIPE,
                     stderr=subprocess.STDOUT,
@@ -732,9 +1161,9 @@ def run_setup_app(
                 log.write(f"[bright_red]launch failed: {exc}[/]")
                 return
             self._update_proc = proc
-            button = self.query_one("#self_update_button", Static)
-            button.update("▶ Running… (output below)")
-            button.add_class("-disabled")
+            button = self.query_one("#btn_run_update", Button)
+            button.label = "Running…"
+            button.disabled = True
 
             def _pump() -> None:
                 assert proc.stdout is not None
@@ -757,10 +1186,9 @@ def run_setup_app(
             t.start()
 
         def _finish_update(self) -> None:
-            button = self.query_one("#self_update_button", Static)
-            button.update("▶ Run update (u)" if ctx.update_cmd else "Run update — unavailable")
-            if ctx.update_cmd:
-                button.remove_class("-disabled")
+            button = self.query_one("#btn_run_update", Button)
+            button.label = "Run update (u)" if ctx.update_cmd else "Run update — unavailable"
+            button.disabled = not ctx.update_cmd
 
     app = _SetupApp()
     return app.run()
