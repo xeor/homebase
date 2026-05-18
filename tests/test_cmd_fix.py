@@ -103,6 +103,30 @@ def test_fix_yes_skips_prompt(tmp_path, monkeypatch):
     assert (proj / _MARKER).is_file()
 
 
+def test_archive_cmd_fix_strict_readline_matches_prompt_readline_signature(
+    tmp_path, monkeypatch,
+):
+    """``commands/archive.cmd_fix`` builds a strict readline shim used
+    by ``prompt_yes_no``. The shim must accept ``default`` and
+    ``non_interactive_default`` kwargs because ``prompt_yes_no`` passes
+    them. Regression for a TypeError that crashed the marker prompt."""
+    from homebase.commands import archive as commands_archive
+
+    base = tmp_path / "base"
+    proj = base / "proj"
+    proj.mkdir(parents=True)
+    monkeypatch.setenv("BASE_DIR", str(base))
+    # Force the interactive path so the strict readline is wired up
+    # and the y/n prompt actually fires.
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    monkeypatch.setattr("sys.stdout.isatty", lambda: True)
+    monkeypatch.setattr("builtins.input", lambda _p="": "y")
+
+    rc = commands_archive.cmd_fix(paths=[str(proj)], yes=False)
+    assert rc == 0
+    assert (proj / ".base.yaml").is_file()
+
+
 def test_fix_marker_uses_only_one_prompt(tmp_path, monkeypatch):
     """No double-confirm: only the y/n question runs; there's no
     follow-up press-enter gate."""

@@ -617,11 +617,17 @@ def cmd_fix(
     # ``b fix`` prompts should let Ctrl-C abort the whole sweep, not
     # just decline the current item. Use the strict readline variant
     # that re-raises KeyboardInterrupt instead of swallowing it.
-    def _read_line_strict(question: str) -> str | None:
+    # Match _prompt_readline's signature exactly so prompt_yes_no can
+    # call it with default/non_interactive_default keywords.
+    def _read_line_strict(
+        prompt_text: str,
+        default: str | None = None,
+        non_interactive_default: str | None = None,
+    ) -> str | None:
         return prompting.prompt_readline(
-            question,
-            default="",
-            non_interactive_default="",
+            prompt_text,
+            default=default,
+            non_interactive_default=non_interactive_default,
             abort_on_interrupt=True,
         )
 
