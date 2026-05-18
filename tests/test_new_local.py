@@ -259,6 +259,99 @@ def test_homebase_debug_emits_new_pipeline_logs(tmp_path: Path, monkeypatch, cap
     assert "[debug] new: plan done" in err
 
 
+def test_local_with_git_wraps_under_repo_non_interactive(tmp_path: Path) -> None:
+    src = tmp_path / "work" / "thing"
+    (src / ".git").mkdir(parents=True)
+    (src / "file.txt").write_text("hi")
+    base = tmp_path / "base"
+    base.mkdir()
+
+    rc = _run(base, tmp_path, [str(src)])
+    assert rc == 0
+    target = base / "thing"
+    assert target.is_dir()
+    assert (target / ".base.yaml").is_file()
+    assert (target / "repo" / ".git").is_dir()
+    assert (target / "repo" / "file.txt").read_text() == "hi"
+    assert not src.exists()
+
+
+def test_local_with_git_interactive_no_keeps_as_is(tmp_path: Path, monkeypatch) -> None:
+    src = tmp_path / "work" / "thing"
+    (src / ".git").mkdir(parents=True)
+    (src / "file.txt").write_text("hi")
+    base = tmp_path / "base"
+    base.mkdir()
+
+    monkeypatch.setattr(local_source.sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr(local_source, "confirm", lambda *a, **kw: False)
+
+    rc = _run(base, tmp_path, [str(src)])
+    assert rc == 0
+    target = base / "thing"
+    assert (target / "file.txt").read_text() == "hi"
+    assert (target / ".git").is_dir()
+    assert not (target / "repo").exists()
+
+
+def test_local_with_git_yes_flag_wraps_without_prompt(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    src = tmp_path / "work" / "thing"
+    (src / ".git").mkdir(parents=True)
+    base = tmp_path / "base"
+    base.mkdir()
+
+    def _no_prompt(*_a, **_kw) -> bool:
+        raise AssertionError("confirm should not be called when --yes is set")
+
+    monkeypatch.setattr(local_source.sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr(local_source, "confirm", _no_prompt)
+
+    rc = _run(base, tmp_path, [str(src), "--yes"])
+    assert rc == 0
+    assert (base / "thing" / "repo" / ".git").is_dir()
+
+
+def test_local_with_git_dry_run_shows_repo_step(
+    tmp_path: Path,
+    capsys,
+) -> None:
+    src = tmp_path / "work" / "thing"
+    (src / ".git").mkdir(parents=True)
+    base = tmp_path / "base"
+    base.mkdir()
+
+    rc = _run(base, tmp_path, [str(src), "--dry-run"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "mkdir" in out
+    assert f"-> {base / 'thing' / 'repo'}" in out
+    assert src.exists()
+
+
+def test_local_with_git_wrapper_handoff_lands_in_repo(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    src = tmp_path / "work" / "proj"
+    nested = src / "a" / "b"
+    nested.mkdir(parents=True)
+    (src / ".git").mkdir()
+    base = tmp_path / "base"
+    base.mkdir()
+    cd_file = tmp_path / "cd-handoff.txt"
+    cd_file.write_text("", encoding="utf-8")
+    monkeypatch.setenv("HOMEBASE_CD_FILE", str(cd_file))
+
+    ns = build_cli_parser().parse_args(["new", "../.."])
+    rc = cmd_new(ns, base, nested)
+    assert rc == 0
+    expected = (base / "proj" / "repo" / "a" / "b").resolve()
+    assert cd_file.read_text(encoding="utf-8").strip() == str(expected)
+
+
 def test_local_move_does_not_run_tag_symlink_sync(tmp_path: Path, monkeypatch) -> None:
     src = tmp_path / "work" / "nosync"
     src.mkdir(parents=True)

@@ -43,10 +43,17 @@ def ask_source(available: list[str], default: str | None = None) -> str:
     return raw
 
 
-def confirm(message: str = "apply?") -> bool:
+def confirm(message: str = "apply?", default: bool = False) -> bool:
     _require_tty()
+    suffix = "[Y/n]" if default else "[y/N]"
     try:
-        raw = input(f"{message} [y/N]: ").strip().lower()
+        raw = input(f"{message} {suffix}: ").strip().lower()
     except EOFError:
+        return default
+    if not raw:
+        return default
+    if raw in {"y", "yes"}:
+        return True
+    if raw in {"n", "no"}:
         return False
-    return raw in {"y", "yes"}
+    return default

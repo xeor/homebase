@@ -65,12 +65,13 @@ def _local_move_handoff_target(plan: NewPlan, ctx: NewContext) -> Path | None:
     if not isinstance(source, str) or not source.strip():
         return None
     src = Path(source)
-    target = plan.target
+    dest_str = plan.log_payload.get("destination")
+    dest = Path(dest_str) if isinstance(dest_str, str) and dest_str.strip() else plan.target
     try:
         rel = ctx.cwd.relative_to(src)
     except ValueError:
-        return target if ctx.cwd == src else None
-    return (target / rel).resolve()
+        return dest if ctx.cwd == src else None
+    return (dest / rel).resolve()
 
 
 def _pick_url_source(url: str, git_hosts: dict[str, str]) -> str:

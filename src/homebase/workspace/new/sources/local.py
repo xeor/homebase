@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import sys
 import time
 from pathlib import Path
 
@@ -16,6 +17,7 @@ from ....metadata.api import (
 from ..base import NewContext, NewOptions, NewPlan, NewResult, Source
 from ..detect import classify_input
 from ..name import resolve_final_name
+from ..prompt import PromptError, confirm
 from ..registry import register_source
 
 
@@ -30,6 +32,24 @@ def _debug_log(message: str) -> None:
     if not _debug_enabled():
         return
     print(f"[debug] local: {message}", file=os.sys.stderr)
+
+
+def _decide_repo_wrap(src: Path, options: NewOptions) -> bool:
+    """If `src` contains a `.git/`, decide whether to wrap the move
+    under `<target>/repo/` (matching the git-clone layout). Interactive
+    TTYs get a prompt (default yes); non-interactive contexts wrap
+    unconditionally."""
+    if not (src / ".git").exists():
+        return False
+    if options.yes or not sys.stdin.isatty():
+        return True
+    try:
+        return confirm(
+            f"'{src.name}' contains .git — place under '<project>/repo/'?",
+            default=True,
+        )
+    except PromptError:
+        return True
 
 
 @register_source
@@ -80,10 +100,13 @@ class LocalDirSource(Source):
         )
         open_shell = options.open and not is_under(ctx.cwd.resolve(), src)
         target = ctx.base_dir / final_name
-        steps = [
-            f"move {src} -> {target}",
-            f"write {target}/.base.yaml",
-        ]
+        wrap_in_repo = _decide_repo_wrap(src, options)
+        dest = (target / "repo") if wrap_in_repo else target
+        steps: list[str] = []
+        if wrap_in_repo:
+            steps.append(f"mkdir {target}")
+        steps.append(f"move {src} -> {dest}")
+        steps.append(f"write {target}/.base.yaml")
         if options.tags:
             steps.append(f"set tags {list(options.tags)}")
         return NewPlan(
@@ -98,7 +121,7 @@ class LocalDirSource(Source):
             log_payload={
                 "kind": "local-move",
                 "source": str(src),
-                "destination": str(target),
+                "destination": str(dest),
             },
             input=raw_input,
             open_shell=open_shell,
@@ -111,13 +134,21 @@ class LocalDirSource(Source):
         if target.exists():
             raise ValueError(f"target already exists: {target}")
         src = Path(plan.log_payload["source"])
-        _debug_log(f"apply start src={src} target={target}")
-        target.parent.mkdir(parents=True, exist_ok=True)
+        dest_str = plan.log_payload.get("destination")
+        dest = Path(dest_str) if dest_str else target
+        wrapped = dest != target
+        _debug_log(f"apply start src={src} target={target} dest={dest} wrapped={wrapped}")
+        dest.parent.mkdir(parents=True, exist_ok=True)
         try:
             t0 = time.time()
-            shutil.move(str(src), str(target))
+            shutil.move(str(src), str(dest))
             _debug_log(f"move done elapsed={max(0.0, time.time() - t0):.3f}s")
         except (OSError, shutil.Error) as exc:
+            if wrapped and target.exists():
+                try:
+                    target.rmdir()
+                except OSError:
+                    pass
             raise ValueError(f"move failed: {exc}") from exc
         try:
             t0 = time.time()
@@ -133,11 +164,15 @@ class LocalDirSource(Source):
             append_base_log(target, plan.log_kind, plan.log_payload)
             _debug_log(f"append log done elapsed={max(0.0, time.time() - t0):.3f}s")
         except (OSError, ValueError):
-            # If marker/log fails, attempt to put src back.
             try:
-                shutil.move(str(target), str(src))
+                shutil.move(str(dest), str(src))
             except (OSError, shutil.Error):
                 pass
+            if wrapped and target.exists():
+                try:
+                    shutil.rmtree(target)
+                except OSError:
+                    pass
             raise
         t0 = time.time()
         cache_upsert_project_fast(ctx.base_dir, target)
