@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import os
+from datetime import datetime
 from pathlib import Path
+from typing import Callable
 
 from ..archive import io as archive_io
 from ..archive import ops as archive_ops
@@ -212,19 +214,26 @@ def _archive_entry_ts_iso(path: Path) -> str:
     return core_utils.archive_iso_from_ts(ts, ARCHIVE_TZ)
 
 
-def archive_move_internal(base_dir: Path, src: Path, sync_tags: bool = True) -> Path:
+def archive_move_internal(
+    base_dir: Path,
+    src: Path,
+    sync_tags: bool = True,
+    *,
+    archive_destination_override: Callable[[Path, Path], Path] | None = None,
+) -> Path:
     # ``sync_tags=False`` to the inner service so it skips the full
     # ``sync_tag_symlinks`` rebuild (walks every project under
     # ``base/`` — 10+ seconds on a real workspace). We follow up with
     # a targeted cleanup that only touches symlinks pointing at the
     # path we just moved.
     src_resolved = src.resolve() if src.exists() else src
+    dest_fn = archive_destination_override or archive_destination
     dst = archive_service.archive_move_internal(
         base_dir,
         src,
         policy_reason_outside_base=_policy_reason_outside_base,
         ensure_safe_cwd=_ensure_safe_cwd,
-        archive_destination=archive_destination,
+        archive_destination=dest_fn,
         sync_tags_if_needed=_archive_sync_tags_if_needed,
         sync_tags=False,
     )
@@ -338,28 +347,129 @@ def delete_internal(base_dir: Path, target: Path, sync_tags: bool = True) -> Non
     cache_delete_opened_ts(base_dir, target)
 
 
-def cmd_archive_mv(base_dir: Path, path: str = ".") -> int:
-    target = Path(path).resolve()
-    # Capture cwd BEFORE the inner archive code chdir's away from the
-    # source dir — without this snapshot the safety check below can
-    # never fire when the user is sitting inside the project being
-    # moved.
+def _archive_dest_with_forced_ts(forced_ts: int) -> Callable[[Path, Path], Path]:
+    """Build an ``archive_destination`` callable that ignores any date
+    parsed from the source name and uses ``forced_ts`` instead."""
+    forced_iso = core_utils.archive_iso_from_ts(forced_ts, ARCHIVE_TZ)
+
+    def _split_no_ts(name: str) -> tuple[str, int]:
+        stem, _ = core_utils.split_archive_name(
+            name,
+            parse_timestamp=lambda v: core_utils.parse_archive_timestamp(v, ARCHIVE_TZ),
+        )
+        return stem, 0
+
+    def _dest(src: Path, base_dir: Path) -> Path:
+        return archive_ops.archive_destination(
+            src,
+            base_dir,
+            archive_dir_name=ARCHIVE_DIR_NAME,
+            split_archive_name=_split_no_ts,
+            archive_iso_from_ts=lambda ts: core_utils.archive_iso_from_ts(ts, ARCHIVE_TZ),
+            archive_now_iso=lambda: forced_iso,
+        )
+
+    return _dest
+
+
+def _resolve_autodate_ts(src: Path, *, yes: bool) -> int | None:
+    """Pick a timestamp for ``src`` using the shared detector. Falls
+    back to prompting (default today) when nothing can be inferred.
+    With --yes / no TTY, the today fallback is used silently."""
+    from ..archive import date_detect
+
+    detection = date_detect.detect_folder_date(
+        src,
+        parse_timestamp=lambda v: core_utils.parse_archive_timestamp(v, ARCHIVE_TZ),
+        archive_tz=ARCHIVE_TZ,
+    )
+    if detection is not None:
+        print(f"autodate: {detection.source}")
+        return detection.ts
+    import sys
+
+    today_dt = datetime.now(ARCHIVE_TZ)
+    today_iso = today_dt.strftime("%Y-%m-%d")
+    today_ts = int(
+        today_dt.replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
+    )
+    if yes or not sys.stdin.isatty():
+        print(f"autodate: no date found, using today ({today_iso})")
+        return today_ts
+    for _ in range(3):
+        raw = _prompt_readline(
+            f"  date for '{src.name}' [YYYY-MM-DD, default {today_iso}]: ",
+            default="",
+            non_interactive_default="",
+        )
+        if raw is None:
+            print("aborted: no valid date", file=sys.stderr)
+            return None
+        text = raw.strip()
+        if not text:
+            print(f"autodate: using today ({today_iso})")
+            return today_ts
+        parsed = date_detect.parse_user_date(text, ARCHIVE_TZ)
+        if parsed is not None:
+            print(f"autodate: user input {text}")
+            return parsed
+        print("  invalid date format, expected YYYY-MM-DD", file=sys.stderr)
+    print("  giving up: no valid date", file=sys.stderr)
+    return None
+
+
+def cmd_archive_mv(
+    base_dir: Path,
+    paths: list[str] | str | None = None,
+    *,
+    autodate: bool = False,
+    yes: bool = False,
+) -> int:
+    # Back-compat for old single-path callers (e.g. ``b a``).
+    if paths is None:
+        targets: list[str] = ["."]
+    elif isinstance(paths, str):
+        targets = [paths]
+    else:
+        targets = list(paths) if paths else ["."]
     try:
         original_cwd = Path.cwd().resolve()
     except OSError:
         original_cwd = base_dir
-    rc = commands_workspace.cmd_archive_mv(
-        base_dir,
-        path,
-        archive_destination=archive_destination,
-        confirm=confirm,
-        archive_move_internal=lambda bd, src: archive_move_internal(bd, src),
-    )
-    if rc == 0:
-        _exec_shell_at_parent_if_cwd_under(
-            target, base_dir, original_cwd=original_cwd,
+    worst = 0
+    for idx, raw in enumerate(targets):
+        if idx > 0:
+            print("")
+        if len(targets) > 1:
+            print(f"== {raw} ==")
+        src = Path(raw).resolve()
+        if autodate:
+            forced_ts = _resolve_autodate_ts(src, yes=yes)
+            if forced_ts is None:
+                worst = max(worst, 1)
+                continue
+            dest_fn = _archive_dest_with_forced_ts(forced_ts)
+            move_fn = lambda bd, s, _dst=dest_fn: archive_move_internal(  # noqa: E731
+                bd, s, archive_destination_override=_dst,
+            )
+        else:
+            dest_fn = archive_destination
+            move_fn = lambda bd, s: archive_move_internal(bd, s)  # noqa: E731
+        rc = commands_workspace.cmd_archive_mv_one(
+            base_dir,
+            raw,
+            archive_destination=dest_fn,
+            confirm=confirm,
+            archive_move_internal=move_fn,
+            skip_confirm=yes,
         )
-    return rc
+        if rc == 0:
+            _exec_shell_at_parent_if_cwd_under(
+                src, base_dir, original_cwd=original_cwd,
+            )
+        else:
+            worst = max(worst, rc)
+    return worst
 
 
 def cmd_archive_ls(base_dir: Path, path: str = ".") -> int:
@@ -503,16 +613,39 @@ def try_parse_archive_suffix_loose(suffix: str) -> int:
     return core_utils.parse_archive_timestamp(suffix, ARCHIVE_TZ)
 
 
-def cmd_fix(path: str = ".") -> int:
+def cmd_fix(
+    paths: list[str] | None = None,
+    *,
+    include: set[str] | None = None,
+    yes: bool = False,
+) -> int:
+    from ..archive import date_detect
+
+    def _read_line(question: str) -> str | None:
+        return _prompt_readline(question, default="", non_interactive_default="")
+
+    selected = (
+        set(include)
+        if include is not None
+        else set(commands_workspace.FIX_KINDS)
+    )
     return commands_workspace.cmd_fix(
-        path,
+        list(paths) if paths is not None else ["."],
+        include=selected,
+        yes=yes,
         env_base_dir_key=ENV_BASE_DIR,
         archive_dir_name=ARCHIVE_DIR_NAME,
+        archive_year_re=ARCHIVE_YEAR_DIR_RE,
+        archive_tz=ARCHIVE_TZ,
         is_under=core_utils.is_under,
-        suggest_project_root=suggest_project_root,
         base_marker_file=BASE_MARKER_FILE,
         prompt_yes_no=_prompt_yes_no,
         parse_archive_timestamp=try_parse_archive_suffix_loose,
+        archive_iso_from_ts=core_utils.archive_iso_from_ts,
+        detect_folder_date=date_detect.detect_folder_date,
+        parse_user_date=date_detect.parse_user_date,
+        strip_date_prefix=date_detect.strip_date_prefix,
         ensure_base_marker=ensure_base_marker,
         confirm=confirm,
+        read_line=_read_line,
     )

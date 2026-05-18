@@ -115,7 +115,45 @@ def _normalize_completion_input(words: list[str], cword: int) -> tuple[list[str]
     return tokens, idx
 
 
-def completion_candidates(words: list[str], cword: int, *, base_dir: Path) -> list[str]:
+def _dir_candidates(token: str, cwd: Path) -> list[str]:
+    """Directory completions for a path token, returned with their
+    full path prefix and a trailing slash so bash/zsh/fish render
+    them as continued completions."""
+    raw = Path(token) if token else Path("")
+    if token.endswith("/"):
+        parent_rel = raw
+        prefix = ""
+        head = token
+    elif "/" in token:
+        parent_rel = raw.parent
+        prefix = raw.name
+        head = token.rsplit("/", 1)[0] + "/"
+    else:
+        parent_rel = Path("")
+        prefix = token
+        head = ""
+    parent = (cwd / parent_rel) if str(parent_rel) else cwd
+    try:
+        entries = list(parent.iterdir())
+    except OSError:
+        return []
+    out: list[str] = []
+    for entry in entries:
+        if not entry.is_dir():
+            continue
+        if not entry.name.startswith(prefix):
+            continue
+        out.append(f"{head}{entry.name}/")
+    return out
+
+
+def completion_candidates(
+    words: list[str],
+    cword: int,
+    *,
+    base_dir: Path,
+    cwd: Path | None = None,
+) -> list[str]:
     tokens, idx = _normalize_completion_input(words, cword)
     token = ""
     if 0 <= idx - 1 < len(tokens):
@@ -135,7 +173,11 @@ def completion_candidates(words: list[str], cword: int, *, base_dir: Path) -> li
         candidates = _named_filter_keys(base_dir)
     else:
         cmd = str(tokens[0]) if tokens else ""
-        candidates = _subcommand_candidates(cmd, tokens, idx, prev, base_dir=base_dir)
+        candidates = _subcommand_candidates(
+            cmd, tokens, idx, prev, base_dir=base_dir,
+            cwd=cwd if cwd is not None else Path.cwd(),
+            token=token,
+        )
     out = [c for c in candidates if c.startswith(token)]
     return sorted(set(out))
 
@@ -147,6 +189,8 @@ def _subcommand_candidates(
     prev: str,
     *,
     base_dir: Path,
+    cwd: Path,
+    token: str,
 ) -> list[str]:
     if prev in {"--base-folder"}:
         return []
@@ -162,6 +206,15 @@ def _subcommand_candidates(
         return _active_project_names(base_dir)
     if cmd == "rm":
         return [*_active_project_names(base_dir), "--force", "--force-outside-base"]
+    if cmd == "fix":
+        flags = [
+            "--yes",
+            "--marker",
+            "--no-marker",
+            "--archive-entry",
+            "--no-archive-entry",
+        ]
+        return [*_dir_candidates(token, cwd), *flags]
     if cmd == "setup":
         return ["--yes", "--no-tmux-binding"]
     if cmd == "cache":

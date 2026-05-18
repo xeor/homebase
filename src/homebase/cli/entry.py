@@ -173,15 +173,31 @@ def main(argv: list[str]) -> int:
         parser.print_help()
         return 0
 
+    # Repair commands must be able to run even when the workspace is
+    # malformed — they exist to fix exactly the issues startup
+    # validation surfaces. Print findings as warnings so the user can
+    # still see them.
+    skip_validation = ns.command == "fix" or (
+        ns.command == "archive"
+        and getattr(ns, "archive_subcommand", None) == "reorganize"
+    )
     startup_issues = run_startup_validations(base_dir)
     if startup_issues:
-        print("startup validation failed:", file=sys.stderr)
-        for issue in startup_issues:
-            if issue.path is not None:
-                print(f"- {issue.message}: {issue.path}", file=sys.stderr)
-            else:
-                print(f"- {issue.message}", file=sys.stderr)
-        return 1
+        if skip_validation:
+            print("startup validation warnings:", file=sys.stderr)
+            for issue in startup_issues:
+                if issue.path is not None:
+                    print(f"- {issue.message}: {issue.path}", file=sys.stderr)
+                else:
+                    print(f"- {issue.message}", file=sys.stderr)
+        else:
+            print("startup validation failed:", file=sys.stderr)
+            for issue in startup_issues:
+                if issue.path is not None:
+                    print(f"- {issue.message}: {issue.path}", file=sys.stderr)
+                else:
+                    print(f"- {issue.message}", file=sys.stderr)
+            return 1
 
     try:
         runtime_builtins = dict(BUILTIN_ACTIONS)

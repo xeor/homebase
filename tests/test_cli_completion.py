@@ -121,6 +121,41 @@ def test_completion_cd_prefix_filters(tmp_path: Path) -> None:
     assert out == ["alpha", "alpine"]
 
 
+def test_completion_fix_lists_dirs_and_flags(tmp_path: Path) -> None:
+    (tmp_path / "proj").mkdir()
+    (tmp_path / "other").mkdir()
+    (tmp_path / "notes.txt").write_text("ignore")
+    out = cli_completion.completion_candidates(
+        ["fix", ""], 2, base_dir=tmp_path, cwd=tmp_path,
+    )
+    assert "proj/" in out
+    assert "other/" in out
+    assert "--yes" in out
+    assert "--marker" in out
+    assert "--no-marker" in out
+    assert "--archive-entry" in out
+    assert "--no-archive-entry" in out
+
+
+def test_completion_fix_dir_prefix_filters(tmp_path: Path) -> None:
+    (tmp_path / "alpha").mkdir()
+    (tmp_path / "alpine").mkdir()
+    (tmp_path / "beta").mkdir()
+    out = cli_completion.completion_candidates(
+        ["fix", "alp"], 2, base_dir=tmp_path, cwd=tmp_path,
+    )
+    assert out == ["alpha/", "alpine/"]
+
+
+def test_completion_fix_nested_dir(tmp_path: Path) -> None:
+    inner = tmp_path / "outer" / "child"
+    inner.mkdir(parents=True)
+    out = cli_completion.completion_candidates(
+        ["fix", "outer/"], 2, base_dir=tmp_path, cwd=tmp_path,
+    )
+    assert "outer/child/" in out
+
+
 def test_completion_rm_offers_projects_and_force(tmp_path: Path) -> None:
     (tmp_path / "foo").mkdir()
     out = cli_completion.completion_candidates(["rm", ""], 2, base_dir=tmp_path)

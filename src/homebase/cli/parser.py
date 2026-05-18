@@ -168,7 +168,24 @@ def build_cli_parser() -> argparse.ArgumentParser:
     utils_sub.add_parser("opt-in-nested-discovery", help="enable nested project discovery if safe")
 
     p_a = sub.add_parser("a", help="archive path (alias for `b archive mv`)")
-    p_a.add_argument("path", nargs="?", default=".", help="target directory (default: cwd)")
+    p_a.add_argument(
+        "paths",
+        nargs="*",
+        default=[],
+        help="target directories (default: cwd)",
+    )
+    p_a.add_argument(
+        "--autodate",
+        dest="autodate",
+        action="store_true",
+        help="detect archive date from name/content (falls back to today)",
+    )
+    p_a.add_argument(
+        "--yes", "-y",
+        dest="yes",
+        action="store_true",
+        help="skip confirmation prompts",
+    )
 
     p_cd = sub.add_parser(
         "cd",
@@ -186,26 +203,105 @@ def build_cli_parser() -> argparse.ArgumentParser:
 
     p_fix = sub.add_parser(
         "fix",
-        help="repair marker/timestamp issues for a project/archive directory",
+        help="repair marker/archive entries under base",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
         description=(
-            "Inspect a directory and offer safe interactive repairs.\n"
-            "- creates missing .base.yaml marker when appropriate\n"
-            "- in archive, can normalize timestamp suffixes to canonical ISO form"
+            "Inspect one or more directories under base and apply safe repairs.\n"
+            "Only paths under base (including the archive) are accepted; other\n"
+            "underscore-prefixed roots (e.g. _tags) are skipped.\n"
+            "\n"
+            "Available fixers (all run by default; each is contextual):\n"
+            "  marker         create missing .base.yaml in active projects\n"
+            "  archive-entry  for items under _archive, ensure canonical\n"
+            "                 YYYY-MM-DD_<name> form and move into the right\n"
+            "                 year subdir. Date is detected from the name,\n"
+            "                 from a YYYY-MM-DD embedded substring, or from\n"
+            "                 the newest file mtime inside the folder; falls\n"
+            "                 back to a prompt (default: today, YYYY-MM-DD).\n"
+            "\n"
+            "Targeting `_archive` itself fans out to its non-year direct\n"
+            "children. Year directories are skipped.\n"
+            "\n"
+            "Selection: pass --<fixer> to run only those, or --no-<fixer>\n"
+            "to skip a fixer. The two forms cannot be mixed for the same name."
         ),
     )
     p_fix.add_argument(
-        "path",
-        nargs="?",
-        default=".",
-        help="target directory (default: current directory)",
+        "paths",
+        nargs="*",
+        default=[],
+        help="target directories (default: current directory)",
+    )
+    p_fix.add_argument(
+        "--yes", "-y",
+        dest="yes",
+        action="store_true",
+        help="skip all prompts and apply every selected fix",
+    )
+    p_fix.add_argument(
+        "--marker",
+        dest="enable_marker",
+        action="store_true",
+        help="include the marker fixer (only this when no other --<fixer> set)",
+    )
+    p_fix.add_argument(
+        "--no-marker",
+        dest="disable_marker",
+        action="store_true",
+        help="skip the marker fixer",
+    )
+    p_fix.add_argument(
+        "--archive-entry",
+        dest="enable_archive_entry",
+        action="store_true",
+        help="include the archive-entry fixer",
+    )
+    p_fix.add_argument(
+        "--no-archive-entry",
+        dest="disable_archive_entry",
+        action="store_true",
+        help="skip the archive-entry fixer",
     )
 
     # ``b archive`` with no subcommand → archive cwd (same as `b a`).
     # That's why ``archive_subcommand`` is not required.
     p_archive = sub.add_parser("archive", help="archive and restore operations")
+    # Bare ``b archive`` accepts the same flags as ``archive mv`` so
+    # ``b archive --autodate`` works without retyping the subcommand.
+    p_archive.add_argument(
+        "--autodate",
+        dest="autodate",
+        action="store_true",
+        help="detect archive date from name/content (falls back to today)",
+    )
+    p_archive.add_argument(
+        "--yes", "-y",
+        dest="yes",
+        action="store_true",
+        help="skip confirmation prompts",
+    )
     archive_sub = p_archive.add_subparsers(dest="archive_subcommand")
-    p_archive_mv = archive_sub.add_parser("mv", help="archive directory (same as bare `b archive`)")
-    p_archive_mv.add_argument("path", nargs="?", default=".", help="target directory (default: cwd)")
+    p_archive_mv = archive_sub.add_parser(
+        "mv", help="archive one or more directories (same as bare `b archive`)",
+    )
+    p_archive_mv.add_argument(
+        "paths",
+        nargs="*",
+        default=[],
+        help="target directories (default: cwd)",
+    )
+    p_archive_mv.add_argument(
+        "--autodate",
+        dest="autodate",
+        action="store_true",
+        help="detect archive date from name/content (falls back to today)",
+    )
+    p_archive_mv.add_argument(
+        "--yes", "-y",
+        dest="yes",
+        action="store_true",
+        help="skip confirmation prompts",
+    )
     p_archive_ls = archive_sub.add_parser("ls", help="list archive matches for path")
     p_archive_ls.add_argument("path", nargs="?", default=".", help="path/name to match")
     p_archive_undo = archive_sub.add_parser("undo", help="restore most recent archive entry for path")

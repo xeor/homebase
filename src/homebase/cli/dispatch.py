@@ -27,10 +27,10 @@ def dispatch_command(
     cmd_tags_sync: Callable[[Path, bool, bool], int],
     cmd_hooks_refresh: Callable[..., int],
     cmd_utils: Callable[[Path, str], int],
-    cmd_archive_mv: Callable[[Path, str], int],
+    cmd_archive_mv: Callable[..., int],
     cmd_cd: Callable[[Path, str], int],
     cmd_rm: Callable[..., int],
-    cmd_fix: Callable[[str], int],
+    cmd_fix: Callable[..., int],
     cmd_archive_ls: Callable[[Path, str], int],
     cmd_archive_undo: Callable[[Path, str], int],
     cmd_archive_restore_entry: Callable[[Path, str], int],
@@ -106,7 +106,15 @@ def dispatch_command(
     if ns.command == "utils":
         return cmd_utils(base_dir, str(ns.utils_subcommand))
     if ns.command == "a":
-        return cmd_archive_mv(base_dir, str(ns.path))
+        paths = list(getattr(ns, "paths", []) or [])
+        if not paths:
+            paths = ["."]
+        return cmd_archive_mv(
+            base_dir,
+            paths,
+            autodate=bool(getattr(ns, "autodate", False)),
+            yes=bool(getattr(ns, "yes", False)),
+        )
     if ns.command == "cd":
         return cmd_cd(base_dir, str(getattr(ns, "name", "") or ""))
     if ns.command == "rm":
@@ -116,13 +124,47 @@ def dispatch_command(
             force=bool(getattr(ns, "force", False)),
         )
     if ns.command == "fix":
-        return cmd_fix(str(ns.path))
+        import sys
+
+        from ..commands.workspace import FIX_KINDS
+
+        slug_to_attr = {kind: kind.replace("-", "_") for kind in FIX_KINDS}
+        include_flags = {
+            kind for kind, attr in slug_to_attr.items()
+            if bool(getattr(ns, f"enable_{attr}", False))
+        }
+        exclude_flags = {
+            kind for kind, attr in slug_to_attr.items()
+            if bool(getattr(ns, f"disable_{attr}", False))
+        }
+        conflict = include_flags & exclude_flags
+        if conflict:
+            names = ", ".join(sorted(conflict))
+            print(
+                f"fix: cannot combine --{names} with --no-{names}",
+                file=sys.stderr,
+            )
+            return 2
+        selected = include_flags if include_flags else (set(FIX_KINDS) - exclude_flags)
+        paths = list(getattr(ns, "paths", []) or [])
+        return cmd_fix(
+            paths,
+            include=selected,
+            yes=bool(getattr(ns, "yes", False)),
+        )
     if ns.command == "archive":
         sub = getattr(ns, "archive_subcommand", None)
         # Bare ``b archive`` archives cwd, matching ``b a``.
         if sub is None or sub == "mv":
-            path = str(getattr(ns, "path", ".") or ".")
-            return cmd_archive_mv(base_dir, path)
+            paths = list(getattr(ns, "paths", []) or [])
+            if not paths:
+                paths = ["."]
+            return cmd_archive_mv(
+                base_dir,
+                paths,
+                autodate=bool(getattr(ns, "autodate", False)),
+                yes=bool(getattr(ns, "yes", False)),
+            )
         if sub == "ls":
             return cmd_archive_ls(base_dir, str(ns.path))
         if sub == "undo":
