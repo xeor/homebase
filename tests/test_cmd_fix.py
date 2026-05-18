@@ -541,6 +541,24 @@ def test_fix_all_overrides_explicit_paths(tmp_path, monkeypatch, capsys):
     assert (proj / _MARKER).is_file()
 
 
+def test_fix_verbose_prints_trace(tmp_path, monkeypatch, capsys):
+    base = tmp_path / "base"
+    src = base / "_archive" / "2026" / "2026-03-15_named"
+    src.mkdir(parents=True)
+    monkeypatch.setenv("HOMEBASE_VERBOSE", "1")
+    rc = _run(
+        base, monkeypatch,
+        paths=[str(src)],
+        include=set(commands_workspace.FIX_KINDS),
+        yes=True,
+    )
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "date detection trace:" in out
+    assert "name-prefix" in out
+    assert "match" in out
+
+
 def test_fix_empty_include_set_errors(tmp_path, monkeypatch, capsys):
     base = tmp_path / "base"
     base.mkdir()

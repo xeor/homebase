@@ -209,6 +209,69 @@ def test_detect_git_head_beats_name_year(tmp_path: Path) -> None:
     assert iso == "2024-09-09"
 
 
+def test_trace_records_all_attempted_strategies(tmp_path: Path) -> None:
+    """Trace must contain one entry per strategy that ran; the
+    winning strategy is the last entry with outcome 'match'."""
+    d = tmp_path / "something 2022"
+    d.mkdir()
+    trace: list = []
+    out = date_detect.detect_folder_date(
+        d, parse_timestamp=_parse_ts, archive_tz=_TZ, trace=trace,
+    )
+    assert out is not None
+    assert out.kind == "name-year"
+    strategies = [s.strategy for s in trace]
+    # Everything from git through name-year (the winner) must appear,
+    # in priority order. mtime is not attempted (year-only matched).
+    assert strategies == [
+        "git",
+        "name-prefix",
+        "name-parse",
+        "name-embedded",
+        "name-prefix-loose",
+        "name-embedded-loose",
+        "name-year",
+    ]
+    assert trace[0].outcome == "skipped"  # no .git/
+    assert all(s.outcome == "no match" for s in trace[1:-1])
+    assert trace[-1].outcome == "match"
+
+
+def test_trace_stops_after_winner(tmp_path: Path) -> None:
+    """If the canonical-prefix strategy wins on step 1 of the name
+    chain, no later name/mtime strategies appear in the trace."""
+    d = tmp_path / "2024-03-15_thing"
+    d.mkdir()
+    trace: list = []
+    date_detect.detect_folder_date(
+        d, parse_timestamp=_parse_ts, archive_tz=_TZ, trace=trace,
+    )
+    strategies = [s.strategy for s in trace]
+    assert strategies == ["git", "name-prefix"]
+    assert trace[-1].outcome == "match"
+
+
+def test_format_trace_plain_text() -> None:
+    trace = [
+        date_detect.TraceStep("git", "skipped", "no .git directory"),
+        date_detect.TraceStep("name-prefix", "no match", "name='foo'"),
+        date_detect.TraceStep("mtime", "match", "newest file mtime"),
+    ]
+    lines = date_detect.format_trace(trace, use_color=False)
+    assert len(lines) == 3
+    assert "git" in lines[0] and "skipped" in lines[0]
+    assert "name-prefix" in lines[1] and "no match" in lines[1]
+    assert "mtime" in lines[2] and "match" in lines[2]
+    # No ANSI escapes when use_color=False.
+    assert "\x1b[" not in "".join(lines)
+
+
+def test_format_trace_color_emits_ansi() -> None:
+    trace = [date_detect.TraceStep("mtime", "match", "x")]
+    lines = date_detect.format_trace(trace, use_color=True)
+    assert "\x1b[" in lines[0]
+
+
 def test_detect_git_marker_without_commit_falls_through(tmp_path: Path) -> None:
     """A bogus ``.git/`` (no real repo) must not stop detection — the
     git probe returns None, and the rest of the chain runs."""

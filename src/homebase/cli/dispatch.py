@@ -111,7 +111,6 @@ def dispatch_command(
         return cmd_archive_mv(
             base_dir,
             paths,
-            autodate=bool(getattr(ns, "autodate", False)),
             yes=bool(getattr(ns, "yes", False)),
         )
     if ns.command == "cd":
@@ -162,7 +161,6 @@ def dispatch_command(
             return cmd_archive_mv(
                 base_dir,
                 paths,
-                autodate=bool(getattr(ns, "autodate", False)),
                 yes=bool(getattr(ns, "yes", False)),
             )
         if sub == "ls":

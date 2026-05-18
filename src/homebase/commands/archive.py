@@ -372,21 +372,42 @@ def _archive_dest_with_forced_ts(forced_ts: int) -> Callable[[Path, Path], Path]
     return _dest
 
 
-def _resolve_autodate_ts(src: Path, *, yes: bool) -> int | None:
-    """Pick a timestamp for ``src`` using the shared detector. Falls
-    back to prompting (default today) when nothing can be inferred.
-    With --yes / no TTY, the today fallback is used silently."""
-    from ..archive import date_detect
+def _resolve_archive_date_ts(src: Path, *, yes: bool) -> int | None:
+    """Pick a timestamp for ``src`` using the shared date detector.
+    Strategy chain: ``.git`` HEAD commit date → date / year in name →
+    newest regular-file mtime. Returns ``None`` only when the user
+    aborts the date prompt. With --yes or no TTY, falls back to today
+    silently when nothing can be inferred."""
+    import sys
 
+    from ..archive import date_detect
+    from ..core.logging import verbose_enabled
+
+    if not src.exists():
+        # Let cmd_archive_mv_one raise the real error; just signal
+        # "use today" so the caller doesn't crash on detection.
+        today_dt = datetime.now(ARCHIVE_TZ)
+        return int(
+            today_dt.replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
+        )
+
+    trace: list[date_detect.TraceStep] | None = (
+        [] if verbose_enabled(1) else None
+    )
     detection = date_detect.detect_folder_date(
         src,
         parse_timestamp=lambda v: core_utils.parse_archive_timestamp(v, ARCHIVE_TZ),
         archive_tz=ARCHIVE_TZ,
+        trace=trace,
     )
+    if trace:
+        use_color = sys.stdout.isatty()
+        print("date detection trace:")
+        for line in date_detect.format_trace(trace, use_color=use_color):
+            print(line)
     if detection is not None:
-        print(f"autodate: {detection.source}")
+        print(f"date: {detection.source}")
         return detection.ts
-    import sys
 
     today_dt = datetime.now(ARCHIVE_TZ)
     today_iso = today_dt.strftime("%Y-%m-%d")
@@ -394,7 +415,7 @@ def _resolve_autodate_ts(src: Path, *, yes: bool) -> int | None:
         today_dt.replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
     )
     if yes or not sys.stdin.isatty():
-        print(f"autodate: no date found, using today ({today_iso})")
+        print(f"date: no date found, using today ({today_iso})")
         return today_ts
     for _ in range(3):
         raw = _prompt_readline(
@@ -407,11 +428,11 @@ def _resolve_autodate_ts(src: Path, *, yes: bool) -> int | None:
             return None
         text = raw.strip()
         if not text:
-            print(f"autodate: using today ({today_iso})")
+            print(f"date: today ({today_iso})")
             return today_ts
         parsed = date_detect.parse_user_date(text, ARCHIVE_TZ)
         if parsed is not None:
-            print(f"autodate: user input {text}")
+            print(f"date: user input {text}")
             return parsed
         print("  invalid date format, expected YYYY-MM-DD", file=sys.stderr)
     print("  giving up: no valid date", file=sys.stderr)
@@ -422,7 +443,6 @@ def cmd_archive_mv(
     base_dir: Path,
     paths: list[str] | str | None = None,
     *,
-    autodate: bool = False,
     yes: bool = False,
 ) -> int:
     # Back-compat for old single-path callers (e.g. ``b a``).
@@ -443,24 +463,24 @@ def cmd_archive_mv(
         if len(targets) > 1:
             print(f"== {raw} ==")
         src = Path(raw).resolve()
-        if autodate:
-            forced_ts = _resolve_autodate_ts(src, yes=yes)
-            if forced_ts is None:
-                worst = max(worst, 1)
-                continue
-            dest_fn = _archive_dest_with_forced_ts(forced_ts)
-            move_fn = lambda bd, s, _dst=dest_fn: archive_move_internal(  # noqa: E731
+        # Date detection is always on: git → name → mtime → prompt.
+        forced_ts = _resolve_archive_date_ts(src, yes=yes)
+        if forced_ts is None:
+            worst = max(worst, 1)
+            continue
+        dest_fn = _archive_dest_with_forced_ts(forced_ts)
+
+        def _move_with_forced(bd: Path, s: Path, _dst=dest_fn) -> Path:
+            return archive_move_internal(
                 bd, s, archive_destination_override=_dst,
             )
-        else:
-            dest_fn = archive_destination
-            move_fn = lambda bd, s: archive_move_internal(bd, s)  # noqa: E731
+
         rc = commands_workspace.cmd_archive_mv_one(
             base_dir,
             raw,
             archive_destination=dest_fn,
             confirm=confirm,
-            archive_move_internal=move_fn,
+            archive_move_internal=_move_with_forced,
             skip_confirm=yes,
         )
         if rc == 0:

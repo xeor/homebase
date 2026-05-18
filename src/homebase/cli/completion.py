@@ -225,7 +225,7 @@ def _subcommand_candidates(
     if cmd == "utils":
         return ["opt-in-nested-discovery"]
     if cmd == "archive":
-        return ["mv", "ls", "undo", "restore", "--autodate", "--yes"]
+        return ["mv", "ls", "undo", "restore", "--yes"]
     if cmd == "tmux":
         if cword == 2:
             return ["load", "save"]

@@ -99,7 +99,7 @@ def test_bare_b_archive_routes_to_mv_cwd() -> None:
         ),
     )
     assert rc == 0
-    assert seen == [{"bd": Path("/base"), "paths": ["."], "autodate": False, "yes": False}]
+    assert seen == [{"bd": Path("/base"), "paths": ["."], "yes": False}]
 
 
 def test_b_archive_mv_still_works_with_path() -> None:
@@ -123,12 +123,12 @@ def test_b_archive_mv_still_works_with_path() -> None:
         ),
     )
     assert rc == 0
-    assert seen == [{"bd": Path("/base"), "paths": ["foo"], "autodate": False, "yes": False}]
+    assert seen == [{"bd": Path("/base"), "paths": ["foo"], "yes": False}]
 
 
-def test_b_archive_mv_multi_path_and_autodate() -> None:
+def test_b_archive_mv_multi_path_and_yes() -> None:
     parser = cli_dispatch.build_cli_parser()
-    ns = parser.parse_args(["archive", "mv", "foo", "bar", "--autodate", "--yes"])
+    ns = parser.parse_args(["archive", "mv", "foo", "bar", "--yes"])
     seen: list[dict] = []
     rc = cli_dispatch.dispatch_command(
         ns,
@@ -146,7 +146,7 @@ def test_b_archive_mv_multi_path_and_autodate() -> None:
     )
     assert rc == 0
     assert seen == [
-        {"bd": Path("/base"), "paths": ["foo", "bar"], "autodate": True, "yes": True},
+        {"bd": Path("/base"), "paths": ["foo", "bar"], "yes": True},
     ]
 
 

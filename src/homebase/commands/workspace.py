@@ -282,6 +282,40 @@ def _print_fail(message: str) -> None:
     print(f"  {_GLYPH_FAIL} {message}", file=sys.stderr)
 
 
+def _run_detection(
+    target: Path,
+    *,
+    detect_folder_date,
+    parse_archive_timestamp,
+    archive_tz,
+):
+    """Wrap ``detect_folder_date`` so a trace is collected when the
+    user passed -v / -vv. Returns ``(detection, trace_or_None)``."""
+    from ..archive.date_detect import TraceStep
+    from ..core.logging import verbose_enabled
+
+    trace: list[TraceStep] | None = [] if verbose_enabled(1) else None
+    detection = detect_folder_date(
+        target,
+        parse_timestamp=parse_archive_timestamp,
+        archive_tz=archive_tz,
+        trace=trace,
+    )
+    return detection, trace
+
+
+def _print_detection_trace(trace) -> None:
+    """Render a detection trace when verbose mode is on. No-op when
+    ``trace`` is ``None``."""
+    if not trace:
+        return
+    from ..archive.date_detect import format_trace
+
+    print(f"  {_dim('date detection trace:')}")
+    for line in format_trace(trace, use_color=_fix_colors_on()):
+        print(line)
+
+
 def _print_summary(counts: dict[str, int]) -> None:
     parts = [
         f"{_green(counts['ok'])} ok",
@@ -423,11 +457,13 @@ def _fix_archive_entry(
         _print_skip("archive-entry fixer disabled (--no-archive-entry)")
         return "skipped"
 
-    detection = detect_folder_date(
+    detection, trace = _run_detection(
         target,
-        parse_timestamp=parse_archive_timestamp,
+        detect_folder_date=detect_folder_date,
+        parse_archive_timestamp=parse_archive_timestamp,
         archive_tz=archive_tz,
     )
+    _print_detection_trace(trace)
     if detection is not None:
         ts = detection.ts
         source = detection.source

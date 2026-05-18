@@ -1,8 +1,8 @@
 """Heuristic date detection for an existing directory.
 
 Used by ``b fix`` to figure out the canonical archive date for an
-entry whose name doesn't already carry one, and by ``b archive
---autodate`` to pick a date without prompting.
+entry whose name doesn't already carry one, and by ``b archive mv``
+to pick the archive date automatically.
 
 Priorities (first hit wins):
 
@@ -49,6 +49,48 @@ class DateDetection:
     kind: str     # short tag: git | name-prefix | name-prefix-loose |
                   # name-parse | name-suffix | name-embedded |
                   # name-embedded-loose | name-year | mtime
+
+
+@dataclass(frozen=True)
+class TraceStep:
+    """One entry in a detection-attempt trace. Strategies that found a
+    match record ``outcome='match'``; everything else uses
+    ``'no match'`` / ``'skipped'`` / ``'error'``."""
+
+    strategy: str
+    outcome: str
+    detail: str = ""
+
+
+def format_trace(
+    trace: list[TraceStep], *, use_color: bool = False,
+) -> list[str]:
+    """Render a trace into aligned lines suitable for stdout. Colored
+    output is opt-in so callers can decide based on TTY status."""
+    if use_color:
+        green = "\x1b[32m"
+        yellow = "\x1b[33m"
+        dim = "\x1b[2m"
+        reset = "\x1b[0m"
+    else:
+        green = yellow = dim = reset = ""
+    width = max((len(s.strategy) for s in trace), default=0)
+    lines: list[str] = []
+    for step in trace:
+        if step.outcome == "match":
+            tag = f"{green}✓ match{reset}"
+        elif step.outcome == "skipped":
+            tag = f"{dim}— skipped{reset}"
+        elif step.outcome == "error":
+            tag = f"{yellow}! error{reset}"
+        else:
+            tag = f"{dim}· {step.outcome}{reset}"
+        head = f"  {dim}{step.strategy.ljust(width)}{reset}  {tag}"
+        if step.detail:
+            lines.append(f"{head}  {dim}{step.detail}{reset}")
+        else:
+            lines.append(head)
+    return lines
 
 
 def _safe_make_ts(year: int, month: int, day: int, tz: tzinfo) -> int | None:
@@ -228,38 +270,78 @@ def _try_mtime(folder: Path) -> DateDetection | None:
     )
 
 
+def _record(
+    trace: list[TraceStep] | None, strategy: str, outcome: str, detail: str = "",
+) -> None:
+    if trace is not None:
+        trace.append(TraceStep(strategy, outcome, detail))
+
+
 def detect_folder_date(
     folder: Path,
     *,
     parse_timestamp: Callable[[str], int],
     archive_tz: tzinfo,
     mtime_scan_limit: int = 2000,  # retained for API compatibility
+    trace: list[TraceStep] | None = None,
 ) -> DateDetection | None:
+    """Run the detection chain. If ``trace`` is provided, every
+    strategy attempted appends a :class:`TraceStep` to it (in order),
+    including the winning one. Strategies that come *after* the
+    winner are not run and won't appear in the trace."""
     _ = mtime_scan_limit  # no longer applicable; left for callers.
+    raw_name = folder.name
+    name = raw_name[:-4] if raw_name.endswith(".tgz") else raw_name
 
     # P1 — git HEAD wins outright when available.
-    git_hit = _try_git_head(folder)
-    if git_hit is not None:
-        return git_hit
+    git_marker = folder / ".git"
+    if not git_marker.exists():
+        _record(trace, "git", "skipped", "no .git directory")
+    elif shutil.which("git") is None:
+        _record(trace, "git", "skipped", "git binary not on PATH")
+    else:
+        git_hit = _try_git_head(folder)
+        if git_hit is not None:
+            _record(trace, "git", "match", git_hit.source)
+            return git_hit
+        _record(
+            trace,
+            "git",
+            "no match",
+            "git log returned no usable timestamp",
+        )
 
     # P2 — name parsing.
-    name = folder.name
-    if name.endswith(".tgz"):
-        name = name[:-4]
-    for fn in (
-        lambda: _try_prefix(name, archive_tz),
-        lambda: _try_parse(name, parse_timestamp),
-        lambda: _try_embedded(name, archive_tz),
-        lambda: _try_prefix(name, archive_tz, normalize_zeros=True),
-        lambda: _try_embedded(name, archive_tz, normalize_zeros=True),
-        lambda: _try_year_only(name, archive_tz),
-    ):
-        found = fn()
-        if found is not None:
-            return found
+    name_strategies: tuple[tuple[str, Callable[[], DateDetection | None]], ...] = (
+        ("name-prefix", lambda: _try_prefix(name, archive_tz)),
+        ("name-parse", lambda: _try_parse(name, parse_timestamp)),
+        ("name-embedded", lambda: _try_embedded(name, archive_tz)),
+        ("name-prefix-loose", lambda: _try_prefix(name, archive_tz, normalize_zeros=True)),
+        ("name-embedded-loose", lambda: _try_embedded(name, archive_tz, normalize_zeros=True)),
+        ("name-year", lambda: _try_year_only(name, archive_tz)),
+    )
+    for label, fn in name_strategies:
+        hit = fn()
+        if hit is not None:
+            _record(trace, label, "match", hit.source)
+            return hit
+        _record(trace, label, "no match", f"name={name!r}")
 
     # P3 — file mtime, regular files only, top-level then one deep.
-    return _try_mtime(folder)
+    if not folder.is_dir():
+        _record(trace, "mtime", "skipped", "target is not a directory")
+        return None
+    mtime_hit = _try_mtime(folder)
+    if mtime_hit is not None:
+        _record(trace, "mtime", "match", mtime_hit.source)
+        return mtime_hit
+    _record(
+        trace,
+        "mtime",
+        "no match",
+        "no eligible regular files at top or one level deep",
+    )
+    return None
 
 
 def parse_user_date(raw: str, archive_tz: tzinfo) -> int | None:

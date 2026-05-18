@@ -175,12 +175,6 @@ def build_cli_parser() -> argparse.ArgumentParser:
         help="target directories (default: cwd)",
     )
     p_a.add_argument(
-        "--autodate",
-        dest="autodate",
-        action="store_true",
-        help="detect archive date from name/content (falls back to today)",
-    )
-    p_a.add_argument(
         "--yes", "-y",
         dest="yes",
         action="store_true",
@@ -279,14 +273,17 @@ def build_cli_parser() -> argparse.ArgumentParser:
 
     # ``b archive`` with no subcommand → archive cwd (same as `b a`).
     # That's why ``archive_subcommand`` is not required.
-    p_archive = sub.add_parser("archive", help="archive and restore operations")
-    # Bare ``b archive`` accepts the same flags as ``archive mv`` so
-    # ``b archive --autodate`` works without retyping the subcommand.
-    p_archive.add_argument(
-        "--autodate",
-        dest="autodate",
-        action="store_true",
-        help="detect archive date from name/content (falls back to today)",
+    p_archive = sub.add_parser(
+        "archive",
+        help="archive and restore operations",
+        description=(
+            "Archive directories under base into _archive/<year>/. The "
+            "archive date is auto-detected: .git HEAD commit date if "
+            "present, otherwise a date found in the folder name (full "
+            "date or year), otherwise the newest regular-file mtime. "
+            "If nothing is detected, falls back to today (prompts for "
+            "confirmation in interactive mode)."
+        ),
     )
     p_archive.add_argument(
         "--yes", "-y",
@@ -303,12 +300,6 @@ def build_cli_parser() -> argparse.ArgumentParser:
         nargs="*",
         default=[],
         help="target directories (default: cwd)",
-    )
-    p_archive_mv.add_argument(
-        "--autodate",
-        dest="autodate",
-        action="store_true",
-        help="detect archive date from name/content (falls back to today)",
     )
     p_archive_mv.add_argument(
         "--yes", "-y",
