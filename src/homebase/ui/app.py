@@ -329,10 +329,8 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
         ),
         ("ctrl+a", "pick_actions", "Actions"),
         ("ctrl+o", "toggle_select_mode", "Select mode"),
-        ("ctrl+shift+n", "open_notes_app", "Open notes"),
         Binding("ctrl+@", "cycle_hotbar", "Next hotbar", show=False, priority=True),
         ("enter", "open_selected", "Open"),
-        ("ctrl+g", "open_existing_pane", "Goto tmux-tab"),
         ("ctrl+q", "quit_app", "Quit"),
     ]
 
@@ -3322,35 +3320,6 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
             return
         self._jump_to_tmux_pane(pane)
 
-    def action_open_existing_pane(self) -> None:
-        if self._critical_job_active():
-            self._log(
-                f"cannot goto while critical job is running: {self._critical_job_label()}",
-                "warn",
-            )
-            self._refresh_side()
-            return
-        row = self._selected_row()
-        if not row:
-            return
-        self.pane_probe_fast_until_ts = max(
-            self.pane_probe_fast_until_ts, time.time() + 25.0
-        )
-        panes = self.open_panes_by_project.get(row.path, [])
-        if not panes:
-            self._log(f"no open panes for {row.name}", "warn")
-            self._refresh_side()
-            return
-        if len(panes) == 1:
-            self._jump_to_tmux_pane(panes[0])
-            return
-
-        self.pending_pane_choices = {pane.pane_id: pane for pane in panes}
-        self.push_screen(
-            PaneChoiceScreen(f"Open pane for {row.name}", panes),
-            self._on_pick_open_pane,
-        )
-
     def action_open_selected(self) -> None:
         if self._table_is_active_focus() and self._hotbar_visible():
             target = self._selected_hotbar_target()
@@ -3387,9 +3356,6 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
         self._persist_state_now()
         self.fast_exit_requested = True
         self.exit(("open", row.path, []))
-
-    def action_open_notes_app(self) -> None:
-        textual_ui_action_dispatch.dispatch_action(self, "notes_create")
 
     def action_cycle_hotbar(self) -> None:
         if not self._table_is_active_focus():

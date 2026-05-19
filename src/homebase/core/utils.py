@@ -208,7 +208,13 @@ def archive_year_from_name(name: str) -> str | None:
     return None
 
 
-_DATE_PREFIX_PATTERN = re.compile(r"^(\d{4})-(\d{2})-(\d{2})_(.*)$", re.DOTALL)
+# Match a leading YYYY-MM-DD followed by one or more separators
+# (``_``, whitespace, ``-``, ``.``). The rest is optional so a bare
+# date with no stem still matches. Mirrors ``date_detect._DATE_PREFIX_RE``
+# so name-prefix detection and stem stripping stay in sync.
+_DATE_PREFIX_PATTERN = re.compile(
+    r"^(\d{4})-(\d{2})-(\d{2})(?:[_\s\-.]+(.*))?$", re.DOTALL,
+)
 
 
 def normalize_date_prefix(name: str) -> str:
@@ -220,7 +226,8 @@ def normalize_date_prefix(name: str) -> str:
         month = "01"
     if day == "00":
         day = "01"
-    return f"{year}-{month}-{day}_{rest}"
+    suffix = f"_{rest}" if rest else ""
+    return f"{year}-{month}-{day}{suffix}"
 
 
 def split_archive_name(name: str, parse_timestamp: Callable[[str], int]) -> tuple[str, int]:
@@ -228,11 +235,12 @@ def split_archive_name(name: str, parse_timestamp: Callable[[str], int]) -> tupl
     if not m:
         return name, 0
     year, month, day, rest = m.groups()
+    stem = rest or ""
     try:
         dt = datetime.strptime(f"{year}-{month}-{day}", "%Y-%m-%d")
-        return rest, int(dt.timestamp())
+        return stem, int(dt.timestamp())
     except ValueError:
-        return rest, 0
+        return stem, 0
 
 
 def is_packed_archive_path(path: Path, packed_archive_suffix: str) -> bool:

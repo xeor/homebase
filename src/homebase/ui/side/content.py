@@ -81,7 +81,6 @@ def cheat_columns(
     left.append("- alt+1..9         open wip project by index")
     left.append("- ctrl+a           actions picker (tags/suffix inside)")
     left.append("- ctrl+o           toggle select mode")
-    left.append("- ctrl+g           jump to existing tmux pane for selected project")
     left.append("- ctrl+q           quit")
     left.append("")
     left.append("- Targets are selected rows, or focused row if nothing is selected")

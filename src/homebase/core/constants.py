@@ -318,8 +318,6 @@ CUSTOM_ACTION_RESERVED_HOTKEYS: set[str] = {
     "ctrl+w",
     "ctrl+a",
     "ctrl+o",
-    "ctrl+shift+n",
-    "ctrl+g",
     "ctrl+q",
     "enter",
     "left",

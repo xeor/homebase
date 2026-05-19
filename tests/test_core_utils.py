@@ -55,6 +55,32 @@ def test_split_archive_name_strips_prefix_with_zero_month_and_day() -> None:
     assert ts == 0
 
 
+def test_split_archive_name_strips_prefix_with_space_separator() -> None:
+    stem, ts = core_utils.split_archive_name(
+        "2023-01-02 something something", lambda _v: 0,
+    )
+    assert stem == "something something"
+    assert ts > 0
+
+
+def test_split_archive_name_strips_prefix_with_dash_separator() -> None:
+    stem, ts = core_utils.split_archive_name("2023-01-02-thing", lambda _v: 0)
+    assert stem == "thing"
+    assert ts > 0
+
+
+def test_split_archive_name_strips_prefix_with_dot_separator() -> None:
+    stem, ts = core_utils.split_archive_name("2023-01-02.thing", lambda _v: 0)
+    assert stem == "thing"
+    assert ts > 0
+
+
+def test_split_archive_name_bare_date_returns_empty_stem() -> None:
+    stem, ts = core_utils.split_archive_name("2023-01-02", lambda _v: 0)
+    assert stem == ""
+    assert ts > 0
+
+
 def test_normalize_date_prefix_replaces_zero_month_and_day() -> None:
     assert core_utils.normalize_date_prefix("2003-00-00_x") == "2003-01-01_x"
 
