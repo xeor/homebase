@@ -3,7 +3,41 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Callable
 
+from ...core.models import ProjectRow
+from ..screens.rename import RenameInputScreen
 from .dispatch import dispatch_action
+
+
+def _truncate(text: str, limit: int = 70) -> str:
+    if len(text) <= limit:
+        return text
+    return text[: limit - 1].rstrip() + "…"
+
+
+def _build_set_desc_side_info(app: Any, targets: list[ProjectRow]) -> str:
+    """Side-info block for the Set Description dialog.
+
+    Shows the existing description per target (so the user sees what
+    they're about to overwrite) and a packed-archive warning when any
+    selected entry is packed.
+    """
+    lines: list[str] = []
+    max_preview = 8
+    if len(targets) > 1:
+        with_desc = sum(1 for r in targets if r.description)
+        lines.append(
+            f"[cyan]targets[/]: {len(targets)}  "
+            f"[dim](with existing description: {with_desc})[/]"
+        )
+    if any(r.packed for r in targets):
+        lines.append("[yellow]some targets are packed — update may be slower[/]")
+    lines.append("[cyan]current descriptions[/]:")
+    for row in targets[:max_preview]:
+        marker = "[dim](empty)[/]" if not row.description else app._esc(_truncate(row.description))
+        lines.append(f"  - {app._esc(row.name)}: {marker}")
+    if len(targets) > max_preview:
+        lines.append(f"  [dim]... +{len(targets) - max_preview} more[/]")
+    return "\n".join(lines)
 
 
 def on_pick_actions(app: Any, value: str | None) -> None:
@@ -117,7 +151,12 @@ def on_pick_actions(app: Any, value: str | None) -> None:
             title = f"Rename target ({done + 1}/{total})"
             app.pending_rename_target = current
             app.push_screen(
-                app._input_screen_cls(title, "new folder name", current_name),
+                RenameInputScreen(
+                    title,
+                    current,
+                    app.base_dir,
+                    current_name=current_name,
+                ),
                 lambda value: _on_rename_submit(value, queue, done, total),
             )
 
@@ -168,7 +207,21 @@ def on_pick_actions(app: Any, value: str | None) -> None:
             app._log("packed archive selected: description updates may be slower", "warn")
         app.pending_desc_targets = [r.path for r in targets]
         initial = targets[0].description if len(targets) == 1 else ""
-        app.push_screen(app._input_screen_cls("Set description (empty clears)", "short summary", initial), app._on_set_description)
+        title = (
+            "Set description (empty clears)"
+            if len(targets) == 1
+            else f"Set description for {len(targets)} targets (empty clears)"
+        )
+        side_info = _build_set_desc_side_info(app, targets)
+        app.push_screen(
+            app._input_screen_cls(
+                title,
+                "short summary",
+                initial,
+                side_info=side_info,
+            ),
+            app._on_set_description,
+        )
         return True
 
     def _handle_hooks_refresh() -> bool:

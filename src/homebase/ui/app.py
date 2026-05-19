@@ -2858,6 +2858,7 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
             base_dir=self.base_dir,
             archived_restore_target=archived_restore_target,
             is_under=core_utils.is_under,
+            is_packed_archive_path=is_packed_archive_path,
         )
 
     def _on_set_description(self, value: str | None) -> None:

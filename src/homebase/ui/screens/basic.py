@@ -99,14 +99,27 @@ class InputScreen(ModalScreen[str | None]):
     Screen {
         align: center middle;
     }
+    #input_side_info {
+        margin: 1 0 0 0;
+        max-height: 14;
+        overflow-y: auto;
+    }
     """
     BINDINGS = [("escape", ACTION_CANCEL, "Cancel")]
 
-    def __init__(self, title: str, placeholder: str, value: str = "") -> None:
+    def __init__(
+        self,
+        title: str,
+        placeholder: str,
+        value: str = "",
+        *,
+        side_info: str | None = None,
+    ) -> None:
         super().__init__()
         self.title = title
         self.placeholder = placeholder
         self.value = value
+        self.side_info = side_info
 
     def compose(self) -> ComposeResult:
         with Vertical(id="confirm_box"):
@@ -114,6 +127,8 @@ class InputScreen(ModalScreen[str | None]):
             yield Input(
                 placeholder=self.placeholder, value=self.value, id="value_input"
             )
+            if self.side_info is not None:
+                yield Static(self.side_info, id="input_side_info")
             yield Static("enter=save, esc=cancel")
 
     def on_mount(self) -> None:
