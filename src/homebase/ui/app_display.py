@@ -76,6 +76,7 @@ class AppDisplayMixin:
 
         if not base_widths:
             table.clear(columns=True)
+            self._table_render_signature = None
             self._visible_column_effective_width_by_id = {}
             return
 
@@ -102,6 +103,7 @@ class AppDisplayMixin:
         self._table_column_signature = column_signature
 
         table.clear(columns=True)
+        self._table_render_signature = None
         for col, width in zip(visible, widths):
             label = str(col.get("label", ""))
             try:

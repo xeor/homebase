@@ -30,6 +30,7 @@ class _FakeDisplay(AppDisplayMixin):
         self._table = _FakeDataTable()
         self._visible_column_effective_width_by_id: dict[str, int] = {}
         self._table_column_signature: tuple[object, ...] | None = None
+        self._table_render_signature: tuple[object, ...] | None = None
 
     def query_one(self, _selector: str, _typ: object = None) -> _FakeDataTable:
         return self._table
@@ -77,3 +78,17 @@ def test_configure_table_columns_reclears_on_view_switch() -> None:
     app.view_mode = "active"
     app._configure_table_columns()
     assert app._table.clear_calls == 3
+
+
+def test_configure_table_columns_invalidates_render_signature_on_clear() -> None:
+    # Regression: _configure_table_columns() clears the table widget when the
+    # effective column widths change (e.g. viewport/tmux resize), but the
+    # render signature in refresh_table uses *configured* widths and would
+    # otherwise skip re-rendering, leaving the table empty.
+    app = _FakeDisplay()
+    app._configure_table_columns()
+    app._table_render_signature = ("prev",)
+
+    app._table.size = _FakeSize(40)
+    app._configure_table_columns()
+    assert app._table_render_signature is None
