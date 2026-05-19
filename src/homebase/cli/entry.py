@@ -21,6 +21,7 @@ from ..commands.setup import (
     cmd_ls,
     cmd_recent,
     cmd_setup,
+    cmd_tags_ls,
     cmd_tags_sync,
     cmd_utils,
 )
@@ -418,6 +419,7 @@ def main(argv: list[str]) -> int:
                 verbose=verbose,
                 debug=debug,
             ),
+            cmd_tags_ls=cmd_tags_ls,
             cmd_hooks_refresh=lambda bd, **kw: cmd_hooks_refresh(
                 bd,
                 hook_specs=runtime_cfg.hook_specs,

@@ -123,6 +123,21 @@ def cmd_tags_sync(base_dir: Path, verbose: bool = True, debug: bool = False) -> 
     )
 
 
+def cmd_tags_ls(base_dir: Path) -> int:
+    from ..cache.api import cache_load_rows
+    from ..workspace.rows import collect_workspace_rows
+
+    def _load_rows(bd: Path):
+        active, archived, _ts = cache_load_rows(bd)
+        if not active and not archived:
+            # Cold cache: fall back to a live scan so first-run output
+            # isn't an empty tree.
+            active, archived = collect_workspace_rows(bd, include_git_dirty=False)
+        return active, archived
+
+    return commands_basic.cmd_tags_ls(base_dir, load_rows=_load_rows)
+
+
 def cmd_ls(
     base_dir: Path,
     *,

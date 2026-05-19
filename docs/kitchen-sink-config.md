@@ -60,6 +60,78 @@ properties:
         value_column: value
         where_like: "%file://%"
 
+# Tag rules — styling and grouping for project tags.
+#
+# Each entry matches one or more tags via:
+#   - `match:` a regex (re.search semantics; anchor with ^/$ if you
+#     want strict equality), and/or
+#   - `tags:`  an explicit list of tag names.
+# A rule fires if EITHER matches. First match in this list wins;
+# subsequent rules don't see tags an earlier rule already claimed.
+#
+# Each entry may attach STYLE and/or GROUPING:
+#   color:     "#RRGGBB" or any Rich-recognised color. Wins over the
+#              hash-based pastel that unstyled tags get by default.
+#   bold:      bool   — Rich `bold` modifier.
+#   italic:    bool   — Rich `italic` modifier.
+#   underline: bool   — Rich `underline` modifier.
+#   prefix:    str    — text shown immediately before the tag name
+#                       (e.g. an emoji + space).
+#   suffix:    str    — text shown immediately after the tag name.
+#   parents:   [str]  — group names this tag belongs to. Builds a
+#                       tree (DAG, really — a tag can be in several
+#                       groups). The `##X` filter syntax matches
+#                       any tag with X as a transitive ancestor.
+#   group_only: bool  — mark the matched tag(s) as virtual grouping
+#                       nodes: hidden from the regular `#tag`
+#                       completion pool and from rendered tag cells,
+#                       reachable only through `##tag` filters. Use
+#                       this for abstract parents that no project
+#                       should ever carry as a direct tag.
+#
+# A rule may declare styling only, grouping only, or both. Rules
+# missing both `match` and `tags` (or with an unparseable regex) are
+# silently dropped.
+#
+# Caching: rules are compiled once per config reload; per-tag style
+# and parent resolution are LRU-cached on the rule tuple, so every
+# render-pass lookup is O(1) after the first hit.
+tag_rules:
+  # Style + grouping via regex.
+  - match: "^prio:"
+    parents: [priority]
+    color: "#ff5555"
+    bold: true
+    prefix: "⚡ "
+
+  # Same idea via an explicit tag list.
+  - tags: [work, office, meeting]
+    parents: [business]
+    color: "#88ccff"
+
+  # Pure styling, no parent.
+  - match: "^wip$"
+    suffix: " 🔥"
+
+  # Pure grouping, no style overrides (hash color still applies).
+  - match: "^lang:"
+    parents: [programming]
+
+  # Multiple parents → a single tag becomes a child of several
+  # groups simultaneously (DAG).
+  - tags: [python, rust, go]
+    parents: [programming, compiled]
+
+  # Nesting: `priority` itself rolls up into `meta`, so `##meta`
+  # will match `prio:*` transitively. Both `priority` and `meta`
+  # are pure groupings — mark them `group_only` so they don't
+  # leak into the regular `#tag` picker or get rendered on rows.
+  - tags: [priority]
+    parents: [meta]
+    group_only: true
+  - tags: [meta]
+    group_only: true
+
 # Cache/reconcile strategy profile.
 cache_profile:
   all:

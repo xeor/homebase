@@ -221,7 +221,7 @@ def _subcommand_candidates(
     if cmd == "cache":
         return ["warm"]
     if cmd == "tags":
-        return ["sync-_tags", "--debug"]
+        return ["sync-_tags", "ls", "--debug"]
     if cmd == "utils":
         return ["opt-in-nested-discovery"]
     if cmd == "archive":

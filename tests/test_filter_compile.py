@@ -86,3 +86,72 @@ def test_compile_filter_expr_tag_match_uses_cached_set() -> None:
     pred_tags, _ = filter_compile.compile_filter_expr("#original-only-in-tags")
     assert pred_cached(row) is True
     assert pred_tags(row) is False
+
+
+def test_compile_filter_expr_double_hash_uses_configured_tree(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    """End-to-end: when BASE_DIR points at a workspace with tag_rules,
+    ``##X`` walks the configured ancestor tree."""
+    import yaml
+
+    from homebase.config import tag_rules
+    from homebase.config.store import clear_global_config_cache
+    from homebase.core.constants import (
+        ENV_BASE_DIR,
+        GLOBAL_CONFIG_FILE_NAME,
+        HOMEBASE_DIR_NAME,
+    )
+
+    base = tmp_path / "base"
+    (base / HOMEBASE_DIR_NAME).mkdir(parents=True)
+    cfg = base / HOMEBASE_DIR_NAME / GLOBAL_CONFIG_FILE_NAME
+    cfg.write_text(yaml.safe_dump({"tag_rules": [
+        {"match": "^prio:", "parents": ["priority"]},
+        {"tags": ["priority"], "parents": ["meta"]},
+    ]}))
+    clear_global_config_cache()
+    tag_rules.clear_tag_rules_cache()
+    monkeypatch.setenv(ENV_BASE_DIR, str(base))
+
+    pred, err = filter_compile.compile_filter_expr("##priority")
+    assert err is None
+
+    row_direct = _row()
+    row_direct.tags = ["priority"]
+    row_direct.tags_lower = frozenset({"priority"})
+    assert pred(row_direct) is True
+
+    row_child = _row()
+    row_child.tags = ["prio:p0"]
+    row_child.tags_lower = frozenset({"prio:p0"})
+    assert pred(row_child) is True
+
+    row_unrelated = _row()
+    row_unrelated.tags = ["home"]
+    row_unrelated.tags_lower = frozenset({"home"})
+    assert pred(row_unrelated) is False
+
+    # ``##meta`` reaches prio:p0 transitively (priority → meta).
+    pred_meta, _ = filter_compile.compile_filter_expr("##meta")
+    assert pred_meta(row_child) is True
+    assert pred_meta(row_direct) is True  # priority itself rolls up
+    assert pred_meta(row_unrelated) is False
+
+
+def test_compile_filter_expr_double_hash_without_base_dir_falls_back(
+    monkeypatch,
+) -> None:
+    """No BASE_DIR env → no tree lookup, but a direct hit on the
+    parent tag still matches."""
+    from homebase.core.constants import ENV_BASE_DIR
+
+    monkeypatch.delenv(ENV_BASE_DIR, raising=False)
+    pred, _err = filter_compile.compile_filter_expr("##priority")
+    row = _row()
+    row.tags = ["priority"]
+    row.tags_lower = frozenset({"priority"})
+    assert pred(row) is True
+    row.tags = ["prio:p0"]
+    row.tags_lower = frozenset({"prio:p0"})
+    assert pred(row) is False

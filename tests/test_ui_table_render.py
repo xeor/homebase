@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from homebase.config.tag_rules import hash_tag_color
 from homebase.core.models import ProjectRow
-from homebase.ui.table.render import _tag_color, refresh_table
+from homebase.ui.table.render import refresh_table
 
 
 class _FakeSize:
@@ -218,13 +219,13 @@ def test_property_cell_cache_persists_across_renders_and_clears_on_sig_change() 
 
 
 def test_tag_color_is_deterministic_and_cached() -> None:
-    _tag_color.cache_clear()
-    color_a = _tag_color("cli")
-    color_b = _tag_color("cli")
-    color_c = _tag_color("web")
+    hash_tag_color.cache_clear()
+    color_a = hash_tag_color("cli")
+    color_b = hash_tag_color("cli")
+    color_c = hash_tag_color("web")
     assert color_a == color_b
     assert color_a != color_c
-    info = _tag_color.cache_info()
+    info = hash_tag_color.cache_info()
     assert info.hits >= 1
 
 

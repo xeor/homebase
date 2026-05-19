@@ -1,20 +1,23 @@
 from __future__ import annotations
 
-import difflib
+from pathlib import Path
 from typing import Callable
 
+from rich.markup import escape as rich_escape
 from textual.app import ComposeResult
 from textual.containers import Vertical
 from textual.events import Key
 from textual.screen import ModalScreen
 from textual.widgets import Static
 
+from ...config.tag_rules import resolve_for_display
 from ...core.constants import (
     ACTION_ACCEPT,
     ACTION_CANCEL,
     COLOR_INFO_HEX,
     COLOR_SUCCESS_HEX,
 )
+from . import tag_tree as tag_tree_view
 from .basic import ConfirmScreen, InputScreen
 
 
@@ -42,6 +45,8 @@ class TagPlanScreen(ModalScreen[dict[str, str] | None]):
         presence: dict[str, str],
         other_counts: dict[str, int],
         mode: str = "full",
+        *,
+        base_dir: Path | None = None,
         on_rename_tag: Callable[[str, str], tuple[bool, str, bool]] | None = None,
         on_delete_tag: Callable[[str], tuple[bool, str]] | None = None,
         on_reload_model: Callable[
@@ -54,14 +59,102 @@ class TagPlanScreen(ModalScreen[dict[str, str] | None]):
         self.presence = dict(presence)
         self.other_counts = dict(other_counts)
         self.mode = mode
+        self.base_dir = base_dir
         self.on_rename_tag = on_rename_tag
         self.on_delete_tag = on_delete_tag
         self.on_reload_model = on_reload_model
-        self.index = 0
         self.plan = {tag: "keep" for tag in self.tags}
         self.filter_text = ""
-        self.list_scroll_offset = 0
         self.status_text = ""
+        self.index = 0
+        self._tree: tag_tree_view.TagTreeView | None = None
+        self._rebuild_tree()
+        self._cached_rows: list[tag_tree_view.TreeRow] = []
+        self._cached_rows_token: tuple[str, int] | None = None
+        self._snap_cursor_to_selectable()
+
+    # ---- tree maintenance -----------------------------------------
+
+    def _rebuild_tree(self) -> None:
+        if self.base_dir is None:
+            self._tree = None
+            return
+        self._tree = tag_tree_view.build_tag_tree(self.tags, self.base_dir)
+
+    def _visible_rows(self) -> list[tag_tree_view.TreeRow]:
+        # Cache by (filter text, tag-list size) so repeated calls in
+        # one paint cycle don't re-walk the tree.
+        token = (self.filter_text, len(self.tags))
+        if self._cached_rows_token == token and self._cached_rows:
+            return self._cached_rows
+        rows = self._build_rows()
+        self._cached_rows = rows
+        self._cached_rows_token = token
+        return rows
+
+    def _build_rows(self) -> list[tag_tree_view.TreeRow]:
+        if self._tree is None:
+            # Defensive: no base_dir, fall back to a flat unfiltered
+            # view of the explicit tag list.
+            q = self.filter_text.strip().lower()
+            return [
+                tag_tree_view.TreeRow(
+                    name=tag,
+                    depth=0,
+                    parent_path=(),
+                    group_only=False,
+                    matched=bool(q) and q in tag.lower(),
+                )
+                for tag in self.tags
+                if not q or q in tag.lower()
+            ]
+        visible, matched = tag_tree_view.filter_visible(
+            self._tree, self.filter_text, self.base_dir,
+        )
+        return tag_tree_view.flatten_for_render(self._tree, visible, matched)
+
+    def _invalidate_rows_cache(self) -> None:
+        self._cached_rows = []
+        self._cached_rows_token = None
+
+    def _snap_cursor_to_selectable(self) -> None:
+        rows = self._visible_rows()
+        if not rows:
+            self.index = 0
+            return
+        if 0 <= self.index < len(rows) and not rows[self.index].group_only:
+            return
+        first = tag_tree_view.first_selectable_index(rows)
+        if first >= 0:
+            self.index = first
+        else:
+            self.index = 0
+
+    def _jump_to_first_match(self) -> None:
+        """After a filter change, park the cursor on the first
+        matched selectable row so the user can hit space straight
+        away. When the match is purely a group-only ancestor (i.e.
+        the user typed the name of a group), fall back to the first
+        selectable child so they can still drill in."""
+        self._invalidate_rows_cache()
+        rows = self._visible_rows()
+        if not rows:
+            self.index = 0
+            return
+        matched = tag_tree_view.first_matched_selectable_index(rows)
+        if matched >= 0:
+            self.index = matched
+            return
+        first = tag_tree_view.first_selectable_index(rows)
+        self.index = first if first >= 0 else 0
+
+    def _current_row(self) -> tag_tree_view.TreeRow | None:
+        rows = self._visible_rows()
+        if not rows or self.index < 0 or self.index >= len(rows):
+            return None
+        return rows[self.index]
+
+    # ---- composition / render -------------------------------------
 
     def compose(self) -> ComposeResult:
         with Vertical(id="tag_plan_box"):
@@ -78,137 +171,122 @@ class TagPlanScreen(ModalScreen[dict[str, str] | None]):
     def on_mount(self) -> None:
         self._refresh_body()
 
-    def _refresh_body(self) -> None:
-        self.query_one("#tag_filter", Static).update(
-            f"filter: {self.filter_text or '(all)'}"
-        )
-        list_lines: list[str] = []
-        plan_mark = {"keep": "=", "add": "+", "remove": "-"}
-        visible = self._visible_tags()
-        if not visible:
-            self.index = 0
-            self.list_scroll_offset = 0
-            if self.tags:
-                list_lines.append("(no tags match current filter)")
-            else:
-                list_lines.append("(no tags available yet)")
-                list_lines.append("press ctrl+a to add new tags")
-            self.query_one("#tag_list", Static).update("\n".join(list_lines))
-            self.query_one("#tag_help", Static).update(
-                f"legend mark: [white]\\[=][/] keep [{COLOR_SUCCESS_HEX}]\\[+][/] set all [white]\\[-][/] remove all\n"
-                f"legend color: [white]white[/]=none [{COLOR_INFO_HEX}]light blue[/]=mixed [{COLOR_SUCCESS_HEX}]light green[/]=all\n"
-                "legend blank: [white]\\[ ][/] means keep + no existing tag\n"
-                "cycle rules: white=[ ]<->+  blue=[=,+,-]  green=[=,-]\n"
-                "others: non-selected projects using this tag"
-            )
-            self.query_one("#tag_status", Static).update(self.status_text)
-            return
-
-        if self.index >= len(visible):
-            self.index = len(visible) - 1
-        if self.index < 0:
-            self.index = 0
-
-        max_rows = 18
-        try:
-            measured = int(
-                getattr(self.query_one("#tag_list", Static).size, "height", 0) or 0
-            )
-            if measured > 0:
-                max_rows = max(6, measured)
-        except (
-            LookupError,
-            KeyError,
-            IndexError,
-            AttributeError,
-            RuntimeError,
-            ValueError,
-            TypeError,
-        ):
-            pass
-        max_offset = max(0, len(visible) - max_rows)
-        if self.list_scroll_offset > max_offset:
-            self.list_scroll_offset = max_offset
-        if self.index < self.list_scroll_offset:
-            self.list_scroll_offset = self.index
-        elif self.index >= self.list_scroll_offset + max_rows:
-            self.list_scroll_offset = self.index - max_rows + 1
-
-        window = visible[
-            self.list_scroll_offset : self.list_scroll_offset + max_rows
-        ]
-
-        for i, tag in enumerate(window):
-            absolute_i = self.list_scroll_offset + i
-            cursor = ">" if absolute_i == self.index else " "
-            plan = self.plan.get(tag, "keep")
-            base_present = self.presence.get(tag, "none")
-
-            color = "white"
-            if base_present == "all":
-                color = COLOR_SUCCESS_HEX
-            elif base_present == "mixed":
-                color = COLOR_INFO_HEX
-
-            other = self.other_counts.get(tag, 0)
-            mark = plan_mark.get(plan, "=")
-            if plan == "keep" and base_present == "none":
-                mark = " "
-            list_lines.append(
-                f"{cursor} [{color}]\\[{mark}][/] [{color}]{tag:<24}[/] others:{other:>4}"
-            )
-        if len(visible) > max_rows:
-            start = self.list_scroll_offset + 1
-            end = self.list_scroll_offset + len(window)
-            list_lines.append(f"[dim]showing {start}-{end} of {len(visible)}[/]")
-        self.query_one("#tag_list", Static).update("\n".join(list_lines))
-        self.query_one("#tag_help", Static).update(
-            f"legend mark: [white]\\[=][/] keep [{COLOR_SUCCESS_HEX}]\\[+][/] set all [white]\\[-][/] remove all\n"
-            f"legend color: [white]white[/]=none [{COLOR_INFO_HEX}]light blue[/]=mixed [{COLOR_SUCCESS_HEX}]light green[/]=all\n"
+    def _legend_text(self) -> str:
+        return (
+            f"legend mark: [white]\\[=][/] keep "
+            f"[{COLOR_SUCCESS_HEX}]\\[+][/] set all "
+            f"[white]\\[-][/] remove all  "
+            f"[dim]\\[·][/] group-only (read-only)\n"
+            f"legend color: [white]white[/]=none "
+            f"[{COLOR_INFO_HEX}]light blue[/]=mixed "
+            f"[{COLOR_SUCCESS_HEX}]light green[/]=all\n"
             "legend blank: [white]\\[ ][/] means keep + no existing tag\n"
             "cycle rules: white=[ ]<->+  blue=[=,+,-]  green=[=,-]\n"
             "others: non-selected projects using this tag"
         )
+
+    def _format_row(self, row: tag_tree_view.TreeRow, is_cursor: bool) -> str:
+        plan_mark = {"keep": "=", "add": "+", "remove": "-"}
+        indent = "  " * row.depth
+        cursor = ">" if is_cursor else " "
+        tag = row.name
+        # Group-only rows are headers — non-selectable, dimmed, with
+        # the explicit ``(group-only)`` label. Even here we still
+        # render the configured display string so a styled emoji
+        # prefix (e.g. ``⚡ priority``) shows through; the bracket
+        # checkbox stays the distinct part for the rest of the rows.
+        if row.group_only:
+            display = self._resolve_display(tag)
+            return (
+                f"{cursor} {indent}[dim]\\[·] "
+                f"{rich_escape(display)}  (group-only)[/]"
+            )
+        plan = self.plan.get(tag, "keep")
+        base_present = self.presence.get(tag, "none")
+        # The checkbox color reflects presence across selected
+        # projects — that's the distinct cue the user reads for
+        # picking. Tag NAMES use their configured style so colour
+        # + bold + prefix/suffix all come through.
+        if base_present == "all":
+            marker_color = COLOR_SUCCESS_HEX
+        elif base_present == "mixed":
+            marker_color = COLOR_INFO_HEX
+        else:
+            marker_color = "white"
+        mark = plan_mark.get(plan, "=")
+        if plan == "keep" and base_present == "none":
+            mark = " "
+        display, style_spec = self._resolve_display_and_style(tag)
+        other = self.other_counts.get(tag, 0)
+        match_glyph = " *" if row.matched else "  "
+        return (
+            f"{cursor} {indent}"
+            f"[{marker_color}]\\[{mark}][/] "
+            f"[{style_spec}]{rich_escape(display)}[/]"
+            f"{match_glyph}  "
+            f"[dim]others:{other}[/]"
+        )
+
+    def _resolve_display_and_style(self, tag: str) -> tuple[str, str]:
+        if self.base_dir is None:
+            return tag, "white"
+        try:
+            resolved = resolve_for_display(tag, self.base_dir)
+        except (OSError, ValueError):
+            return tag, "white"
+        return resolved.display, resolved.style_spec
+
+    def _resolve_display(self, tag: str) -> str:
+        return self._resolve_display_and_style(tag)[0]
+
+    def _refresh_body(self) -> None:
+        self._invalidate_rows_cache()
+        self.query_one("#tag_filter", Static).update(
+            f"filter: {self.filter_text or '(all)'}"
+        )
+        rows = self._visible_rows()
+        if not rows:
+            if self.tags:
+                lines = ["(no tags match current filter)"]
+            else:
+                lines = [
+                    "(no tags available yet)",
+                    "press ctrl+a to add new tags",
+                ]
+            self.query_one("#tag_list", Static).update("\n".join(lines))
+            self.query_one("#tag_help", Static).update(self._legend_text())
+            self.query_one("#tag_status", Static).update(self.status_text)
+            return
+
+        self._snap_cursor_to_selectable()
+
+        # Render every row at once. The previous implementation
+        # windowed by the measured widget height and fell back to a
+        # fixed 18-row cap when the widget hadn't been sized yet —
+        # that's the "only 20 visible on first paint" bug. Letting
+        # the Static hold the full list defers any clipping decision
+        # to Textual's layout, which already knows how much room the
+        # modal actually has.
+        lines = [
+            self._format_row(row, is_cursor=idx == self.index)
+            for idx, row in enumerate(rows)
+        ]
+        self.query_one("#tag_list", Static).update("\n".join(lines))
+        self.query_one("#tag_help", Static).update(self._legend_text())
         self.query_one("#tag_status", Static).update(self.status_text)
 
-    def _visible_tags(self) -> list[str]:
-        q = self.filter_text.strip().lower()
-        if not q:
-            return list(self.tags)
-
-        ranked: list[tuple[float, str]] = []
-        for tag in self.tags:
-            t = tag.lower()
-            score = 0.0
-            if q in t:
-                score = max(score, 0.80 + min(0.15, len(q) / max(1, len(t))))
-            score = max(score, difflib.SequenceMatcher(None, q, t).ratio())
-
-            qi = 0
-            for ch in t:
-                if qi < len(q) and ch == q[qi]:
-                    qi += 1
-            if qi == len(q):
-                score = max(score, 0.72 + min(0.20, len(q) / max(1, len(t))))
-
-            if score >= 0.45:
-                ranked.append((score, tag))
-
-        ranked.sort(key=lambda item: (-item[0], item[1]))
-        return [tag for _score, tag in ranked]
+    # ---- keyboard / navigation ------------------------------------
 
     def on_key(self, event: Key) -> None:
         if event.key == "backspace":
             self.filter_text = self.filter_text[:-1]
-            self.index = 0
-            self.list_scroll_offset = 0
+            self._jump_to_first_match()
             self._refresh_body()
             event.stop()
             return
         if len(event.key) == 1 and event.key.isprintable() and event.key != " ":
             self.filter_text += event.key
-            self.index = 0
-            self.list_scroll_offset = 0
+            self._jump_to_first_match()
             self._refresh_body()
             event.stop()
             return
@@ -217,27 +295,32 @@ class TagPlanScreen(ModalScreen[dict[str, str] | None]):
         if not self.filter_text:
             return
         self.filter_text = ""
+        self._jump_to_first_match()
         self._refresh_body()
 
     def action_move_up(self) -> None:
-        visible = self._visible_tags()
-        if not visible:
+        rows = self._visible_rows()
+        if not rows or tag_tree_view.first_selectable_index(rows) < 0:
             return
-        self.index = (self.index - 1) % len(visible)
+        self.index = tag_tree_view.next_selectable_index(
+            rows, self.index, forward=False,
+        )
         self._refresh_body()
 
     def action_move_down(self) -> None:
-        visible = self._visible_tags()
-        if not visible:
+        rows = self._visible_rows()
+        if not rows or tag_tree_view.first_selectable_index(rows) < 0:
             return
-        self.index = (self.index + 1) % len(visible)
+        self.index = tag_tree_view.next_selectable_index(
+            rows, self.index, forward=True,
+        )
         self._refresh_body()
 
     def action_cycle_plan(self) -> None:
-        visible = self._visible_tags()
-        if not visible:
+        row = self._current_row()
+        if row is None or row.group_only:
             return
-        tag = visible[self.index]
+        tag = row.name
         cur = self.plan.get(tag, "keep")
         base_present = self.presence.get(tag, "none")
         if base_present == "none":
@@ -252,6 +335,8 @@ class TagPlanScreen(ModalScreen[dict[str, str] | None]):
         nxt = allowed[(idx + 1) % len(allowed)]
         self.plan[tag] = nxt
         self._refresh_body()
+
+    # ---- add / rename / delete ------------------------------------
 
     def action_add_tags(self) -> None:
         self.app.push_screen(
@@ -295,17 +380,19 @@ class TagPlanScreen(ModalScreen[dict[str, str] | None]):
         self.other_counts = dict(other_counts)
         self.plan = {tag: old_plan.get(tag, "keep") for tag in self.tags}
         self.index = 0
-        self.list_scroll_offset = 0
+        self._rebuild_tree()
+        self._invalidate_rows_cache()
+        self._snap_cursor_to_selectable()
 
     def action_rename_tag(self) -> None:
         if self.mode == "add_only" or self.on_rename_tag is None:
             self._set_status("[yellow]rename unavailable in this mode[/]")
             self._refresh_body()
             return
-        visible = self._visible_tags()
-        if not visible:
+        row = self._current_row()
+        if row is None or row.group_only:
             return
-        old = visible[self.index]
+        old = row.name
         self.app.push_screen(
             InputScreen("Rename tag", "new tag name", old),
             lambda value, old_tag=old: self._on_rename_tag_input(old_tag, value),
@@ -338,10 +425,10 @@ class TagPlanScreen(ModalScreen[dict[str, str] | None]):
             self._set_status("[yellow]delete unavailable in this mode[/]")
             self._refresh_body()
             return
-        visible = self._visible_tags()
-        if not visible:
+        row = self._current_row()
+        if row is None or row.group_only:
             return
-        tag = visible[self.index]
+        tag = row.name
         self.app.push_screen(
             ConfirmScreen(
                 f"Delete tag '{tag}' from all projects?",
@@ -369,23 +456,28 @@ class TagPlanScreen(ModalScreen[dict[str, str] | None]):
             if tag not in self.tags:
                 self.tags.append(tag)
                 self.presence[tag] = "none"
-                self.plan[tag] = "add"
-            else:
-                self.plan[tag] = "add"
+            self.plan[tag] = "add"
         self.tags = sorted(self.tags)
-        visible = self._visible_tags()
-        if visible:
-            self.index = min(self.index, len(visible) - 1)
-            self.list_scroll_offset = min(
-                self.list_scroll_offset, max(0, len(visible) - 1)
-            )
+        self._rebuild_tree()
+        self._invalidate_rows_cache()
+        self._snap_cursor_to_selectable()
         self._refresh_body()
 
+    # ---- accept / cancel ------------------------------------------
+
     def action_accept(self) -> None:
-        self.dismiss(dict(self.plan))
+        # Group-only tags can never end up as anything but ``keep``
+        # because the toggle action refuses to touch them. Strip them
+        # from the returned plan defensively so callers don't have to
+        # filter again.
+        clean = {
+            tag: state for tag, state in self.plan.items()
+            if not (
+                self._tree is not None
+                and tag in self._tree.group_only
+            )
+        }
+        self.dismiss(clean)
 
     def action_cancel(self) -> None:
         self.dismiss(None)
-
-
-

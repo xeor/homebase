@@ -109,6 +109,85 @@ def test_compile_filter_expr_short_circuits_or() -> None:
     assert calls == ["left"]
 
 
+def test_double_hash_matches_descendants_via_ancestors_fn() -> None:
+    """``##X`` matches any row whose tag has X in its ancestor chain
+    (and the tag X itself)."""
+    tree = {
+        "prio:p0": frozenset({"priority", "meta"}),
+        "prio:p1": frozenset({"priority", "meta"}),
+        "priority": frozenset({"meta"}),
+        "home": frozenset(),
+    }
+
+    def ancestors(tag: str) -> frozenset[str]:
+        return tree.get(tag, frozenset())
+
+    pred, err = filter_engine.compile_filter_expr(
+        "##priority",
+        token_re=TOKEN_RE,
+        match_query_fn=lambda row, q: q in row.name.lower(),
+        property_alias_set_fn=lambda key: {key.lower()},
+        get_named_filter=lambda _name: "",
+        tag_ancestors_fn=ancestors,
+    )
+    assert err is None
+    # Direct hit.
+    assert pred(Row(name="x", tags=["priority"])) is True
+    # Descendant via single hop.
+    assert pred(Row(name="x", tags=["prio:p0"])) is True
+    # Unrelated tag.
+    assert pred(Row(name="x", tags=["home"])) is False
+
+
+def test_double_hash_walks_transitively() -> None:
+    """``##meta`` should reach prio:* via priority."""
+    tree = {
+        "prio:p0": frozenset({"priority", "meta"}),
+        "priority": frozenset({"meta"}),
+    }
+    pred, _err = filter_engine.compile_filter_expr(
+        "##meta",
+        token_re=TOKEN_RE,
+        match_query_fn=lambda row, q: q in row.name.lower(),
+        property_alias_set_fn=lambda key: {key.lower()},
+        get_named_filter=lambda _name: "",
+        tag_ancestors_fn=lambda t: tree.get(t, frozenset()),
+    )
+    assert pred(Row(name="x", tags=["prio:p0"])) is True
+    assert pred(Row(name="x", tags=["priority"])) is True
+    assert pred(Row(name="x", tags=["meta"])) is True
+    assert pred(Row(name="x", tags=["home"])) is False
+
+
+def test_double_hash_falls_back_to_direct_match_without_ancestors_fn() -> None:
+    """Without a tag_ancestors_fn the matcher still finds the tag
+    itself — no tree walk, but a direct hit on the parent tag works."""
+    pred, _err = filter_engine.compile_filter_expr(
+        "##priority",
+        token_re=TOKEN_RE,
+        match_query_fn=lambda row, q: q in row.name.lower(),
+        property_alias_set_fn=lambda key: {key.lower()},
+        get_named_filter=lambda _name: "",
+    )
+    assert pred(Row(name="x", tags=["priority"])) is True
+    assert pred(Row(name="x", tags=["prio:p0"])) is False
+
+
+def test_double_hash_in_named_filter() -> None:
+    """A named filter that uses ``##X`` must also get the
+    ancestors function so the inner predicate works."""
+    tree = {"prio:p0": frozenset({"priority"})}
+    pred, _err = filter_engine.compile_filter_expr(
+        "@grouped",
+        token_re=TOKEN_RE,
+        match_query_fn=lambda row, q: q in row.name.lower(),
+        property_alias_set_fn=lambda key: {key.lower()},
+        get_named_filter=lambda name: "##priority" if name == "grouped" else "",
+        tag_ancestors_fn=lambda t: tree.get(t, frozenset()),
+    )
+    assert pred(Row(name="x", tags=["prio:p0"])) is True
+
+
 def test_normalize_and_pretty_filter_expression() -> None:
     normalized = filter_engine.normalize_filter_expression("( OR #a | | #b )", token_re=TOKEN_RE)
     assert normalized == "( #a OR #b )"

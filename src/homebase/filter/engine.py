@@ -13,6 +13,7 @@ def compile_filter_expr(
     match_query_fn: Callable[[Any, str], bool],
     property_alias_set_fn: Callable[[str], set[str]],
     get_named_filter: Callable[[str], str],
+    tag_ancestors_fn: Callable[[str], frozenset[str]] | None = None,
 ) -> tuple[Callable[[Any], bool], str | None]:
     raw = expr.strip()
     if not raw:
@@ -154,6 +155,7 @@ def compile_filter_expr(
             match_query_fn=match_query_fn,
             property_alias_set_fn=property_alias_set_fn,
             get_named_filter=get_named_filter,
+            tag_ancestors_fn=tag_ancestors_fn,
         )
         compiling_named.discard(name)
         if err:
@@ -223,6 +225,30 @@ def compile_filter_expr(
         if token.startswith(".") and len(token) > 1:
             suffix = token[1:].strip().lower()
             return lambda row: (getattr(row, "suffix", "") or "") == suffix
+        if token.startswith("##") and len(token) > 2:
+            target = token[2:].lower()
+
+            def _tree_tag_match(row: Any) -> bool:
+                tags = getattr(row, "tags", []) or []
+                # Direct hit on the parent tag itself.
+                cached = getattr(row, "tags_lower", None)
+                if cached is not None and target in cached:
+                    return True
+                if cached is None:
+                    for tag in tags:
+                        if str(tag).lower() == target:
+                            return True
+                if tag_ancestors_fn is None:
+                    return False
+                # Any tag whose (transitive) ancestor chain includes
+                # the target.
+                for tag in tags:
+                    for anc in tag_ancestors_fn(str(tag)):
+                        if anc.lower() == target:
+                            return True
+                return False
+
+            return _tree_tag_match
         if token.startswith("#") and len(token) > 1:
             needle = token[1:].lower()
 

@@ -143,10 +143,14 @@ def build_cli_parser() -> argparse.ArgumentParser:
     cache_sub = p_cache.add_subparsers(dest="cache_subcommand", required=True)
     cache_sub.add_parser("warm", help="pre-warm runtime/import cache")
 
-    p_tags = sub.add_parser("tags", help="tag index maintenance commands")
+    p_tags = sub.add_parser("tags", help="tag index and listing commands")
     tags_sub = p_tags.add_subparsers(dest="tags_subcommand", required=True)
     p_tags_sync = tags_sub.add_parser("sync-_tags", help="rebuild _tags symlink index")
     p_tags_sync.add_argument("--debug", action="store_true", help="print per-project debug output")
+    tags_sub.add_parser(
+        "ls",
+        help="list every known tag in its configured hierarchy",
+    )
 
     p_hooks = sub.add_parser("hooks", help="hook administration commands")
     hooks_sub = p_hooks.add_subparsers(dest="hooks_subcommand", required=True)

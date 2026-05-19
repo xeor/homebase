@@ -200,6 +200,7 @@ def action_pick_tags(app: Any, *, tag_plan_screen: Any) -> None:
             all_tags,
             presence,
             other_counts,
+            base_dir=getattr(app, "base_dir", None),
             on_rename_tag=app._rename_tag_globally,
             on_delete_tag=app._delete_tag_globally,
             on_reload_model=lambda p=paths, v=app.view_mode: app._tag_plan_model_for_paths(p, v),

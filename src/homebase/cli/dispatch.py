@@ -25,6 +25,7 @@ def dispatch_command(
     cmd_setup: Callable[..., int],
     cmd_cache_warm: Callable[[], int],
     cmd_tags_sync: Callable[[Path, bool, bool], int],
+    cmd_tags_ls: Callable[[Path], int],
     cmd_hooks_refresh: Callable[..., int],
     cmd_utils: Callable[[Path, str], int],
     cmd_archive_mv: Callable[..., int],
@@ -87,6 +88,8 @@ def dispatch_command(
     if ns.command == "tags":
         if ns.tags_subcommand == "sync-_tags":
             return cmd_tags_sync(base_dir, True, bool(ns.debug))
+        if ns.tags_subcommand == "ls":
+            return cmd_tags_ls(base_dir)
         return 1
     if ns.command == "hooks":
         if ns.hooks_subcommand == "refresh":

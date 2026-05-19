@@ -283,7 +283,13 @@ class NewProjectScreen(ModalScreen[dict[str, object] | None]):
             for tag in all_tags
         }
         self.app.push_screen(
-            TagPlanScreen(all_tags, presence, counts, mode="add_only"),
+            TagPlanScreen(
+                all_tags,
+                presence,
+                counts,
+                mode="add_only",
+                base_dir=self.base_dir_ref,
+            ),
             self._on_tag_picker_plan,
         )
 

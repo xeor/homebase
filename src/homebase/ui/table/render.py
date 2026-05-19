@@ -1,8 +1,5 @@
 from __future__ import annotations
 
-import colorsys
-import functools
-import hashlib
 import time
 from pathlib import Path
 from typing import Any, Callable
@@ -10,19 +7,10 @@ from typing import Any, Callable
 from rich.text import Text
 from textual.widgets import DataTable
 
+from ...config.tag_rules import is_group_only, resolve_for_display
 from ...core.constants import COLOR_PENDING_HEX
 from ...core.models import ProjectRow
 from ...core.utils import WIDGET_API_ERRORS
-
-
-@functools.lru_cache(maxsize=4096)
-def _tag_color(tag: str) -> str:
-    digest = hashlib.sha1(tag.encode("utf-8", errors="ignore")).digest()
-    hue = int.from_bytes(digest[:2], "big") / 65535.0
-    sat = 0.32
-    val = 0.95
-    r, g, b = colorsys.hsv_to_rgb(hue, sat, val)
-    return f"#{int(r * 255):02X}{int(g * 255):02X}{int(b * 255):02X}"
 
 
 def refresh_table(
@@ -243,38 +231,50 @@ def refresh_table(
             return Text("-", style="dim")
         labels = [str(t).strip() for t in tags]
         labels = [label for label in labels if label]
+        # Group-only tags are virtual grouping nodes — hide them
+        # from the visible cell. They still drive ``##tag`` filters.
+        labels = [label for label in labels if not is_group_only(label, base_dir)]
         if not labels:
             return Text("-", style="dim")
+        # Resolve each tag through the central style system once;
+        # budget math uses the *displayed* string length (which may
+        # include a configured prefix/suffix).
+        resolved = [resolve_for_display(label, base_dir) for label in labels]
         budget = max(6, int(width))
         sep_len = 2
         suffix = "  ++"
         suffix_len = len(suffix)
-        parts: list[str] = []
+        parts: list[tuple[str, str]] = []  # (display, style_spec)
         cur_len = 0
         i = 0
-        while i < len(labels):
-            label = labels[i]
+        while i < len(resolved):
+            entry = resolved[i]
+            display_len = len(entry.display)
             sep = sep_len if parts else 0
-            remaining = len(labels) - i - 1
+            remaining = len(resolved) - i - 1
             reserve = suffix_len if remaining > 0 else 0
-            if cur_len + sep + len(label) + reserve > budget:
-                if parts and reserve == 0 and cur_len + sep + len(label) <= budget:
-                    parts.append(label)
-                    cur_len += sep + len(label)
+            if cur_len + sep + display_len + reserve > budget:
+                if parts and reserve == 0 and cur_len + sep + display_len <= budget:
+                    parts.append((entry.display, entry.style_spec))
+                    cur_len += sep + display_len
                     i += 1
                     continue
                 break
-            parts.append(label)
-            cur_len += sep + len(label)
+            parts.append((entry.display, entry.style_spec))
+            cur_len += sep + display_len
             i += 1
-        hidden = len(labels) - len(parts)
+        hidden = len(resolved) - len(parts)
         if not parts:
-            return Text(trunc_ellipsis(labels[0], budget), style=_tag_color(labels[0]))
+            first = resolved[0]
+            return Text(
+                trunc_ellipsis(first.display, budget),
+                style=first.style_spec,
+            )
         out = Text()
-        for j, label in enumerate(parts):
+        for j, (display, spec) in enumerate(parts):
             if j > 0:
                 out.append("  ")
-            out.append(label, style=_tag_color(label))
+            out.append(display, style=spec)
         if hidden > 0:
             out.append(suffix, style="dim")
         return out

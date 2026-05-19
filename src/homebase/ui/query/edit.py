@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from ...config.tag_rules import is_group_only as tag_is_group_only
+from ...config.tag_rules import roots as tag_roots
 from ...core.constants import NAMED_FILTERS, SAVED_FILTER_QUERIES, SUFFIXES
 
 
@@ -57,7 +59,31 @@ def completion_counts(app: Any) -> tuple[list[tuple[str, int]], list[tuple[str, 
 def query_completion_candidates(app: Any, token: str) -> list[str]:
     t = token.strip()
     tag_rank, prop_rank = completion_counts(app)
-    tags = [f"#{x}" for x, _ in tag_rank]
+    base_dir = getattr(app, "base_dir", None)
+    # Hide group-only tags from the regular ``#X`` pool: those exist
+    # purely as ``##group`` filter targets, never as plain project
+    # tags. ``base_dir`` may be missing in some test stubs — degrade
+    # gracefully.
+    if base_dir is not None:
+        def _is_group_only(name: str) -> bool:
+            try:
+                return tag_is_group_only(name, base_dir)
+            except (OSError, ValueError):
+                return False
+    else:
+        def _is_group_only(_name: str) -> bool:
+            return False
+    tags = [f"#{x}" for x, _ in tag_rank if not _is_group_only(x)]
+    # ``##X`` completions: only group/parent names. A ``##X`` filter
+    # matches the tag X itself plus every descendant via the
+    # configured tag_rules tree — offering ``##`` for every plain
+    # tag would just clutter the picker since ``#X`` already covers
+    # the leaf case.
+    try:
+        group_names = tag_roots(app.base_dir)
+    except (AttributeError, OSError):
+        group_names = ()
+    parent_tags = [f"##{x}" for x in group_names]
     props = [f"!{x}" for x, _ in prop_rank]
     names = [f"@{n}" for n in sorted(NAMED_FILTERS.keys())]
     suffixes = [f".{s}" for s in SUFFIXES]
@@ -79,7 +105,16 @@ def query_completion_candidates(app: Any, token: str) -> list[str]:
         "(",
         ")",
     ]
-    pool = names + tags + props + suffixes + misc + SAVED_FILTER_QUERIES[:30]
+    pool = (
+        names + tags + parent_tags + props + suffixes
+        + misc + SAVED_FILTER_QUERIES[:30]
+    )
+    # Typing a single ``#`` (not ``##``) means "regular tag" — keep
+    # the ``##X`` group entries out of the cycled list. Without this
+    # guard ``#<tab>`` jumps straight into the group picker because
+    # those entries also start with ``#``.
+    if t.startswith("#") and not t.startswith("##"):
+        pool = [c for c in pool if not c.startswith("##")]
     if not t:
         return pool[:120]
     return [x for x in pool if x.lower().startswith(t.lower())][:120]
