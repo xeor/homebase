@@ -1,329 +1,354 @@
 # TODO-wt — Worktree Support in `b`
 
-Status: design draft, not implemented. Iterate on this file.
+Status: design draft, not implemented. Iterate inline.
 
 ## 1. Goal
 
-Make long-lived (and short-lived) git worktrees first-class projects in
-homebase so they show up in the TUI with their own tags, WIP flag,
-opened-time, description, notes, etc. Add a small set of commands and
-TUI affordances to make branch-as-worktree the dominant flow.
+Make long-lived (and short-lived) git worktrees first-class projects
+in homebase so they show up in the TUI with their own tags, WIP flag,
+opened-time, description, notes, etc. Branch-as-worktree should feel
+as native as cloning a new project.
 
 Concrete shape: one repo with three checked-out branches becomes three
-rows in `b`: `foo`, `foo.feat-x`, `foo.bugfix-y`. Each row is
+rows in `b`: `foo`, `foo-featx`, `foo-bugfixy`. Each row is
 independent for tagging/filtering but knows its parent.
 
-## 2. Worktrunk: integrate, replace, or skip?
+## 2. Worktrunk
 
-**TL;DR — skip the dependency, steal the conventions.**
-
-What worktrunk gives us:
-
-- Path template `../<repo>.<branch>` for worktree placement.
-- `wt switch / list / merge / remove` UX.
-- Post-create hooks (install deps, start dev server, port hashing).
-- LLM commit message generation.
-- Per-repo state under `.git/wt/` (logs, CI cache).
-
-Why not adopt it as a backend:
-
-- **No machine-readable API.** It's CLI-first; `wt list` is text and
-  there's no documented JSON output. Parsing stdout is fragile.
-- **Approvals.toml UX** — every project hook needs first-run approval.
-  That fights the homebase "no migration blocks" rule
-  ([[feedback_no_migration_blocks]]).
-- **Two config worlds.** `~/.config/worktrunk/config.toml` + per-repo
-  `.config/wt.toml` would sit alongside `.homebase/config.yaml` and
-  `.base.yml`. Three sources of truth.
-- **Wrong philosophy.** Worktrunk optimises for many ephemeral AI-agent
-  worktrees you trash. We want long-lived branches as durable
-  projects. The semantics overlap but the defaults differ.
-- **Extra runtime dep.** Rust binary install per machine; version
-  drift; not available on all our targets.
-
-What we should keep from worktrunk:
-
-- Path layout: `<base>/<repo>.<branch>/repo/` mirrors their
-  `../<repo>.<branch>` exactly. Makes interop trivial if the user ever
-  runs `wt` against a homebase project.
-COMMENT: Lets keep it simple and use <projectname>-<worktree>/repo instead. So, a "-", not "."
-
-- Hook event names (`post-create`, `pre-merge`, `post-merge`) for
-  consistency.
-COMMENT: We don't need this functionality
-
-- Optional escape-hatch flag: `b wt merge --via wt` shells out to
-  worktrunk if installed, for users who want its merge ergonomics. No
-  default delegation.
-COmMENT: no need
-
-**Verdict:** native implementation, with worktrunk-compatible layout so
-you can layer worktrunk on top later without a migration.
-COMMENT: I don't use worktrunk, so there is no need to keep a compatibiltiy or support anything from it. I was just looking into alternatives.
+Looked at worktrunk.dev as a possible backend. Decision: not used.
+Native implementation, no compat layer, no escape-hatch shell-out, no
+hooks framework borrowed. The research is parked.
 
 ## 3. Data model
 
-### 3.1 Where worktrees live
+### 3.1 Layout & naming
 
-Convention: worktree is a sibling project directory.
-COMMENT: Needs to be updated from comments above.
+Worktrees are sibling project directories under `<base>/`. Separator
+is `-` (not `.`).
 
 ```
 <base>/
-├── foo/                 # main project (clone)
+├── foo/                 # main project (regular clone)
 │   ├── repo/            # working tree, branch = main
-│   └── .base.yml        # tags, wip, etc.
-├── foo.feat-x/          # worktree project
-│   ├── repo/            # git worktree, branch = feat-x
-│   └── .base.yml        # kind: worktree, worktree_of: foo, branch: feat-x
-└── foo.bugfix-y/
+│   └── .base.yml
+├── foo-featx/           # worktree project
+│   ├── repo/            # git worktree, branch = featx
+│   └── .base.yml        # has a worktree: block (see §3.2)
+└── foo-bugfixy/
     ├── repo/
     └── .base.yml
 ```
 
-- The worktree's `repo/.git` is a *file* (gitdir pointer), not a dir.
-- Naming: `<parent-name>.<sanitised-branch>`. Slashes in branch →
-  `__` (e.g. `feature/auth` → `foo.feature__auth`). Keep raw branch
-  name in `.base.yml`.
-- Reusing the existing suffix mechanism: worktrees get
-  `suffix: wt` alongside today's `tmp` and `fork`
-  (`core/constants.py:374`).
-COMMENT: Suffixes is untouched because of comments above
+CLAUDE-COMMENT: Branch names can contain `/` (e.g. `feature/auth`),
+which can't go into a directory name. Pick one:
+(a) replace `/` with `--` → `foo-feature--auth`
+(b) replace `/` with `__` → `foo-feature__auth`
+(c) keep only the leaf segment → `foo-auth` (loses namespace)
+(d) reject branches with `/` in `b new`, force the user to rename
+Default proposal: (a). The raw branch name still lives in
+`.base.yml`, so this only affects the directory name.
+COMMENT: Lets use a, name them --
 
-### 3.2 `.base.yml` schema additions
+CLAUDE-COMMENT: If `<parent>-<branch>` already exists as a directory
+under `<base>/` (worktree or regular project), what should `b new`
+do? Error out, auto-suffix (`-2`, `-3`), or prompt? Default
+proposal: error out, force the user to pick a different branch name
+or remove the conflict.
+COMMENT: Correct, hard error
 
-Add to `BASE_META_ALLOWED_KEYS` in `core/constants.py:469`:
+### 3.2 `.base.yml` schema
+
+Add a single new top-level key, `worktree`, as a dict. Presence of
+this key means the project is a worktree. No separate `kind` field.
 
 ```yaml
-# new keys for worktree projects:
-
-# Lets assume it's a worktree if worktree_of is set, this is not needed
-kind: worktree            # one of: project (default, implicit), worktree
-
-# Lets add worktree as a dict instead with worktree.of, worktree.branch and so on.
-worktree_of: foo          # parent project name (sibling under <base>/)
-branch: feature/auth      # raw git branch, unescaped
-upstream: origin/main     # merge target (optional, default config)
-created_from: abc1234     # sha when worktree was created
-ttl_days: 7               # optional auto-archive when merged+stale
+# only present on worktree projects:
+worktree:
+  of: foo                 # parent project name (directory under <base>/)
+  branch: feature/auth    # raw git branch, unescaped
+  upstream: origin/main   # optional, merge target hint
+  created_from: abc1234   # sha of parent HEAD when worktree was made
 ```
 
-For non-worktree projects no change.
+Regular projects: no change, no `worktree:` key.
 
-### 3.3 Discovery & detection
+Add `worktree` to `BASE_META_ALLOWED_KEYS` and to the schema
+validator (`metadata/utils.py`). Validator must check that `of` is a
+non-empty string, `branch` is a non-empty string, the others are
+optional.
 
-Two real bugs to fix before anything else:
+CLAUDE-COMMENT: Do we want to record `upstream` and `created_from` at
+creation time even though there's no merge command yet, or skip them
+until a real consumer exists? Default proposal: skip both for now —
+only `of` and `branch`. Add the rest when a feature actually reads
+them.
+COMMENT: Drop them. Not sure if we need upstream or created_from
 
-1. **`workspace/projects.py` `git_info()` checks `(.git).is_dir()`.**
-   That returns False for a worktree. Either swap to `.exists()` and
-   let `git -C` figure it out, or explicitly handle the gitdir-file
-   case.
-COMMENT: This must be updated. I want it to look different in the columns as well if it is a worktree or not.
+CLAUDE-COMMENT: When creating a worktree, what (if anything) should
+be copied from the parent's `.base.yml` to the new worktree's
+`.base.yml`? Options: nothing (clean slate), description only, tags
+only, description+tags. Default proposal: nothing. WIP is already
+explicit per your earlier note.
+COMMENT: Nothing should be copied
 
-2. **Built-in `GIT` property uses `dir-exists: [.git]`.** Same problem;
-   needs `path-exists` or a dedicated detector.
-COMMENT: No need to change anything here except updating kitchen-sink-config with examples how to add it so it can detect both types or both together.
+### 3.3 Git detection (`.git` file vs dir)
 
-Then add a new built-in property `WT` (label "worktree", detector =
-`.git` is a regular file containing `gitdir:`). Once that's in,
-filters like `#wt` and `kind:worktree` Just Work.
+Two concrete code changes:
 
-## 4. TUI changes
+1. `workspace/projects.py:git_info()` currently does
+   `(.git).is_dir()` and returns `("-", "-", 0)` otherwise. That
+   skips every worktree. Change to `.exists()` and let `git -C`
+   handle both cases.
+2. The GIT column rendering must visibly distinguish worktree from
+   regular repo. The information lives in `repo/.git`: directory =
+   regular, file with `gitdir: …` = worktree.
 
-Smallest useful set:
+The built-in `GIT` property (`dir-exists: [.git]`) stays as-is. We
+add an example to `docs/kitchen-sink-config.md` showing how a user
+can configure a property that matches either form, or only one.
 
-- **New column** (optional, off by default): `wt_of` — shows parent
-  project name for worktree rows.
-COMMENT: No need to add another column. Info about worktree should be visible in a compact form in the git column
+CLAUDE-COMMENT: For the GIT column, pick a compact format that fits
+in ~20 chars next to the branch name. Three concrete options:
+(a) `featx*  ↪foo`     — branch first, arrow + parent name suffix
+(b) `[wt] featx*`      — `[wt]` prefix tag, parent not shown
+(c) `foo:featx*`       — parent:branch, colon-separated
+Regular repos still render as `main*` / `featx*` only. Default
+proposal: (a), because the parent name is the high-value extra info.
+COMMENT: Let's try a first.
 
-- **Filter sugar** in the query bar:
-  - `kind:wt` / `kind:worktree`
-  - `wt-of:foo` — all worktrees of `foo`
-  - `branch:feat-*` — glob match on branch name
-COMMENT: ":git-worktree-of=...", must support syntax highlight. We will add multiple other filters later with : prefix, so this must be dynamic.
+## 4. Filter syntax
 
-- **Grouping mode** (table view setting):
-  - `expand` — flat list, all worktrees as siblings (default)
-  - `group` — parent project + worktrees folded under it; expand with
-    a key. Implemented as a view-level sort/indent, not a tree widget,
-    to avoid rewriting the table.
-COMMENT: No need to group them
+Introduce a dynamic structured-filter syntax in the query bar,
+separate from `#tag` and free-text. Form: `:<key>=<value>`.
 
-- **Hotbar actions** (target scope, dispatch via existing actions
-  mechanism):
-  - `wt_new` — prompt branch name, create worktree from selected row's
-    repo
-  - `wt_switch` — alias for "open this worktree" (= existing open
-    action, mention here for discoverability)
-  - `wt_merge` — confirm prompt → merge into upstream
-  - `wt_rm` — confirm prompt → remove worktree + delete branch
-COMMENT: They are not specific hotbar actions, but generic actions. I want one to create a new worktree from the one selected. It must be for only the selected (not multiple select), I want it to fill in the new dialog (ctrl-n), with the name of the project, and source set to "worktree". This is a new functionality in the "new" handler. It should also be possible from the CLI
-COmMENT: remove needs to be handled by delete action
+First filter, used by worktrees:
 
-- **Status badges** in info pane:
-  - `behind: 3, ahead: 1` vs upstream
-  - `merged: yes/no` (is this branch already merged into upstream?)
-  - `worktree health: ok / detached / branch-gone / conflicted`
+- `:git-worktree-of=foo` — matches all worktrees whose parent is `foo`
 
-## 5. Commands
+This must be a generic mechanism, not a worktree-only special case.
+Future filters will land under the same `:<key>=<value>` shape
+(`:git-branch=main`, `:size>10M`, etc. — exact set is out of scope
+here). Implementation expectations:
 
-All under `b wt <subcommand>`. Live in `commands/worktree.py`.
+COMMENT: Lets also move over existing dynamic elements like "last=..." as well. No need to keep backward compatibility. But make sure docs and such is also updated
+
+- Tokeniser recognises a leading `:` on a query token and parses
+  `key=value` (or other operators we add later).
+- Query bar gets syntax highlighting for `:key=value` tokens (key
+  one colour, operator another, value a third), same way `#tag` and
+  free-text are already coloured differently.
+- Unknown keys still parse but match nothing, with a non-fatal hint
+  in the input area (don't block the filter — homebase rule: no
+  migration blocks, [[feedback_no_migration_blocks]]).
+- Filter engine in `filter/engine.py` gains a registry of `key →
+  matcher(row) -> bool` so adding more later is one entry.
+
+CLAUDE-COMMENT: Operator. You wrote `:git-worktree-of=foo`. Confirm
+`=` is the only operator for now (equality), and we reserve `!=`,
+`>`, `<`, `~` (regex/glob) for later. Default proposal: `=` only in
+v1, parser accepts the others but the engine warns "operator not
+implemented" until we wire each one up.
+COMMENT: Correct, but querylang needs to support them even tho we don't need to implement it yet
+
+CLAUDE-COMMENT: Should `:git-worktree-of=foo` also match `foo`
+itself (i.e. the parent row), so the filter shows "this repo and
+its worktrees"? Or strictly worktrees? Default proposal: strictly
+worktrees. Use `:git-worktree-of=foo OR name=foo` if you want both.
+COMMENT: I want both, but in that case the name must change to something that covers both. Come up with some examples.
+
+## 5. Creating worktrees — via `b new`
+
+No dedicated `b wt new` subcommand. Worktree creation is a new
+source kind in the existing `b new` plumbing.
+
+### 5.1 CLI
 
 ```sh
-b wt new <branch> [--from <project>] [--track <ref>] [--open]
-                    [--ttl <days>] [--tag <t>...]
-    # creates <base>/<from>.<branch>/repo, runs git worktree add,
-    # writes .base.yml with kind=worktree, optional copy of NOTES.md
-    # template from parent.
-# COMMENT: should be handled by "b new" and the same syntax as that is using. I must also be able to do this inside an existing project with "b new . ..." as example
+# from anywhere — pick parent explicitly:
+b new <branch> --as worktree --from <parent-project>
 
-b wt ls [<project>]
-    # list worktrees (for one repo, or all). same output style as
-    # `b ls`. accepts query: `b wt ls #wip`.
-# COMMENT: Should be seen in "b ls", and it's filter functionality
+# from inside an existing project — `.` means "the project I'm in":
+# COMMENT: yes, but I want the syntax shorter. I want "b new <name>" to auto on worktree with that name. Auto must default to worktree if inside project folder, and git exists. This must also work if I want a new worktree out of an existing one.
+b new <branch> --as worktree --from .
 
-b wt rm <project> [--delete-branch] [--force]
-    # remove the worktree dir + git worktree remove + optionally
-    # delete the branch. archives notes if any.
-# COMMENT: Should be handled by normal delete
-
-b wt merge <project> [--into <ref>] [--strategy squash|merge|rebase]
-                       [--push] [--rm-after] [--via wt]
-    # merge the worktree's branch into <ref> (default upstream from
-    # .base.yml or config). --via wt delegates to worktrunk if
-    # installed.
-# COMMENT: Lets wait and see what's needed
-
-b wt switch <project>
-    # alias for `b cd <project>` for muscle-memory parity with wt.
-# COMMENT: Lets wait and see what's needed
-
-b wt sync [<project>]
-    # fetch + show ahead/behind for all worktrees of a repo, refresh
-    # cache row.
-# COMMENT: Lets wait and see what's needed
-
-b wt prune
-    # find worktree dirs whose branch is merged/gone and offer to
-    # archive or remove (interactive).
-# COMMENT: Lets wait and see what's needed
+# shorter form when current directory is a project (auto-detects --from):
+b new . <branch> --as worktree
 ```
 
-Behaviour rules:
+Semantics:
 
-- **No git side-effects without confirmation by default.** `--yes`
-  flag to skip prompts. Aligns with [[feedback_no_git_actions]].
-- `b wt rm` never force-deletes an unmerged branch unless `--force`.
-- `b wt merge --push` is opt-in, never default.
+- `--from <project>` resolves to a sibling under `<base>/`.
+- `--from .` walks up from `cwd` to find the enclosing project
+  (looks for `.base.yml`, same logic as `b cd .`).
+- Branch handling:
+  - If the branch already exists locally, `git worktree add` checks
+    it out into the new path.
+  - If the branch doesn't exist, it's created from a base ref —
+    see open question below.
+- Output path: `<base>/<parent-name><sep><sanitised-branch>/repo/`
+  where `<sep>` is `-`.
+- A `.base.yml` is written next to `repo/` with the `worktree:`
+  block from §3.2.
+- Single-selection only — never operates on a multi-select.
 
-## 6. Lifecycle walkthroughs
+### 5.2 TUI
 
-### 6.1 Short-lived experiment
+`ctrl-n` opens the existing new-project dialog. When a worktree
+candidate is selected (single-select), the dialog is pre-filled:
 
-```sh
-b wt new spike-xyz --from foo --tag scratch --ttl 3
-# work in <base>/foo.spike-xyz/repo/
-b wt merge foo.spike-xyz --strategy squash --rm-after
-```
+COMMENT: no, ctrl-n shoulnt autofill. There should be a new action that is named something like "New worktree" available in the normal action list. That new action should open the same dialog box as ctrl-n, but prefilled.
 
-COMMENT: No, I don't want magic deletion
+- "source" set to `worktree`
+- "parent" set to the selected row's project name
+- "name" field empty, awaiting the branch name (treated as the
+  worktree branch, not the directory name — directory is computed)
 
-### 6.2 Long-lived feature branch
+If the dialog is opened with no selection or a multi-selection, the
+`worktree` source is not pre-selected; user can still pick it
+manually from the source dropdown.
 
-```sh
-b wt new feature/auth --from foo --tag work --tag auth
-# tagged independently, shows in TUI as its own row, can be WIP
-# toggled separately, has its own NOTES.md.
-# weeks later:
-b wt sync foo.feature__auth
-b wt merge foo.feature__auth --strategy merge --push
-```
+CLAUDE-COMMENT: Base ref for new branches. When `b new <branch>
+--as worktree` is called and `<branch>` doesn't exist yet, what ref
+does the new branch start from? Options:
+(a) parent repo's current HEAD
+(b) parent repo's default branch (main/master, detected)
+(c) explicit `--base <ref>` required, no default
+Default proposal: (a) — parent's HEAD — because that matches what
+`git worktree add -b new` does by default and is the least
+surprising.
+COMMENT: yes, if that is the default thats what we are doing. If other functionality is acting against the default behavior, we should also reconsidder. Please add comments if that is the case.
 
-COMMENT: Lets wait and see whats needed
+CLAUDE-COMMENT: From the TUI, after the worktree is created, do we
+land in the new worktree directory (existing `b new --open`
+behaviour) or stay in the current project? Default proposal: same
+as `b new` default — follow whatever the global `open` / `cd`
+default is for `b new`, no special case.
+COMMENT: follow global
 
-### 6.3 Permanent parallel branch (release/stable)
+## 6. Removing worktrees — via existing delete
 
-```sh
-b wt new release/2.x --from foo --track origin/release/2.x
-b tag add stable foo.release__2.x
-# never merged back, stays around indefinitely.
-b wt prune  # leaves it alone — branch isn't gone or merged.
-```
+No dedicated `b wt rm`. The existing delete action must learn to do
+the right thing for a worktree-kind row:
 
-COMMENT: Lets wait and see
+- Run `git worktree remove <path>` (or `git worktree remove --force`
+  if the user confirms a dirty-tree force) before / instead of just
+  `rm -rf`ing the directory.
+- Clean up the parent repo's `.git/worktrees/<name>/` admin entry.
+- Leave the branch alone by default. Branch deletion is a separate
+  manual step the user can do in git directly, until we have
+  evidence it's needed inside `b`.
 
-## 7. Risks & open questions
+CLAUDE-COMMENT: When deleting the *parent* project of one or more
+worktrees, what's the policy?
+(a) Refuse — user must delete worktrees first.
+(b) Cascade — delete all worktrees automatically (with confirm).
+(c) Orphan — delete parent, leave worktree directories as "broken"
+   rows that surface in the TUI for manual cleanup.
+Default proposal: (a) refuse with a clear message listing the
+worktrees that block the delete.
+COMMENT: Show warning with info and list. If still accepted it should delete parent and leave them broken.
 
-**Hard problems:**
+## 7. Reference integrity on moves and archive
 
-- `.git` as file vs dir runs through more code than just
-  `git_info()`. Need a sweep:
-  `grep -rn "\.git" src/homebase/` and audit each. Some property
-  detectors and discovery prune logic may treat `.git` specially.
-- Archive flow: `b archive mv foo.feat-x` should run
-  `git worktree remove` first, otherwise the parent repo keeps a
-  dangling worktree entry. Needs a hook into `archive/ops.py`.
-  - COMMENT: I want references to be updated when things are moved around using b. I should be able to go into an archived worktree and still use git. Even if worktree moves, or if the main repo moves.
+This is the hard part and the most important one. A git worktree is
+held together by two pointers that both contain absolute paths:
 
-- Tag symlinks (`_tags/<tag>/<proj>`): if a worktree and its parent
-  share a tag, both appear under that tag dir. Fine, but symlink
-  names must not collide — already disambiguated by
-  `_safe_link_name` so probably ok; verify.
-- Cache invalidation: `git_info()` caches by `(refs_sig, head_sig)`.
-  Worktrees write to shared `.git/`, so a commit in one worktree
-  changes the signature for all of them. Either cache per-worktree
-  HEAD only, or accept extra cache misses.
-- `b new --git <url>` should optionally create the main project +
-  pre-allocate a default branch worktree layout. Probably out of
-  scope for v1.
+- `<worktree>/repo/.git` is a file with `gitdir:
+  <absolute-path-to-parent>/.git/worktrees/<id>`.
+- `<parent>/.git/worktrees/<id>/gitdir` is a file with
+  `<absolute-path-to-worktree>/repo/.git`.
 
-**Open questions (user, please answer inline):**
+Any time `b` moves a directory, those pointers must be rewritten or
+the worktree silently breaks (`fatal: not a git repository`).
 
-1. Naming: `foo.feat-x` (worktrunk-compat) vs `foo/wt/feat-x` (nested,
-   visually grouped, but harder to discover and `b cd` UX is worse).
-   Default proposal: flat `foo.feat-x`.
-   → answer: COMMENT: flat, see previous comments
+Concrete obligations:
 
-2. Parent linkage: store `worktree_of: foo` in `.base.yml` *and*
-   derive it from the directory prefix, or rely on prefix only?
-   Storing it is more robust (rename-safe); derivation is simpler.
-   Default proposal: store explicitly, derive as fallback.
-   → answer: already commented
+1. **Renaming a worktree project** (`b mv foo-featx foo-newname`):
+   rewrite `<parent>/.git/worktrees/<id>/gitdir` to the new path.
+2. **Archiving a worktree project** (`b archive mv foo-featx`):
+   same as rename, but new path is under `_archive/…`. The
+   archived worktree must still be a working git repo when the
+   user `cd`s into it.
+3. **Renaming the parent project** (`b mv foo bar`): walk every
+   worktree row with `worktree.of == foo`, rewrite each one's
+   `repo/.git` file to the new parent path, and update the
+   `worktree.of` in their `.base.yml`.
+4. **Archiving the parent project**: same as rename, but to an
+   archive path. Open question below.
+5. **Packed-archive worktrees**: the existing tar-pack flow must
+   either refuse to pack a worktree (because the gitdir pointer
+   would freeze a path that no longer resolves on restore) or pack
+   it and rewrite pointers on unpack. See open question.
 
-3. Should `b wt new` always set `wip: true` on the new row? Helps with
-   "show me what I'm actively branched on" filters.
-   → answer: no, I must set wip explicit
+COMMENT: Make sure this works on all ways archive can be triggered, both in tui and cli. Same with renaming and such. There must also be a "b fix" handler for fixing broken repositories. b fix must see inside the .base.yaml to find worktree's and verify them. If there is something wrong it must suggest a fix. b fix must also handle moved base folders (if the path's in git needs to be absolute). In case of moved base folder, it must calculate and find where the new worktree folders are located
 
-4. Worktrunk escape hatch: keep `--via wt` for `merge` only, or also
-   for `new` and `rm`? More surface = more support burden.
-   Default proposal: `merge` only, since that's where worktrunk adds
-   real value (squash + cleanup + LLM commit msg).
-   → answer: no merge functionality yet
+CLAUDE-COMMENT: Archiving the parent — what's the desired
+behaviour?
+(a) Move parent + all its worktrees together, rewriting pointers,
+   so the whole family lives under `_archive/<year>/…`.
+(b) Refuse to archive the parent while any of its worktrees are
+   still active (non-archived).
+(c) Allow archiving parent without touching worktrees, and rewrite
+   pointers so worktrees keep working against the archived parent.
+Default proposal: (a). Worktrees of an archived repo conceptually
+belong with that repo, and (c) means worktrees keep depending on an
+archived parent — fragile.
+COMMENT: refuse to move if parent while there are still worktrees. However, there should be an action that can run on worktrees that moves the worktree into a fully cloned version of the same repo instread. Essentially "de worktreeing" it making it standalone. This new action should be suggested if trying to remove the parent, ie, suggest running this action to make the worktrees standalone before moving. There should also be an option to move everything together without making them standalone, ie, option a.
 
-5. TTL: when `ttl_days` elapses *and* the branch is merged, do we
-   auto-archive, auto-remove, or just flag? Auto-anything is scary;
-   I'd start with "flag with a property `wt_stale` and let the user
-   run `b wt prune`".
-   → answer: no auto
+CLAUDE-COMMENT: Packed archives (`.tar.zst` or similar) of
+worktrees. Options:
+(a) Refuse — packing a worktree is not supported; user must
+   un-worktree it (`git worktree remove`) before packing.
+(b) Pack as a normal directory; on restore, the gitdir pointer is
+   probably stale and we rewrite or warn.
+(c) Pack the worktree *and* its admin entry in the parent, so
+   restore reconstructs both. Most work, most robust.
+Default proposal: (a) refuse. The worktree concept depends on a
+live parent; freezing one side in a tarball asks for trouble.
+COMMENT: Let it be stale, but make sure enough info is kept in .base.yaml so we would be able to repair later. Give warning when packing. And detect this when unpacking to see if we can repair it.
 
-6. Should `b wt ls` be its own command or just sugar for
-   `b ls kind:wt`? Less surface = better, unless we want richer
-   per-repo output (ahead/behind columns).
-   → answer: already commented
+## 8. Risks and side-effects
 
-## 8. Implementation order (if we proceed)
+- **Cache invalidation.** `git_info()` caches by `(refs_sig,
+  head_sig)`. All worktrees of one repo share `.git/refs`, so any
+  commit anywhere invalidates the row for every sibling worktree.
+  Acceptable for v1; revisit if it becomes a hot path.
+- **Tag symlinks.** A worktree and its parent can share tags. The
+  symlink namer (`_safe_link_name`) already disambiguates by full
+  project name, so `_tags/work/foo` and `_tags/work/foo-featx`
+  coexist. Verify with a test.
+- **Discovery prune.** Make sure the walker doesn't treat the
+  worktree's `.git` *file* as a marker that needs special handling
+  (it currently keys on `.base.yml`, so this should be fine, but
+  audit).
+- **Stale worktree rows.** A worktree directory can exist on disk
+  while `git worktree list` no longer knows about it (e.g. the
+  user ran `git worktree prune` manually). The row should still
+  render — it's a "broken worktree" state — and surface a health
+  warning in the info pane.
 
-1. Fix `.git` detection bugs across the codebase (small PR, valuable
-   on its own — worktree users today already hit this).
-2. Add `kind`, `worktree_of`, `branch`, `upstream`, `ttl_days` to
-   `BASE_META_ALLOWED_KEYS`. Tests.
-3. Add `wt` suffix + `WT` property. Tests.
-4. `b wt new` + `b wt ls`. Tests with `tmp_path` and a real git repo.
-5. `b wt rm` + archive hook integration.
-6. `b wt merge` (native, no `--via wt` yet) + `b wt sync` +
-   `b wt prune`.
-7. Filter sugar (`kind:`, `wt-of:`, `branch:`) in query bar.
-8. TUI grouping mode + status badges.
-9. Optional `--via wt` delegation for `merge`.
+## 9. Implementation order
 
-Each step should leave the tool fully usable; no half-landed kinds.
+Each step ships independently and leaves the tool usable.
+
+1. **Fix `.git` detection.** `git_info()` and any siblings that
+   special-case `.git` as a directory. Tests with a real worktree
+   under `tmp_path`.
+2. **Schema.** Add `worktree` to `BASE_META_ALLOWED_KEYS` and the
+   schema validator. Tests for the validator.
+3. **GIT column rendering.** Pick the format from the §3.3 open
+   question, render parent-name suffix for worktree rows.
+4. **Dynamic `:key=value` filter framework.** Generic parser,
+   registry, syntax highlight. First registered key:
+   `git-worktree-of`. Tests for parser + matcher.
+5. **`b new --as worktree`** (CLI), including `--from .` walk-up.
+   Tests with real git.
+6. **ctrl-n pre-fill** in TUI when a single worktree-eligible row
+   is selected.
+7. **Delete-action wiring** for worktree rows (`git worktree
+   remove` + admin cleanup).
+8. **Rename / archive pointer rewriting.** §7 items 1–3 first.
+   Then §7 item 4 once the open question is settled.
+
+Items 9+ (merge, sync, prune, packed-archive policy) are parked
+until we see real friction.
