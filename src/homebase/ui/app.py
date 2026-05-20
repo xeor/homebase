@@ -23,7 +23,10 @@ from textual.widgets import (
     DataTable,
     Footer,
     Input,
+    Label,
+    Select,
     Static,
+    Switch,
     Tab,
     Tabs,
 )
@@ -64,6 +67,7 @@ from ..core import utils as core_utils
 from ..core.constants import (
     ARCHIVE_DIR_NAME,
     ARCHIVE_TZ,
+    ARCHIVE_TZ_PRESETS,
     BASE_MARKER_FILE,
     BUILTIN_ACTIONS,
     BUSY_LABEL_IDLE,
@@ -86,6 +90,8 @@ from ..core.constants import (
     MODE_ARCHIVE,
     OPEN_MODE_PROFILES,
     PACKED_ARCHIVE_SUFFIX,
+    PREVIEW_ENTRIES_LIMIT_MAX,
+    PREVIEW_ENTRIES_LIMIT_MIN,
     PROFILE_GIT_REFRESH_ACTIVE,
     PROFILE_GIT_REFRESH_ARCHIVE,
     PROFILE_METADATA_HEALTH_ACTIVE,
@@ -268,6 +274,13 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
     #side_settings_tabs { height: 3; margin: 0 0 1 0; }
     #side_settings_table { height: 1fr; display: none; }
     #side_settings_notes { height: 15; display: none; color: $text-muted; }
+    #side_settings_config_panel { height: 1fr; display: none; padding: 0 1; }
+    #side_settings_config_panel .cfg-row { height: 3; align: left middle; }
+    #side_settings_config_panel .cfg-label { width: 1fr; padding: 1 1 0 0; }
+    #side_settings_config_panel Switch { width: auto; }
+    #side_settings_config_panel Select { width: 28; }
+    #side_settings_config_panel Input { width: 12; }
+    #side_settings_config_help { height: auto; color: $text-muted; padding: 1 1 0 1; }
     #side_scroll { height: 1fr; }
     #side_body { padding: 0 1; }
     #side_readme_panel { height: 1fr; display: none; }
@@ -587,7 +600,7 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
         self.table_settings_index = 0
         self.table_behavior = load_table_behavior_config(self.base_dir)
         self.table_date_color_ranges = load_table_date_column_styles(self.base_dir)
-        self.table_config_index = 0
+        self._settings_config_loading = True
         self.open_mode = dict(self.ctx.open_mode_config)
         self.notes_config = dict(self.ctx.notes_config)
         self.open_settings_index = 0
@@ -825,6 +838,42 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
                         )
                 yield Static("", id="side_settings_notes")
                 yield DataTable(id="side_settings_table", cursor_type="row")
+                with Vertical(id="side_settings_config_panel"):
+                    with Horizontal(classes="cfg-row"):
+                        yield Label("Pin WIP rows at top", classes="cfg-label")
+                        yield Switch(id="cfg_pin_wip", value=False)
+                    with Horizontal(classes="cfg-row"):
+                        yield Label("Info panel width", classes="cfg-label")
+                        yield Select(
+                            options=[(f"{p}%", p) for p in TABLE_SIDE_WIDTH_PRESETS],
+                            id="cfg_side_width",
+                            allow_blank=False,
+                            compact=True,
+                            type_to_search=True,
+                        )
+                    with Horizontal(classes="cfg-row"):
+                        yield Label("Preview files (overview)", classes="cfg-label")
+                        yield Input(
+                            id="cfg_preview_limit",
+                            value="8",
+                            type="integer",
+                            max_length=4,
+                            compact=True,
+                        )
+                    with Horizontal(classes="cfg-row"):
+                        yield Label("Archive timezone", classes="cfg-label")
+                        yield Select(
+                            options=[(tz, tz) for tz in ARCHIVE_TZ_PRESETS],
+                            id="cfg_archive_tz",
+                            allow_blank=False,
+                            compact=True,
+                            type_to_search=True,
+                        )
+                    yield Static(
+                        "[dim]tab: next field   space/enter: toggle/open   "
+                        "type to filter dropdowns   enter on number: commit[/]",
+                        id="side_settings_config_help",
+                    )
         yield Static("", id="wip_bar")
         yield Footer()
 
@@ -896,6 +945,10 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
         self.call_after_refresh(self._start_probe_open_panes)
         self.set_timer(0.12, self._retry_pending_restore)
         self.set_timer(0.18, self._reflow_table_columns_after_layout)
+        self.call_after_refresh(self._settings_config_finish_boot)
+
+    def _settings_config_finish_boot(self) -> None:
+        self._settings_config_loading = False
 
     def _reflow_table_columns_after_layout(self) -> None:
         self._configure_table_columns()
@@ -1418,8 +1471,17 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
     def _stats_and_context_lines(self) -> list[str]:
         return textual_ui_side_content.stats_and_context_lines(self, base_dir=self.base_dir)
 
-    def _preview_entries(self, path: Path, limit: int = 8) -> list[str]:
+    def _preview_entries(self, path: Path, limit: int | None = None) -> list[str]:
+        if limit is None:
+            limit = self._preview_entries_limit()
         return textual_ui_side_content.preview_entries(path, limit=limit)
+
+    def _preview_entries_limit(self) -> int:
+        try:
+            raw = int(self.table_behavior.get("preview_entries_limit", 8))
+        except (TypeError, ValueError):
+            raw = 8
+        return max(PREVIEW_ENTRIES_LIMIT_MIN, min(PREVIEW_ENTRIES_LIMIT_MAX, raw))
 
     @staticmethod
     def _esc(text: object) -> str:
@@ -2405,9 +2467,6 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
     ) -> None:
         textual_ui_settings_panel.update_open_settings_details(self, rows)
 
-    def _table_config_rows(self) -> list[tuple[str, str, str, str]]:
-        return textual_ui_settings_panel.table_config_rows(self)
-
     def _table_pin_wip_top_enabled(self) -> bool:
         return bool(self.table_behavior.get("pin_wip_top", False))
 
@@ -2421,9 +2480,6 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
 
     def _table_config_save(self) -> None:
         textual_ui_settings_panel.table_config_save(self, base_dir=self.base_dir)
-
-    def _table_config_toggle_selected(self) -> None:
-        textual_ui_settings_panel.table_config_toggle_selected(self, base_dir=self.base_dir)
 
     def _table_settings_save(self) -> None:
         textual_ui_settings_panel.table_settings_save(self, base_dir=self.base_dir)

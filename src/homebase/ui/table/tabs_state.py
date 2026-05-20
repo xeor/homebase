@@ -54,15 +54,20 @@ def sync_side_tab_visibility(app: Any, *, widget_projects: str) -> None:
     side_global_panel = app.query_one("#side_global_panel")
     settings_table = app.query_one("#side_settings_table")
     settings_notes = app.query_one("#side_settings_notes")
+    settings_config_panel = app.query_one("#side_settings_config_panel")
     app._refresh_settings_tab_labels(settings_tabs)
     selected_tabs.display = app.side_main_tab == "selected"
     info_tabs.display = app.side_main_tab == "info"
     settings_tabs.display = app.side_main_tab == "settings"
 
-    settings_active = (
+    settings_table_active = (
         app.side_main_tab == "settings"
-        and app.side_settings_tab in {"table", "table_config", "open"}
+        and app.side_settings_tab in {"table", "open"}
     )
+    settings_config_active = (
+        app.side_main_tab == "settings" and app.side_settings_tab == "table_config"
+    )
+    settings_active = settings_table_active or settings_config_active
     selected_readme_active = (
         app.side_main_tab == "selected" and app.side_selected_tab == "readme"
     )
@@ -93,7 +98,8 @@ def sync_side_tab_visibility(app: Any, *, widget_projects: str) -> None:
     side_readme_panel.display = not settings_active and selected_readme_active
     side_notes_panel.display = not settings_active and selected_notes_active
     side_global_panel.display = settings_global_active
-    settings_table.display = settings_active
+    settings_table.display = settings_table_active
+    settings_config_panel.display = settings_config_active
     settings_notes.display = app.side_main_tab == "settings" and app.side_settings_tab in {
         "table",
         "open",
@@ -110,16 +116,23 @@ def sync_side_tab_visibility(app: Any, *, widget_projects: str) -> None:
     except WIDGET_API_ERRORS:
         pass
     try:
-        settings_table.can_focus = settings_active
+        settings_table.can_focus = settings_table_active
     except WIDGET_API_ERRORS:
         pass
     try:
         side.can_focus = False
     except WIDGET_API_ERRORS:
         pass
-    if settings_active and not settings_table.has_focus and not app._modal_active():
+    if settings_table_active and not settings_table.has_focus and not app._modal_active():
         try:
             settings_table.focus()
+        except WIDGET_API_ERRORS:
+            pass
+    if settings_config_active and not app._modal_active():
+        try:
+            first_cfg = app.query_one("#cfg_pin_wip")
+            if not first_cfg.has_focus:
+                first_cfg.focus()
         except WIDGET_API_ERRORS:
             pass
     if app._main_table_was_locked and not projects_locked and not app._modal_active():
@@ -153,9 +166,11 @@ def refresh_settings_tab_labels(app: Any, settings_tabs: Any) -> None:
             if tab_id == "table":
                 tab.label = f"Table {view_suffix}"
             elif tab_id == "table_config":
-                tab.label = f"Table config {view_suffix}"
+                tab.label = "Config"
             elif tab_id == "open":
                 tab.label = "Open"
+            elif tab_id == "global":
+                tab.label = "Config-file"
         except WIDGET_API_ERRORS:
             continue
 

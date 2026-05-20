@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from textual.events import Key
-from textual.widgets import DataTable
+from textual.widgets import DataTable, Input, Select, Switch
 
 from .query import key_input as textual_ui_key_input
 from .query import selection_events as textual_ui_selection_events
+from .side import settings as textual_ui_settings_panel
 from .side import tabs as textual_ui_side_tabs
 
 
@@ -19,6 +20,15 @@ class AppEventsMixin:
 
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
         textual_ui_selection_events.on_data_table_row_selected(self, event)
+
+    def on_switch_changed(self, event: Switch.Changed) -> None:
+        textual_ui_settings_panel.on_config_widget_changed(self, event)
+
+    def on_select_changed(self, event: Select.Changed) -> None:
+        textual_ui_settings_panel.on_config_widget_changed(self, event)
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        textual_ui_settings_panel.on_config_widget_changed(self, event)
 
     def on_key(self, event: Key) -> None:
         textual_ui_key_input.on_key(

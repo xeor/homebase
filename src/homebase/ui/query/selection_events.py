@@ -45,9 +45,6 @@ def on_data_table_row_highlighted(app: Any, event: Any) -> None:
             max_idx = max(0, len(app._open_mode_rows()) - 1)
             app.open_settings_index = max(0, min(idx, max_idx))
             app._update_open_settings_details()
-        elif app.side_settings_tab == "table_config":
-            max_idx = max(0, len(app._table_config_rows()) - 1)
-            app.table_config_index = max(0, min(idx, max_idx))
         else:
             current_columns = app._table_columns_for_view(app.view_mode)
             app.table_settings_index = max(0, min(idx, len(current_columns) - 1))
@@ -110,9 +107,6 @@ def on_data_table_row_selected(app: Any, event: Any) -> None:
             app.open_settings_index = max(0, min(idx, max_idx))
             app._open_mode_select_selected()
             app._update_open_settings_details()
-        elif app.side_settings_tab == "table_config":
-            max_idx = max(0, len(app._table_config_rows()) - 1)
-            app.table_config_index = max(0, min(idx, max_idx))
         else:
             current_columns = app._table_columns_for_view(app.view_mode)
             app.table_settings_index = max(0, min(idx, len(current_columns) - 1))

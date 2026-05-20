@@ -11,6 +11,8 @@ from ..core.constants import (
     NOTES_CONFIG,
     OPEN_MODE_CONFIG,
     OPEN_MODE_PROFILES,
+    PREVIEW_ENTRIES_LIMIT_MAX,
+    PREVIEW_ENTRIES_LIMIT_MIN,
     RECONCILE_CONFIG,
     SAVED_FILTER_QUERIES,
     SIDE_CHILD_TABS,
@@ -488,6 +490,14 @@ def _normalize_side_width_pct(value: object) -> int:
     return min(presets, key=lambda p: abs(p - n))
 
 
+def _normalize_preview_entries_limit(value: object) -> int:
+    try:
+        n = int(value)
+    except (TypeError, ValueError):
+        n = int(TABLE_BEHAVIOR_CONFIG["preview_entries_limit"])
+    return max(PREVIEW_ENTRIES_LIMIT_MIN, min(PREVIEW_ENTRIES_LIMIT_MAX, n))
+
+
 def load_table_behavior_config(base_dir: Path) -> dict[str, object]:
     data = load_global_config_dict(base_dir)
     raw = data.get("table", {}) if isinstance(data, dict) else {}
@@ -500,6 +510,10 @@ def load_table_behavior_config(base_dir: Path) -> dict[str, object]:
         out["pin_wip_top"] = bool(behavior_raw.get("pin_wip_top"))
     if "side_width_pct" in behavior_raw:
         out["side_width_pct"] = _normalize_side_width_pct(behavior_raw.get("side_width_pct"))
+    if "preview_entries_limit" in behavior_raw:
+        out["preview_entries_limit"] = _normalize_preview_entries_limit(
+            behavior_raw.get("preview_entries_limit")
+        )
     return out
 
 
@@ -512,9 +526,27 @@ def save_table_behavior_config(base_dir: Path, conf: dict[str, object]) -> None:
     behavior = {
         "pin_wip_top": bool(conf.get("pin_wip_top", False)),
         "side_width_pct": _normalize_side_width_pct(conf.get("side_width_pct")),
+        "preview_entries_limit": _normalize_preview_entries_limit(
+            conf.get("preview_entries_limit")
+        ),
     }
     table["behavior"] = behavior
     data["table"] = table
+    save_global_config_dict(base_dir, data)
+
+
+def save_archive_timezone_name(base_dir: Path, name: str) -> None:
+    cleaned = str(name).strip()
+    if not cleaned:
+        cleaned = DEFAULT_ARCHIVE_TZ_NAME
+    data = load_global_config_dict(base_dir)
+    if not isinstance(data, dict):
+        data = {}
+    archive = data.get("archive", {})
+    if not isinstance(archive, dict):
+        archive = {}
+    archive["timezone"] = cleaned
+    data["archive"] = archive
     save_global_config_dict(base_dir, data)
 
 

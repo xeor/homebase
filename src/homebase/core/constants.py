@@ -400,7 +400,19 @@ VALID_NOTE_COMMANDS: frozenset[str] = frozenset({"add_log"})
 TABLE_BEHAVIOR_CONFIG: dict[str, object] = {
     "pin_wip_top": False,
     "side_width_pct": 33,
+    "preview_entries_limit": 8,
 }
+PREVIEW_ENTRIES_LIMIT_MIN = 1
+PREVIEW_ENTRIES_LIMIT_MAX = 100
+ARCHIVE_TZ_PRESETS: tuple[str, ...] = (
+    "UTC",
+    "Europe/Oslo",
+    "Europe/London",
+    "Europe/Berlin",
+    "America/New_York",
+    "America/Los_Angeles",
+    "Asia/Tokyo",
+)
 TABLE_DATE_COLOR_COLUMNS: tuple[str, ...] = (
     "created",
     "last_modified",
@@ -603,9 +615,9 @@ SIDE_CHILD_TABS: dict[str, list[tuple[str, str]]] = {
     ],
     "settings": [
         ("table", "Table"),
-        ("table_config", "Table config"),
+        ("table_config", "Config"),
         ("open", "Open"),
-        ("global", "Global config"),
+        ("global", "Config-file"),
     ],
 }
 

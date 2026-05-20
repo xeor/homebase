@@ -50,6 +50,8 @@ def on_key(
         app._readme_nav_allow_until = time.time() + 0.35
 
     if event.key in {"tab", "shift+tab", "backtab"}:
+        if app.side_main_tab == "settings" and app.side_settings_tab == "table_config":
+            return
         table = app.query_one(widget_projects, DataTable)
         if not table.has_focus:
             table.focus()
