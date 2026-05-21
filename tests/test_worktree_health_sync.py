@@ -37,8 +37,24 @@ def _init_project_repo(base: Path, name: str) -> Path:
     return project
 
 
+class _Banner:
+    def __init__(self) -> None:
+        self.text = ""
+        self.classes: set[str] = set()
+
+    def update(self, text: str) -> None:
+        self.text = text
+
+    def add_class(self, name: str) -> None:
+        self.classes.add(name)
+
+    def remove_class(self, name: str) -> None:
+        self.classes.discard(name)
+
+
 def _make_app(tmp_path: Path) -> SimpleNamespace:
-    return SimpleNamespace(
+    banner = _Banner()
+    app = SimpleNamespace(
         base_dir=tmp_path,
         fast_exit_requested=False,
         worktree_health_issues=[],
@@ -48,7 +64,16 @@ def _make_app(tmp_path: Path) -> SimpleNamespace:
         worktree_health_dismissed=False,
         logs=[],
         _log=lambda msg, level="info": None,
+        _banner=banner,
     )
+
+    def _query_one(selector: str, _typ):
+        if selector == "#worktree_health_banner":
+            return banner
+        raise LookupError(selector)
+
+    app.query_one = _query_one
+    return app
 
 
 def _capture_logs(app: SimpleNamespace) -> None:
@@ -143,3 +168,65 @@ def test_audit_then_save_then_reload_matches(tmp_path: Path) -> None:
     cache_save_worktree_health(tmp_path, 7, [])
     cached = cache_load_worktree_health(tmp_path)
     assert cached == (7, [])
+
+
+def test_banner_shows_summary_when_issues_present(tmp_path: Path) -> None:
+    app = _make_app(tmp_path)
+    _capture_logs(app)
+    issues = [
+        {"kind": "stale_gitdir", "path": "/x", "detail": "", "fix_summary": "", "parent_path": ""},
+        {"kind": "orphan_admin", "path": "/y", "detail": "", "fix_summary": "", "parent_path": ""},
+    ]
+    on_worktree_health_refresh_done(app, issues, scan_at=1)
+
+    assert "visible" in app._banner.classes
+    assert "2 issue(s)" in app._banner.text
+    assert "stale_gitdir:1" in app._banner.text
+    assert "orphan_admin:1" in app._banner.text
+
+
+def test_banner_hides_when_dismissed_and_reshows_on_count_change(tmp_path: Path) -> None:
+    app = _make_app(tmp_path)
+    _capture_logs(app)
+    on_worktree_health_refresh_done(
+        app,
+        [{"kind": "stale_gitdir", "path": "/x", "detail": "", "fix_summary": "", "parent_path": ""}],
+        scan_at=1,
+    )
+    assert "visible" in app._banner.classes
+
+    dismiss_worktree_health(app)
+    assert "visible" not in app._banner.classes
+
+    # Same count → stays dismissed.
+    on_worktree_health_refresh_done(
+        app,
+        [{"kind": "stale_gitdir", "path": "/x", "detail": "", "fix_summary": "", "parent_path": ""}],
+        scan_at=2,
+    )
+    assert "visible" not in app._banner.classes
+
+    # Issue count changes → dismissal lifts and banner returns.
+    on_worktree_health_refresh_done(
+        app,
+        [
+            {"kind": "stale_gitdir", "path": "/x", "detail": "", "fix_summary": "", "parent_path": ""},
+            {"kind": "orphan_admin", "path": "/y", "detail": "", "fix_summary": "", "parent_path": ""},
+        ],
+        scan_at=3,
+    )
+    assert "visible" in app._banner.classes
+    assert app.worktree_health_dismissed is False
+
+
+def test_banner_clears_when_workspace_goes_clean(tmp_path: Path) -> None:
+    app = _make_app(tmp_path)
+    _capture_logs(app)
+    on_worktree_health_refresh_done(
+        app,
+        [{"kind": "stale_gitdir", "path": "/x", "detail": "", "fix_summary": "", "parent_path": ""}],
+        scan_at=1,
+    )
+    on_worktree_health_refresh_done(app, [], scan_at=2)
+    assert app._banner.text == ""
+    assert "visible" not in app._banner.classes

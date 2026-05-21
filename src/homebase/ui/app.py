@@ -268,6 +268,17 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
     #toolbar { height: 5; border: round $accent; padding: 0 1; }
     #global_meta_left { content-align: left top; width: 4fr; }
     #global_meta_right { content-align: left top; width: 2fr; }
+    #worktree_health_banner {
+        height: 0;
+        padding: 0 1;
+        background: $warning-darken-2;
+        color: $text;
+        display: none;
+    }
+    #worktree_health_banner.visible {
+        display: block;
+        height: 1;
+    }
     #main { height: 1fr; }
     #projects { width: 4fr; height: 1fr; border: round $surface; scrollbar-gutter: stable; }
     #side { width: 2fr; height: 1fr; border: round $surface; padding: 0 1; }
@@ -345,6 +356,7 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
         ),
         ("ctrl+a", "pick_actions", "Actions"),
         ("ctrl+o", "toggle_select_mode", "Select mode"),
+        Binding("ctrl+x", "dismiss_worktree_health", "Dismiss banner", show=False),
         Binding("ctrl+@", "cycle_hotbar", "Next hotbar", show=False, priority=True),
         ("enter", "open_selected", "Open"),
         ("ctrl+q", "quit_app", "Quit"),
@@ -756,6 +768,7 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
         with Horizontal(id="toolbar"):
             yield Static("", id="global_meta_left")
             yield Static("", id="global_meta_right")
+        yield Static("", id="worktree_health_banner")
         with Horizontal(id="main"):
             yield SafeDataTable(id="projects", cursor_type="row")
             with Vertical(id="side"):
@@ -2128,6 +2141,9 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
     def _initial_worktree_health_scan(self) -> None:
         textual_ui_worktree_health.load_initial_health(self)
         self._maybe_refresh_worktree_health()
+
+    def action_dismiss_worktree_health(self) -> None:
+        textual_ui_worktree_health.dismiss_worktree_health(self)
 
     def _on_metadata_health_refresh_done(
         self,
