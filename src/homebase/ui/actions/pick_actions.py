@@ -246,6 +246,20 @@ def on_pick_actions(app: Any, value: str | None) -> None:
         app._action_new_worktree(parent_name)
         return True
 
+    def _handle_deworktree() -> bool:
+        worktree_rows = [r for r in targets if getattr(r, "worktree_of", "")]
+        if not worktree_rows:
+            app._log("de-worktree skipped: no worktree rows in target", "warn")
+            app._refresh_side()
+            return True
+        paths = [r.path for r in worktree_rows]
+        title, details = app._build_bulk_confirm_payload("deworktree", paths)
+        app.push_screen(
+            app._confirm_screen_cls(title, details),
+            lambda ok: app._on_confirm_bulk(ok, "deworktree", paths),
+        )
+        return True
+
     handlers: dict[str, Callable[[], bool]] = {
         "tags_set": _handle_tags_set,
         "suffix_set": _handle_suffix_set,
@@ -262,6 +276,7 @@ def on_pick_actions(app: Any, value: str | None) -> None:
         "hooks_refresh": _handle_hooks_refresh,
         "hooks_refresh_view": _handle_hooks_refresh_view,
         "new_worktree": _handle_new_worktree,
+        "deworktree": _handle_deworktree,
     }
     handler = handlers.get(value)
     if handler is not None and handler():

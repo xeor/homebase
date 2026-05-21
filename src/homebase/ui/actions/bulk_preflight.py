@@ -84,6 +84,11 @@ def preflight_bulk_action(
                 reason = "missing path"
             else:
                 reason = policy_reason_outside_base(path, base_dir) or ""
+        elif action == "deworktree":
+            if not exists:
+                reason = "missing path"
+            elif not path.is_dir():
+                reason = "not a directory"
         elif action == "review_meta":
             if is_packed_archive_path(path):
                 reason = "not supported for packed archive"

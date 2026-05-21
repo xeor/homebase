@@ -257,6 +257,7 @@ def build_bulk_confirm_payload(
         "unpack": "Confirm Unpack",
         "toggle_pack": "Confirm Toggle Pack",
         "delete": "Confirm Delete",
+        "deworktree": "Confirm De-worktree",
         "review_meta": "Confirm Metadata Review",
         "rename_meta_ext": "Confirm Metadata Rename",
     }.get(action, "Confirm Action")

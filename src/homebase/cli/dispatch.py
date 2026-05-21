@@ -32,6 +32,7 @@ def dispatch_command(
     cmd_cd: Callable[[Path, str], int],
     cmd_rm: Callable[..., int],
     cmd_fix: Callable[..., int],
+    cmd_deworktree: Callable[[Path, str], int],
     cmd_archive_ls: Callable[[Path, str], int],
     cmd_archive_undo: Callable[[Path, str], int],
     cmd_archive_restore_entry: Callable[[Path, str], int],
@@ -124,6 +125,8 @@ def dispatch_command(
             bool(ns.force_outside_base),
             force=bool(getattr(ns, "force", False)),
         )
+    if ns.command == "deworktree":
+        return cmd_deworktree(base_dir, str(getattr(ns, "path", ".") or "."))
     if ns.command == "fix":
         import sys
 

@@ -27,6 +27,7 @@ def _stub_kwargs(**overrides):
         cmd_cd=lambda _a, _b: 0,
         cmd_rm=lambda _a, _b: 0,
         cmd_fix=lambda _paths, **_kw: 0,
+        cmd_deworktree=lambda _bd, _path: 0,
         cmd_archive_ls=lambda _a, _b: 0,
         cmd_archive_undo=lambda _a, _b: 0,
         cmd_archive_restore_entry=lambda _a, _b: 0,

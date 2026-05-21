@@ -32,6 +32,7 @@ def test_builtin_actions_include_all_legacy_ids() -> None:
         "hooks_refresh",
         "hooks_refresh_view",
         "new_worktree",
+        "deworktree",
     }
     assert expected_ids == set(BUILTIN_ACTIONS)
 
@@ -46,7 +47,7 @@ def test_builtin_actions_have_default_label_and_help_text() -> None:
 def test_builtin_action_view_scope_matches_current_view_config() -> None:
     active_ids = {action_id for action_id, _label in _VIEW_CONFIG_DEFAULT["active"]["actions"]}
     archive_ids = {action_id for action_id, _label in _VIEW_CONFIG_DEFAULT["archive"]["actions"]}
-    active_only_ids = {"suffix_set", "new_worktree"}
+    active_only_ids = {"suffix_set", "new_worktree", "deworktree"}
     for action_id, meta in BUILTIN_ACTIONS.items():
         if action_id in active_only_ids:
             expected = ("active",)

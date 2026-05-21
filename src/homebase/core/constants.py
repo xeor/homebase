@@ -232,6 +232,14 @@ BUILTIN_ACTIONS: dict[str, BuiltinActionMeta] = {
         view_scope=("active",),
         default_confirm_prompt=None,
     ),
+    "deworktree": BuiltinActionMeta(
+        id="deworktree",
+        default_label="De-worktree (make standalone)",
+        help_text="Turn a worktree project into a standalone clone (copies parent .git)",
+        scope="target",
+        view_scope=("active",),
+        default_confirm_prompt="Confirm de-worktree",
+    ),
     "review_meta": BuiltinActionMeta(
         id="review_meta",
         default_label="Open .base.yaml and review warnings",

@@ -135,6 +135,7 @@ def on_confirm_bulk(
     rename_legacy_base_yaml: Callable[[Path], tuple[bool, str]],
     project_row: Callable[..., ProjectRow],
     row_build_errors: tuple[type[BaseException], ...],
+    deworktree_internal: Callable[[Path, Path], None],
 ) -> None:
     if not ok:
         app._log(f"{action} cancelled", "warn")
@@ -268,6 +269,13 @@ def on_confirm_bulk(
                     delete_internal(app.base_dir, path, sync_tags=False)
                     app._log(f"deleted: {path}", "info")
                     removed_paths.append(path)
+                elif action == "deworktree":
+                    deworktree_internal(app.base_dir, path)
+                    app._log(f"deworktreed: {path.name}", "info")
+                    try:
+                        upsert_rows.append(project_row(path, archived=False))
+                    except row_build_errors:
+                        pass
                 elif action == "review_meta":
                     ok_review, msg = open_meta_for_review(path)
                     if not ok_review:

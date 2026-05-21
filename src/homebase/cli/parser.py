@@ -192,6 +192,17 @@ def build_cli_parser() -> argparse.ArgumentParser:
     )
     p_cd.add_argument("name", nargs="?", default="", help="project name under base")
 
+    p_deworktree = sub.add_parser(
+        "deworktree",
+        help="turn a worktree project into a standalone clone",
+    )
+    p_deworktree.add_argument(
+        "path",
+        nargs="?",
+        default=".",
+        help="worktree project directory (default: cwd)",
+    )
+
     p_rm = sub.add_parser("rm", help="delete a directory recursively")
     p_rm.add_argument("path", nargs="?", default=".", help="target path (default: cwd)")
     p_rm.add_argument("--force-outside-base", action="store_true", help="allow deleting outside base root")

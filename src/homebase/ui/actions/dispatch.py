@@ -69,6 +69,7 @@ def dispatch_action(app: Any, action_id: str) -> None:
             "hooks_refresh",
             "hooks_refresh_view",
             "new_worktree",
+            "deworktree",
         }:
             app._run_custom_action(aid)
             return

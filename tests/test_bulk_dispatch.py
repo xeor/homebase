@@ -53,6 +53,7 @@ def test_on_confirm_bulk_logs_cancelled_and_returns() -> None:
         rename_legacy_base_yaml=_false_meta,
         project_row=_noop,
         row_build_errors=(ValueError,),
+        deworktree_internal=_noop,
     )
     assert app.logs and app.logs[0][0] == "warn"
     assert "cancelled" in app.logs[0][1]
@@ -76,6 +77,7 @@ def test_on_confirm_bulk_handles_no_runnable_items() -> None:
         rename_legacy_base_yaml=_false_meta,
         project_row=_noop,
         row_build_errors=(ValueError,),
+        deworktree_internal=_noop,
     )
     assert app.logs and app.logs[0][0] == "warn"
     assert "no eligible items" in app.logs[0][1]
@@ -158,6 +160,7 @@ def test_on_confirm_bulk_delete_respects_pre_hook_cancel(tmp_path: Path, monkeyp
         rename_legacy_base_yaml=_false_meta,
         project_row=_noop,
         row_build_errors=(ValueError,),
+        deworktree_internal=_noop,
     )
     assert called["delete"] == 0
     assert any("cancelled by hook" in msg for _level, msg in app.logs)

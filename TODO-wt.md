@@ -515,9 +515,9 @@ Each step ships independently and leaves the tool usable.
    and `git worktree repair`; falls back to hand-rewriting only
    when git's CLI can't do the job. Updates `worktree.of` /
    `worktree.parent_path` in `.base.yml` as part of each mutation.
-   Tests for every code path that mutates a project's location.~~ — pending commit
-10. **De-worktree action.** §7.3, rsync-of-`.git` method. CLI +
-    action list entry. Tests.
+   Tests for every code path that mutates a project's location.~~ — `47f9e65`
+10. ~~**De-worktree action.** §7.3, rsync-of-`.git` method. CLI +
+    action list entry. Tests.~~ — pending commit
 11. **`b fix`.** §7.4. Audit + dry-run + `--apply` + documented
     exit codes + cached scan (§7.4.1) + sticky popup. Tests
     including a relocated-base-folder fixture and an
@@ -997,7 +997,7 @@ design; verify with `grep` before editing.
 - Worktree rows delete via git; parent-delete warning lists
   blockers; all dialog paths work.
 
-### ~~11.9 Rename / archive pointer rewriting~~ — pending commit
+### ~~11.9 Rename / archive pointer rewriting~~ — `47f9e65`
 
 **Files**
 
@@ -1044,7 +1044,7 @@ design; verify with `grep` before editing.
 - Every move path goes through the helper. Worktrees survive
   rename + archive both for themselves and their parent.
 
-### 11.10 De-worktree action
+### ~~11.10 De-worktree action~~ — pending commit
 
 **Files**
 

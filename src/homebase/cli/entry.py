@@ -14,6 +14,7 @@ from ..commands.archive import (
     cmd_fix,
     cmd_rm,
 )
+from ..commands.deworktree import cmd_deworktree
 from ..commands.hooks_cmd import cmd_hooks_refresh
 from ..commands.setup import (
     cmd_cache_warm,
@@ -435,6 +436,7 @@ def main(argv: list[str]) -> int:
                 hook_specs=runtime_cfg.hook_specs,
             ),
             cmd_fix=cmd_fix,
+            cmd_deworktree=cmd_deworktree,
             cmd_archive_ls=cmd_archive_ls,
             cmd_archive_undo=cmd_archive_undo,
             cmd_archive_restore_entry=cmd_archive_restore_entry,
