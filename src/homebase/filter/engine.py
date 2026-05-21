@@ -5,6 +5,13 @@ import time
 from datetime import datetime
 from typing import Any, Callable
 
+StructuredTermBuilder = Callable[[str, str], tuple[str | None, Callable[[Any], bool] | None]]
+
+STRUCTURED_TERM_RE = re.compile(
+    r"^:([a-z][a-z0-9-]*)(!=|<=|>=|=|<|>|~)(.+)$"
+)
+STRUCTURED_OPS = frozenset({"=", "!=", "<", "<=", ">", ">=", "~"})
+
 
 def compile_filter_expr(
     expr: str,
@@ -14,6 +21,7 @@ def compile_filter_expr(
     property_alias_set_fn: Callable[[str], set[str]],
     get_named_filter: Callable[[str], str],
     tag_ancestors_fn: Callable[[str], frozenset[str]] | None = None,
+    extra_term_builders: dict[str, StructuredTermBuilder] | None = None,
 ) -> tuple[Callable[[Any], bool], str | None]:
     raw = expr.strip()
     if not raw:
@@ -71,6 +79,7 @@ def compile_filter_expr(
     now_ts = int(time.time())
     compiled_named: dict[str, Callable[[Any], bool]] = {}
     compiling_named: set[str] = set()
+    hints: list[str] = []
 
     def compare_int(lhs: int, op: str, rhs: int) -> bool:
         if op == "=":
@@ -163,41 +172,22 @@ def compile_filter_expr(
         compiled_named[name] = pred
         return pred
 
-    def term_pred(token: str) -> Callable[[Any], bool]:
-        low = token.lower()
-
-        m_count = re.match(r"^(tags|props|properties)(<=|>=|!=|=|<|>)(\d+)$", low)
-        if m_count:
-            field = m_count.group(1)
-            op = m_count.group(2)
-            rhs = int(m_count.group(3))
-
-            def lhs(row: Any) -> int:
-                if field == "tags":
-                    return len(getattr(row, "tags", []))
-                return len(getattr(row, "properties", []))
-
-            return lambda row: compare_int(lhs(row), op, rhs)
-
-        m_rel_time = re.match(r"^(created|opened|last)=@-([0-9ymwdhs]+)$", low)
-        if m_rel_time:
-            field = m_rel_time.group(1)
-            seconds = parse_relative_span_to_seconds(m_rel_time.group(2))
-            if seconds is None:
-                return lambda _row: False
-            threshold = now_ts - seconds
-            return lambda row: row_ts(row, field) >= threshold
-
-        m_abs_date = re.match(
-            r"^(created|opened|last)(<=|>=|!=|=|<|>)(\d{4}(?:-\d{2}(?:-\d{2})?)?)$",
-            low,
-        )
-        if m_abs_date:
-            field = m_abs_date.group(1)
-            op = m_abs_date.group(2)
-            rhs_key = parse_date_literal(m_abs_date.group(3))
+    def _make_time_builder(field: str) -> StructuredTermBuilder:
+        def build(op: str, value: str) -> tuple[str | None, Callable[[Any], bool] | None]:
+            if value.startswith("@-"):
+                seconds = parse_relative_span_to_seconds(value[2:])
+                if seconds is None:
+                    return f"invalid relative span: :{field}{op}{value}", None
+                if op != "=":
+                    return (
+                        f"operator {op} not implemented for :{field} with relative span",
+                        None,
+                    )
+                threshold = now_ts - seconds
+                return None, (lambda row: row_ts(row, field) >= threshold)
+            rhs_key = parse_date_literal(value)
             if rhs_key is None:
-                return lambda _row: False
+                return f"invalid value for :{field}: {value!r}", None
             precision = len(rhs_key)
 
             def pred(row: Any) -> bool:
@@ -218,7 +208,49 @@ def compile_filter_expr(
                     return lhs_key >= rhs_key
                 return False
 
-            return pred
+            return None, pred
+
+        return build
+
+    structured_builders: dict[str, StructuredTermBuilder] = {
+        "created": _make_time_builder("created"),
+        "opened": _make_time_builder("opened"),
+        "last": _make_time_builder("last"),
+    }
+    if extra_term_builders:
+        structured_builders.update(extra_term_builders)
+
+    def term_pred(token: str) -> Callable[[Any], bool]:
+        low = token.lower()
+
+        m_count = re.match(r"^(tags|props|properties)(<=|>=|!=|=|<|>)(\d+)$", low)
+        if m_count:
+            field = m_count.group(1)
+            op = m_count.group(2)
+            rhs = int(m_count.group(3))
+
+            def lhs(row: Any) -> int:
+                if field == "tags":
+                    return len(getattr(row, "tags", []))
+                return len(getattr(row, "properties", []))
+
+            return lambda row: compare_int(lhs(row), op, rhs)
+
+        m_struct = STRUCTURED_TERM_RE.match(low)
+        if m_struct:
+            key = m_struct.group(1)
+            op = m_struct.group(2)
+            value = m_struct.group(3)
+            builder = structured_builders.get(key)
+            if builder is None:
+                hints.append(f"unknown filter key: :{key}")
+                return lambda _row: False
+            hint, struct_pred = builder(op, value)
+            if hint is not None:
+                hints.append(hint)
+                return lambda _row: False
+            assert struct_pred is not None
+            return struct_pred
 
         if token.startswith("@") and len(token) > 1:
             return named_pred(token[1:].strip())
@@ -297,23 +329,22 @@ def compile_filter_expr(
         return (lambda _row: False), None
 
     predicate = pred_stack[0]
-    return predicate, None
+    hint_msg = "; ".join(hints) if hints else None
+    return predicate, hint_msg
 
 
 def query_uses_filter_syntax(text: str) -> bool:
     q = text.strip()
     if not q:
         return False
-    if q.startswith("@"):
+    if q.startswith("@") or q.startswith(":"):
         return True
     if any(ch in q for ch in "#!()|"):
         return True
     ql = q.lower()
-    if re.search(r"\b(created|opened|last)=@-(?:\d+[ymwdhs])+\b", ql):
+    if re.search(r"(^|\s):[a-z][a-z0-9-]*(=|!=|<=|>=|<|>|~)", ql):
         return True
     if re.search(r"\b(tags|props|properties)(<=|>=|!=|=|<|>)\d+\b", ql):
-        return True
-    if re.search(r"\b(created|opened|last)(<=|>=|!=|=|<|>)\d{4}(?:-\d{2}(?:-\d{2})?)?\b", ql):
         return True
     if re.search(r"\bOR\b", q, flags=re.IGNORECASE):
         return True

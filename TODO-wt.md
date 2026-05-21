@@ -490,12 +490,12 @@ Each step ships independently and leaves the tool usable.
    `gitdir_id`) to `BASE_META_ALLOWED_KEYS` and the validator.
    Tests.~~ — `a764893`
 3. ~~**GIT column rendering.** Format `featx*  ↪foo` for worktree
-   rows. Tests with a row containing/lacking the `worktree:` block.~~ — pending commit
-4. **Filter framework migration.** Move existing
+   rows. Tests with a row containing/lacking the `worktree:` block.~~ — `b2e50e4`
+4. ~~**Filter framework migration.** Move existing
    `created=`/`opened=`/`last=` to the `:` prefix. Parse all
    operators; implement only `=`. Add registry. Update parser,
    normaliser, pretty-printer, saved/named filters in defaults,
-   docs. Hard cut, no migration helper.
+   docs. Hard cut, no migration helper.~~ — pending commit
 5. **Filter keys.** Register `:worktree-of=` (strict) and
    `:repo=` (umbrella). Tests.
 6. **`b new --as worktree`** (CLI) + auto-default rule when cwd is
@@ -703,7 +703,7 @@ design; verify with `grep` before editing.
 - Schema accepts and validates the block. Read/write round-trip
   test passes.
 
-### ~~11.3 GIT column rendering~~ — pending commit
+### ~~11.3 GIT column rendering~~ — `b2e50e4`
 
 **Files**
 
@@ -746,7 +746,7 @@ design; verify with `grep` before editing.
 
 - Worktree rows render `featx*  ↪foo`; regular rows unchanged.
 
-### 11.4 Filter framework migration
+### ~~11.4 Filter framework migration~~ — pending commit
 
 **Files**
 

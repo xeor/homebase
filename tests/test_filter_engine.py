@@ -193,3 +193,79 @@ def test_normalize_and_pretty_filter_expression() -> None:
     assert normalized == "( #a OR #b )"
     pretty = filter_engine.pretty_filter_expression("#a OR (#b #c)", token_re=TOKEN_RE)
     assert "OR" in pretty
+
+
+def _compile(expr: str, *, extra=None):
+    return filter_engine.compile_filter_expr(
+        expr,
+        token_re=TOKEN_RE,
+        match_query_fn=lambda row, q: q in (row.name.lower() if row.name else ""),
+        property_alias_set_fn=lambda key: {key.lower()},
+        get_named_filter=lambda _name: "",
+        extra_term_builders=extra,
+    )
+
+
+def test_structured_relative_time_filter_matches_within_window() -> None:
+    import time as _time
+
+    now = int(_time.time())
+    pred, err = _compile(":created=@-7d")
+    assert err is None
+    assert pred(Row(name="x", created_ts=now - 3 * 86400)) is True
+    assert pred(Row(name="x", created_ts=now - 30 * 86400)) is False
+
+
+def test_structured_absolute_date_supports_full_operators() -> None:
+    from datetime import datetime
+
+    ts_2025_06 = int(datetime(2025, 6, 1).timestamp())
+    pred_eq, err_eq = _compile(":created=2025")
+    pred_le, err_le = _compile(":opened<=2025-06")
+    pred_gt, err_gt = _compile(":last>2024")
+    assert err_eq is None and err_le is None and err_gt is None
+    assert pred_eq(Row(created_ts=ts_2025_06)) is True
+    assert pred_eq(Row(created_ts=int(datetime(2024, 1, 1).timestamp()))) is False
+    assert pred_le(Row(opened_ts=ts_2025_06)) is True
+    assert pred_le(Row(opened_ts=int(datetime(2025, 7, 1).timestamp()))) is False
+    assert pred_gt(Row(last_ts=ts_2025_06)) is True
+
+
+def test_structured_relative_with_non_equal_op_emits_hint_and_matches_nothing() -> None:
+    pred, err = _compile(":created!=@-7d")
+    assert err is not None
+    assert "not implemented" in err
+    assert pred(Row(created_ts=999)) is False
+
+
+def test_structured_unknown_key_emits_hint_and_matches_nothing() -> None:
+    pred, err = _compile(":nope=foo")
+    assert err is not None
+    assert "unknown filter key" in err
+    assert pred(Row(name="anything")) is False
+
+
+def test_structured_extra_term_builder_is_consulted() -> None:
+    def repo_build(op, value):
+        if op != "=":
+            return f"operator {op} not implemented for :repo", None
+        return None, (lambda row: row.name == value)
+
+    pred, err = _compile(":repo=foo", extra={"repo": repo_build})
+    assert err is None
+    assert pred(Row(name="foo")) is True
+    assert pred(Row(name="bar")) is False
+
+
+def test_query_uses_filter_syntax_detects_colon_keys() -> None:
+    assert filter_engine.query_uses_filter_syntax(":created=2025") is True
+    assert filter_engine.query_uses_filter_syntax("foo :last=@-1d bar") is True
+    assert filter_engine.query_uses_filter_syntax("just text") is False
+
+
+def test_normalize_filter_preserves_colon_tokens() -> None:
+    normalized = filter_engine.normalize_filter_expression(
+        ":last=@-7d :created>=2025", token_re=TOKEN_RE
+    )
+    assert ":last=@-7d" in normalized
+    assert ":created>=2025" in normalized

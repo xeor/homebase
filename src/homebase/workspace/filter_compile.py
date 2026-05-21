@@ -64,7 +64,12 @@ def compile_filter_expr(expr: str) -> tuple[Callable[[ProjectRow], bool], str | 
         property_alias_set_fn=_property_alias_set,
         get_named_filter=lambda name: NAMED_FILTERS.get(name, ""),
         tag_ancestors_fn=_build_tag_ancestors_fn(),
+        extra_term_builders=_extra_term_builders(),
     )
+
+
+def _extra_term_builders() -> dict[str, filter_engine.StructuredTermBuilder]:
+    return {}
 
 
 def query_uses_filter_syntax(text: str) -> bool:

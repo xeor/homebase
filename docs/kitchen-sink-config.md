@@ -23,10 +23,10 @@ filters:
   saved:
     - "#wip"
     - "tags=0"
-    - "last=@-7d"
+    - ":last=@-7d"
   named:
     hot: "#cli OR #api"
-    stale: "last<=@-60d"
+    stale: ":last<=@-60d"
 
 # Dynamic property badges on project rows.
 properties:

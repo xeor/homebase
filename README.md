@@ -282,7 +282,7 @@ filters:
     - "tags=0"
   named:
     hot: "#cli OR #api"
-    fresh: "last=@-7d"
+    fresh: ":last=@-7d"
 
 # Dynamic property detectors
 properties:
