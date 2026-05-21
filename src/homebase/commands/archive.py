@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Callable
@@ -265,6 +266,7 @@ def archive_move_internal(
 
 
 def archive_pack_internal(base_dir: Path, src: Path) -> Path:
+    _enforce_worktree_pack_preflight(src)
     dst = archive_service.archive_pack_internal(
         base_dir,
         src,
@@ -291,7 +293,51 @@ def archive_unpack_internal(base_dir: Path, src: Path) -> Path:
         invalidate_packed_cache_path=_packed_cache_invalidate_path,
     )
     cache_move_opened_ts(base_dir, src, dst)
+    _warn_if_stale_worktree(dst)
     return dst
+
+
+def _enforce_worktree_pack_preflight(src: Path) -> None:
+    block = load_base_worktree(src)
+    if block is None:
+        return
+    missing = [
+        key for key in ("of", "branch", "parent_path", "gitdir_id")
+        if not block.get(key)
+    ]
+    if missing:
+        raise ValueError(
+            f"cannot pack worktree {src.name}: incomplete worktree block "
+            f"(missing {', '.join(missing)}). Run 'b fix-worktrees --apply' first."
+        )
+    print(
+        f"warning: packed worktree {src.name} is only restorable next to its "
+        f"parent at {block['parent_path']}; run 'b fix-worktrees --apply' after restore.",
+        file=sys.stderr,
+    )
+
+
+def _warn_if_stale_worktree(unpacked: Path) -> None:
+    block = load_base_worktree(unpacked)
+    if block is None:
+        return
+    pointer = unpacked / "repo" / ".git"
+    if not pointer.is_file():
+        return
+    try:
+        text = pointer.read_text(encoding="utf-8", errors="replace").strip()
+    except OSError:
+        return
+    if not text.startswith("gitdir:"):
+        return
+    target = Path(text.split(":", 1)[1].strip())
+    if target.exists():
+        return
+    print(
+        f"warning: unpacked worktree {unpacked.name} has a stale gitdir pointer "
+        f"({target}). Run 'b fix-worktrees --apply' to repair.",
+        file=sys.stderr,
+    )
 
 
 def archive_restore_internal(

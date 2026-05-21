@@ -521,11 +521,11 @@ Each step ships independently and leaves the tool usable.
 11. ~~**`b fix`.** §7.4. Audit + dry-run + `--apply` + documented
     exit codes + cached scan (§7.4.1) + sticky popup. Tests
     including a relocated-base-folder fixture and an
-    orphan-worktree fixture.~~ — pending commit (pragmatic: audit
+    orphan-worktree fixture.~~ — `2e45a6c` (pragmatic: audit
     + CLI shipped as `b fix-worktrees`; TUI sticky popup, cache
     table, and idle scan deferred to a follow-up)
-12. **Packed archive flow.** §7.5. Warning on pack, detection on
-    unpack, repair via `b fix`.
+12. ~~**Packed archive flow.** §7.5. Warning on pack, detection on
+    unpack, repair via `b fix`.~~ — pending commit
 
 Items beyond 12 (merge, sync, prune, advanced status badges) are
 parked until we see real friction.
@@ -1092,7 +1092,7 @@ design; verify with `grep` before editing.
   repo, the parent has no record of it, the row renders as a
   regular project (no `↪parent` suffix).
 
-### ~~11.11 `b fix`~~ — pending commit
+### ~~11.11 `b fix`~~ — `2e45a6c`
 
 **Files**
 
@@ -1164,7 +1164,7 @@ design; verify with `grep` before editing.
   exist; dismissal is session-only; documented exit codes
   honoured; startup is not measurably slower.
 
-### 11.12 Packed-archive flow
+### ~~11.12 Packed-archive flow~~ — pending commit
 
 **Files**
 
