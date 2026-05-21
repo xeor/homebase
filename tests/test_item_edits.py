@@ -10,6 +10,7 @@ class _AppStub:
     def __init__(self, src: Path) -> None:
         self.pending_rename_target = src
         self.view_mode = "active"
+        self.base_dir = src.parent
         self._rows = [
             ProjectRow(
                 path=src,

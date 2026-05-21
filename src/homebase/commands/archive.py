@@ -31,6 +31,7 @@ from ..metadata.api import (
     sync_tag_symlinks,
 )
 from ..tmux.flow import open_shell_in_dir
+from ..workspace import worktree_paths
 from ..workspace.rows import (
     archive_destination,
     archived_restore_target,
@@ -228,6 +229,13 @@ def archive_move_internal(
     # ``base/`` — 10+ seconds on a real workspace). We follow up with
     # a targeted cleanup that only touches symlinks pointing at the
     # path we just moved.
+    blockers = worktree_paths.find_worktree_children(base_dir, src.name)
+    if blockers:
+        names = ", ".join(b.name for b in blockers)
+        raise ValueError(
+            f"cannot archive {src.name}: it has active worktrees ({names}). "
+            f"De-worktree them first or remove them."
+        )
     src_resolved = src.resolve() if src.exists() else src
     dest_fn = archive_destination_override or archive_destination
     dst = archive_service.archive_move_internal(
@@ -239,6 +247,7 @@ def archive_move_internal(
         sync_tags_if_needed=_archive_sync_tags_if_needed,
         sync_tags=False,
     )
+    worktree_paths.repair_after_move(base_dir, dst)
     if sync_tags:
         cleanup_tag_symlinks_pointing_at(base_dir, src_resolved)
     cache_move_opened_ts(base_dir, src, dst)

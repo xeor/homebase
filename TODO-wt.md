@@ -509,13 +509,13 @@ Each step ships independently and leaves the tool usable.
 8. ~~**Delete-action wiring** for worktree rows
    (`git worktree remove` + admin cleanup). Parent-delete warning
    + "de-worktree first" / "move all together" alternatives
-   (the de-worktree branch lands in step 10).~~ — pending commit
-9. **Rename / archive pointer rewriting.** §7.1 items 1–3, single
+   (the de-worktree branch lands in step 10).~~ — `b4a6652`
+9. ~~**Rename / archive pointer rewriting.** §7.1 items 1–3, single
    helper used from both CLI and TUI. Uses `git worktree move`
    and `git worktree repair`; falls back to hand-rewriting only
    when git's CLI can't do the job. Updates `worktree.of` /
    `worktree.parent_path` in `.base.yml` as part of each mutation.
-   Tests for every code path that mutates a project's location.
+   Tests for every code path that mutates a project's location.~~ — pending commit
 10. **De-worktree action.** §7.3, rsync-of-`.git` method. CLI +
     action list entry. Tests.
 11. **`b fix`.** §7.4. Audit + dry-run + `--apply` + documented
@@ -956,7 +956,7 @@ design; verify with `grep` before editing.
   pre-fills the dialog correctly. No regression in plain
   ctrl-n behaviour.
 
-### ~~11.8 Delete-action wiring for worktree rows~~ — pending commit
+### ~~11.8 Delete-action wiring for worktree rows~~ — `b4a6652`
 
 **Files**
 
@@ -997,7 +997,7 @@ design; verify with `grep` before editing.
 - Worktree rows delete via git; parent-delete warning lists
   blockers; all dialog paths work.
 
-### 11.9 Rename / archive pointer rewriting
+### ~~11.9 Rename / archive pointer rewriting~~ — pending commit
 
 **Files**
 

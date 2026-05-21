@@ -10,6 +10,7 @@ from ...core.models import ProjectRow
 from ...hooks import runtime as hooks_runtime
 from ...hooks.snapshot import snapshot_target
 from ...metadata.api import load_base_data
+from ...workspace.worktree_paths import move_project
 from . import note_sync as note_sync_actions
 
 
@@ -248,7 +249,7 @@ def on_rename_item(
         new_name = target.name
 
     try:
-        current.rename(target)
+        move_project(app.base_dir, current, target)
     except (OSError, ValueError) as exc:
         _rename_abort(app, str(exc))
         return
