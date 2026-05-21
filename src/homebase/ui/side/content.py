@@ -227,7 +227,7 @@ def run_cmd(cwd: Path, *cmd: str) -> tuple[str, str | None]:
 def build_side_git_text(app: Any, row: ProjectRow) -> str:
     if row.packed:
         return "[dim]packed archive: git details unavailable until unpacked[/]"
-    if not (row.path / ".git").is_dir():
+    if not (row.path / ".git").exists():
         return "[dim]not a git repository[/]"
     lines: list[str] = []
     max_branches = 5

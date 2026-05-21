@@ -247,20 +247,55 @@ _GIT_INFO_CACHE: dict[Path, tuple[int, str, str, int, str]] = {}
 _GIT_INFO_CACHE_MAX = 8192
 
 
-def _resolve_head_ref_text(git_dir: Path, head_text: str) -> str:
+def _resolve_git_dirs(path: Path) -> tuple[Path, Path] | None:
+    git_entry = path / ".git"
+    if git_entry.is_dir():
+        return git_entry, git_entry
+    if not git_entry.is_file():
+        return None
+    try:
+        text = git_entry.read_text(encoding="utf-8", errors="replace").strip()
+    except OSError:
+        return None
+    if not text.startswith("gitdir:"):
+        return None
+    gitdir_raw = text.split(":", 1)[1].strip()
+    if not gitdir_raw:
+        return None
+    gitdir = Path(gitdir_raw)
+    if not gitdir.is_absolute():
+        gitdir = (path / gitdir).resolve()
+    if not gitdir.is_dir():
+        return None
+    common = gitdir
+    commondir_file = gitdir / "commondir"
+    try:
+        common_text = commondir_file.read_text(encoding="utf-8", errors="replace").strip()
+    except OSError:
+        common_text = ""
+    if common_text:
+        common_path = Path(common_text)
+        if not common_path.is_absolute():
+            common_path = (gitdir / common_path).resolve()
+        if common_path.is_dir():
+            common = common_path
+    return gitdir, common
+
+
+def _resolve_head_ref_text(common_dir: Path, head_text: str) -> str:
     if not head_text.startswith("ref: "):
         return head_text
     ref_rel = head_text[5:].strip()
     if not ref_rel:
         return head_text
-    ref_file = git_dir / ref_rel
+    ref_file = common_dir / ref_rel
     try:
         ref_sha = ref_file.read_text(encoding="utf-8", errors="replace").strip()
         if ref_sha:
             return f"{head_text}@{ref_sha}"
     except OSError:
         pass
-    packed_refs = git_dir / "packed-refs"
+    packed_refs = common_dir / "packed-refs"
     try:
         for line in packed_refs.read_text(encoding="utf-8", errors="replace").splitlines():
             if not line or line[0] in {"#", "^"}:
@@ -273,9 +308,9 @@ def _resolve_head_ref_text(git_dir: Path, head_text: str) -> str:
     return head_text
 
 
-def _git_state_signature(git_dir: Path) -> tuple[int, str] | None:
-    head_file = git_dir / "HEAD"
-    index_file = git_dir / "index"
+def _git_state_signature(worktree_dir: Path, common_dir: Path) -> tuple[int, str] | None:
+    head_file = worktree_dir / "HEAD"
+    index_file = worktree_dir / "index"
     try:
         head_text = head_file.read_text(encoding="utf-8", errors="replace").strip()
     except OSError:
@@ -284,7 +319,7 @@ def _git_state_signature(git_dir: Path) -> tuple[int, str] | None:
         index_mtime_ns = int(index_file.stat().st_mtime_ns)
     except OSError:
         index_mtime_ns = 0
-    return index_mtime_ns, _resolve_head_ref_text(git_dir, head_text)
+    return index_mtime_ns, _resolve_head_ref_text(common_dir, head_text)
 
 
 def _git_diff_quiet(path: Path, cached: bool) -> str:
@@ -331,11 +366,12 @@ def _git_clear_cache() -> None:
 
 
 def git_info(path: Path, include_dirty: bool = True) -> tuple[str, str, int]:
-    git_dir = path / ".git"
-    if not git_dir.is_dir():
+    git_entry = path / ".git"
+    if not git_entry.exists():
         return "-", "-", 0
 
-    sig = _git_state_signature(git_dir)
+    dirs = _resolve_git_dirs(path)
+    sig = _git_state_signature(*dirs) if dirs is not None else None
     cached = _GIT_INFO_CACHE.get(path) if sig is not None else None
     if (
         cached is not None

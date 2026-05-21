@@ -133,3 +133,56 @@ def test_git_info_returns_unverified_when_dirty_skipped(tmp_path: Path) -> None:
     assert dirty_skip == "~"
 
 
+def test_git_info_resolves_worktree_branch(tmp_path: Path) -> None:
+    parent = tmp_path / "parent"
+    _init_git_repo(parent)
+    parent_branch = subprocess.run(
+        ["git", "-C", str(parent), "branch", "--show-current"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+
+    wt = tmp_path / "wt-featx"
+    subprocess.run(
+        ["git", "-C", str(parent), "worktree", "add", "-b", "featx", str(wt)],
+        check=True,
+        capture_output=True,
+    )
+    projects._git_clear_cache()
+
+    wt_branch, wt_dirty, wt_ts = projects.git_info(wt)
+    assert wt_branch == "featx"
+    assert wt_dirty == ""
+    assert wt_ts > 0
+
+    parent_branch_after, _, _ = projects.git_info(parent)
+    assert parent_branch_after == parent_branch
+
+
+def test_git_info_worktree_cache_invalidates_on_commit(tmp_path: Path) -> None:
+    parent = tmp_path / "parent"
+    _init_git_repo(parent)
+    wt = tmp_path / "wt"
+    subprocess.run(
+        ["git", "-C", str(parent), "worktree", "add", "-b", "side", str(wt)],
+        check=True,
+        capture_output=True,
+    )
+    projects._git_clear_cache()
+
+    _, _, ts1 = projects.git_info(wt)
+    env = {
+        **os.environ,
+        "GIT_AUTHOR_DATE": "2026-01-02T12:00:00",
+        "GIT_COMMITTER_DATE": "2026-01-02T12:00:00",
+    }
+    (wt / "f.txt").write_text("changed\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(wt), "add", "f.txt"], check=True)
+    subprocess.run(["git", "-C", str(wt), "commit", "-q", "-m", "wt"], check=True, env=env)
+
+    _, dirty_after, ts2 = projects.git_info(wt)
+    assert dirty_after == ""
+    assert ts2 != ts1
+
+

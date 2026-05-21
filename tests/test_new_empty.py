@@ -63,10 +63,10 @@ def test_url_input_without_git_signal_routes_to_download(tmp_path: Path) -> None
     assert not (tmp_path / "x").exists()
 
 
-def test_path_input_routes_to_local(tmp_path: Path) -> None:
-    # ./thing doesn't exist → LocalDirSource path-not-found error
+def test_missing_relative_path_creates_empty_by_basename(tmp_path: Path) -> None:
     rc = _run(tmp_path, ["./thing"])
-    assert rc == 1
+    assert rc == 0
+    assert (tmp_path / "thing" / ".base.yaml").is_file()
 
 
 def test_too_many_positionals(tmp_path: Path) -> None:

@@ -142,7 +142,7 @@ def build_project_info_text(
         keys = ", ".join(sorted(data.keys())) if data else ""
         lines.append(f"[cyan]{base_marker_file} keys[/]: {esc(keys)}")
 
-    if (row.path / ".git").is_dir():
+    if (row.path / ".git").exists():
         try:
             last_msg = run_out(
                 "git",

@@ -49,16 +49,13 @@ def test_multi_continues_on_per_item_failure(tmp_path: Path) -> None:
 
 
 def test_multi_with_mode_flag_forces_all(tmp_path: Path) -> None:
-    # `--multi --empty` forces empty for every positional, even
-    # path-shaped ones — but path-shape positionals will still be
-    # rejected by resolve_new_project_name because they contain `/`.
     base = tmp_path / "base"
     base.mkdir()
-    rc = _run(base, tmp_path, ["--multi", "--empty", "ok", "bad/path"])
-    assert rc != 0
+    rc = _run(base, tmp_path, ["--multi", "--empty", "ok", "sub/leaf"])
+    assert rc == 0
     assert (base / "ok").is_dir()
-    # path-shaped name fails validation; not created
-    assert not (base / "bad" / "path").exists()
+    assert (base / "leaf").is_dir()
+    assert not (base / "sub").exists()
 
 
 def test_multi_dry_run_writes_nothing(tmp_path: Path) -> None:

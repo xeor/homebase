@@ -9,6 +9,8 @@ codeberg, bitbucket — and crucially the self-hosted gitea case via
 """
 from __future__ import annotations
 
+from pathlib import Path
+
 from homebase.workspace.new.adapters import (
     adapter_for_host,
     parse_url,
@@ -307,8 +309,16 @@ def test_bare_token_routes_to_empty() -> None:
     assert autodetect_source_key("myproj", _cfg()) == "empty"
 
 
-def test_path_routes_to_local() -> None:
-    assert autodetect_source_key("./somepath", _cfg()) == "local"
+def test_existing_path_routes_to_local(tmp_path: Path) -> None:
+    assert autodetect_source_key(str(tmp_path), _cfg()) == "local"
+
+
+def test_missing_relative_path_routes_to_empty() -> None:
+    assert autodetect_source_key("./somepath", _cfg()) == "empty"
+
+
+def test_missing_absolute_path_routes_to_local() -> None:
+    assert autodetect_source_key("/no/such/dir-xyz", _cfg()) == "local"
 
 
 # ============================================================
