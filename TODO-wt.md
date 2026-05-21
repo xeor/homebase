@@ -75,7 +75,7 @@ only read by repair code, never required for normal operation. Add
 them, or trust `worktree.of` + parent's `.git/worktrees/` listing
 to recover? Default proposal: add both, write at create + on every
 move/archive. Cheap insurance.
-xxx add them both
+COMMENT: add them both
 
 ### 3.3 Git detection (`.git` file vs dir)
 
@@ -149,7 +149,7 @@ all its worktrees). Concrete options:
 (e) `:worktree-group=foo` — verbose but obvious
 Default proposal: (a) `:repo=foo`. Short, intuitive, leaves
 `:worktree-of=foo` for the strict variant.
-xxx "repo"
+COMMENT: Lets call it as A, "repo"
 
 ### 4.5 Syntax highlighting
 
@@ -209,7 +209,7 @@ refuse and ask the user to pass an explicit base? Default proposal:
 use HEAD anyway — that's still what plain `git worktree add -b`
 does — but surface the actual base ref in the success message so
 the user sees what happened.
-xxx yes, do as upstream command does 
+COMMENT: yes, do as upstream command does
 
 Constraints:
 
@@ -318,7 +318,7 @@ parent plus N worktrees, where do the worktrees land?
     `_archive/2026/2026-05-20_foo/_worktrees/featx/`
 Default proposal: (a). Matches the active layout one-to-one, no
 discovery special-casing needed, no nested marker file rules.
-xxx a
+COMMENT: A
 
 ### 7.3 De-worktree action (make worktree standalone)
 
@@ -353,7 +353,7 @@ only artefacts: stashes, reflog, hooks installed in the parent's
 Default proposal: (a). Document in the action's confirm prompt.
 (c) is tempting but mixes the parent's stash list into the new
 clone, which is wrong.
-xxx let's try c
+COMMENT: I want a real version of it, so let's try option C
 
 ### 7.4 `b fix`
 
@@ -403,7 +403,7 @@ CLAUDE-COMMENT: Trigger. When does `b fix` run?
    rest.
 Default proposal: (b). (a) is too quiet, (c) violates "no git
 actions without explicit ask" ([[feedback_no_git_actions]]).
-xxx b, but should be runnable from cli and aa action manually as well
+COMMENT: Lets do option B. This should be runnable from cli and as action manually as well
 
 ### 7.5 Packed archives (`.tar.zst` etc.)
 
