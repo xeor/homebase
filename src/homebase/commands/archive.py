@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import subprocess
 from datetime import datetime
 from pathlib import Path
 from typing import Callable
@@ -26,6 +27,7 @@ from ..metadata.api import (
     append_base_log,
     cleanup_tag_symlinks_pointing_at,
     ensure_base_marker,
+    load_base_worktree,
     sync_tag_symlinks,
 )
 from ..tmux.flow import open_shell_in_dir
@@ -334,6 +336,7 @@ def delete_internal(base_dir: Path, target: Path, sync_tags: bool = True) -> Non
     # inner service does ``sync_tags=False`` (no full rebuild) and we
     # finish with a targeted cleanup of just the affected symlinks.
     target_resolved = target.resolve() if target.exists() else target
+    _try_release_worktree(target)
     archive_service.delete_internal(
         base_dir,
         target,
@@ -345,6 +348,34 @@ def delete_internal(base_dir: Path, target: Path, sync_tags: bool = True) -> Non
     if sync_tags:
         cleanup_tag_symlinks_pointing_at(base_dir, target_resolved)
     cache_delete_opened_ts(base_dir, target)
+
+
+def _try_release_worktree(target: Path) -> None:
+    if not target.is_dir():
+        return
+    block = load_base_worktree(target)
+    if block is None:
+        return
+    parent_path = block.get("parent_path")
+    worktree_repo = target / "repo"
+    if not parent_path or not worktree_repo.exists():
+        return
+    try:
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                str(parent_path),
+                "worktree",
+                "remove",
+                "--force",
+                str(worktree_repo),
+            ],
+            capture_output=True,
+            check=False,
+        )
+    except (subprocess.SubprocessError, OSError):
+        return
 
 
 def _archive_dest_with_forced_ts(forced_ts: int) -> Callable[[Path, Path], Path]:

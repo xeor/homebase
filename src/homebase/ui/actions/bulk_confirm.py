@@ -120,6 +120,8 @@ def _delete_preview_lines(
             badges.append("[cyan]packed[/]")
         if row.wip:
             badges.append("[cyan]wip[/]")
+        if row.worktree_of:
+            badges.append(f"[magenta]worktree of {app._esc(row.worktree_of)}[/]")
         if row.size_bytes > 0:
             badges.append(f"[dim]{core_utils.fmt_size_human(row.size_bytes)}[/]")
     head = f"  - {rel}"
@@ -137,7 +139,21 @@ def _delete_preview_lines(
             out.append(
                 f"      [dim]restore_target:[/] {app._esc(str(row.restore_target))}"
             )
+        orphans = _worktree_children(app, row.name)
+        if orphans:
+            names = ", ".join(app._esc(child.name) for child in orphans[:6])
+            extra = "" if len(orphans) <= 6 else f" (+{len(orphans) - 6} more)"
+            out.append(
+                f"      [bold yellow]worktrees that will be orphaned:[/] {names}{extra}"
+            )
     return out
+
+
+def _worktree_children(app: Any, parent_name: str) -> list[Any]:
+    if not parent_name:
+        return []
+    rows = list(getattr(app, "active_rows", []) or [])
+    return [r for r in rows if getattr(r, "worktree_of", "") == parent_name]
 
 
 def _restore_preview_lines(

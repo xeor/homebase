@@ -505,11 +505,11 @@ Each step ships independently and leaves the tool usable.
    worktree-from-worktree fixture and parent-HEAD-detached
    fixtures.~~ — `fcf6048`
 7. ~~**New action: "New worktree"** in the TUI action list,
-   single-target, opens prefilled `ctrl-n` dialog.~~ — pending commit
-8. **Delete-action wiring** for worktree rows
+   single-target, opens prefilled `ctrl-n` dialog.~~ — `3a246c4`
+8. ~~**Delete-action wiring** for worktree rows
    (`git worktree remove` + admin cleanup). Parent-delete warning
    + "de-worktree first" / "move all together" alternatives
-   (the de-worktree branch lands in step 10).
+   (the de-worktree branch lands in step 10).~~ — pending commit
 9. **Rename / archive pointer rewriting.** §7.1 items 1–3, single
    helper used from both CLI and TUI. Uses `git worktree move`
    and `git worktree repair`; falls back to hand-rewriting only
@@ -916,7 +916,7 @@ design; verify with `grep` before editing.
 - CLI path works end-to-end; auto-default works; tests cover
   the four scenarios above + collision.
 
-### ~~11.7 TUI "New worktree" action~~ — pending commit
+### ~~11.7 TUI "New worktree" action~~ — `3a246c4`
 
 **Files**
 
@@ -956,7 +956,7 @@ design; verify with `grep` before editing.
   pre-fills the dialog correctly. No regression in plain
   ctrl-n behaviour.
 
-### 11.8 Delete-action wiring for worktree rows
+### ~~11.8 Delete-action wiring for worktree rows~~ — pending commit
 
 **Files**
 
