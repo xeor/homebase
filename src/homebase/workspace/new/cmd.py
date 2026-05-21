@@ -4,6 +4,7 @@ import os
 import sys
 import time
 from argparse import Namespace
+from dataclasses import replace
 from pathlib import Path
 from typing import Callable
 
@@ -18,7 +19,7 @@ from .options import resolve_options
 from .prompt import PromptError, ask_name, ask_source, confirm
 from .registry import builtin_keys, construct_source, get_source_class
 
-_BUILTIN_KEYS = {"empty", "local", "git", "download", "downloaded"}
+_BUILTIN_KEYS = {"empty", "local", "git", "download", "downloaded", "worktree"}
 _SHAPE_TO_SOURCE = {
     "bare": "empty",
     "path": "local",
@@ -104,6 +105,7 @@ def autodetect_source_key(
     sources_cfg: dict[str, dict],
     *,
     cwd: Path | None = None,
+    base_dir: Path | None = None,
 ) -> str | None:
     if raw_input is None:
         return None
@@ -113,6 +115,10 @@ def autodetect_source_key(
             sources_cfg.get("git", {}).get("config", {}).get("hosts") or {}
         )
         return _pick_url_source(raw_input, git_hosts)
+    if base_dir is not None and shape in {"bare", "path"}:
+        enclosing = enclosing_base_project(cwd or Path.cwd().resolve(), base_dir)
+        if enclosing is not None and (enclosing / "repo" / ".git").exists():
+            return "worktree"
     source_key = _SHAPE_TO_SOURCE.get(shape)
     if source_key != "local" or raw_input is None:
         return source_key
@@ -121,6 +127,21 @@ def autodetect_source_key(
     if resolved.exists():
         return "local"
     return "local" if raw_path.is_absolute() else "empty"
+
+
+def enclosing_base_project(cwd: Path, base_dir: Path) -> Path | None:
+    try:
+        cwd_res = cwd.resolve()
+        base_res = base_dir.resolve()
+    except OSError:
+        return None
+    try:
+        rel = cwd_res.relative_to(base_res)
+    except ValueError:
+        return None
+    if not rel.parts:
+        return None
+    return base_res / rel.parts[0]
 
 
 def _resolve_base_key(child_key: str, sources_cfg: dict[str, dict]) -> str | None:
@@ -205,7 +226,12 @@ def plan_and_apply_one(
     elif mode:
         source_key = str(mode)
     else:
-        source_key = autodetect_source_key(raw_input, sources_cfg, cwd=ctx.cwd) or ""
+        source_key = (
+            autodetect_source_key(
+                raw_input, sources_cfg, cwd=ctx.cwd, base_dir=ctx.base_dir
+            )
+            or ""
+        )
 
     if getattr(ns, "ask_source", False) and not forced:
         try:
@@ -245,6 +271,10 @@ def plan_and_apply_one(
         source_config.setdefault("hosts", git_hosts)
     source = construct_source(base_key, source_config)
     options = resolve_options(base_key, ns, source_cfg=child_cfg)
+    if base_key == "worktree" and not options.from_project:
+        enclosing = enclosing_base_project(ctx.cwd, ctx.base_dir)
+        if enclosing is not None:
+            options = replace(options, from_project=enclosing.name)
 
     # Interactive setup hook (DownloadedSource uses this to prompt
     # for which recent file to use). Most sources are no-ops.

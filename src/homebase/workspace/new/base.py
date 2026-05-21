@@ -26,6 +26,7 @@ class NewOptions:
     template: str = ""
     tags: tuple[str, ...] = ()
     post: tuple[str, ...] = ()
+    from_project: str = ""
 
 
 @dataclass(frozen=True)

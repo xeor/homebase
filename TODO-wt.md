@@ -497,13 +497,13 @@ Each step ships independently and leaves the tool usable.
    normaliser, pretty-printer, saved/named filters in defaults,
    docs. Hard cut, no migration helper.~~ — `a86052f`
 5. ~~**Filter keys.** Register `:worktree-of=` (strict) and
-   `:repo=` (umbrella). Tests.~~ — pending commit
-6. **`b new --as worktree`** (CLI) + auto-default rule when cwd is
+   `:repo=` (umbrella). Tests.~~ — `f4f65a3`
+6. ~~**`b new --as worktree`** (CLI) + auto-default rule when cwd is
    inside a git-enabled project. Chained-parent resolution.
    Branch forks from the selected/cwd row's branch (not the root
    parent's HEAD). Tests with real git, including a
    worktree-from-worktree fixture and parent-HEAD-detached
-   fixtures.
+   fixtures.~~ — pending commit
 7. **New action: "New worktree"** in the TUI action list,
    single-target, opens prefilled `ctrl-n` dialog.
 8. **Delete-action wiring** for worktree rows
@@ -804,7 +804,7 @@ design; verify with `grep` before editing.
   `grep -rn 'last=@\|created=@\|opened=@' src/ docs/ README.md`
   returns nothing. Old tests rewritten to new syntax.
 
-### ~~11.5 Filter keys for worktrees~~ — pending commit
+### ~~11.5 Filter keys for worktrees~~ — `f4f65a3`
 
 **Files**
 
@@ -830,7 +830,7 @@ design; verify with `grep` before editing.
 
 - Tests pass; query bar accepts both keys.
 
-### 11.6 `b new --as worktree` (CLI)
+### ~~11.6 `b new --as worktree` (CLI)~~ — pending commit
 
 **Files**
 

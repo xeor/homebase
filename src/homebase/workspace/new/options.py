@@ -65,6 +65,9 @@ def resolve_options(
         merged["open"] = cd_value
     if getattr(cli_ns, "template", "") != "":
         merged["template"] = str(cli_ns.template)
+    cli_from = getattr(cli_ns, "from_project", "") or ""
+    if cli_from:
+        merged["from_project"] = str(cli_from)
     cli_tags = getattr(cli_ns, "tag", None) or []
     if cli_tags:
         existing = merged.get("tags") or []
@@ -93,4 +96,5 @@ def resolve_options(
         template=str(merged.get("template", "") or ""),
         tags=tuple(str(t) for t in (merged.get("tags") or [])),
         post=tuple(str(c) for c in (merged.get("post") or [])),
+        from_project=str(merged.get("from_project", "") or ""),
     )

@@ -6,9 +6,10 @@ import argparse
 def _add_new_arguments(p: argparse.ArgumentParser) -> None:
     p.add_argument("inputs", nargs="*", default=[])
     mode = p.add_mutually_exclusive_group()
-    for key in ("empty", "local", "git", "download", "downloaded"):
+    for key in ("empty", "local", "git", "download", "downloaded", "worktree"):
         mode.add_argument(f"--{key}", dest="mode", action="store_const", const=key)
     p.add_argument("--as", dest="child_key", default=None)
+    p.add_argument("--from", dest="from_project", default="")
     p.add_argument("--tag", action="append", default=[])
     p.add_argument("--template", default="")
     p.add_argument("--tmp", action=argparse.BooleanOptionalAction, default=None)
