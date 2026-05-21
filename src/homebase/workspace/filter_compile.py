@@ -69,7 +69,28 @@ def compile_filter_expr(expr: str) -> tuple[Callable[[ProjectRow], bool], str | 
 
 
 def _extra_term_builders() -> dict[str, filter_engine.StructuredTermBuilder]:
-    return {}
+    return {
+        "repo": _build_repo_term,
+        "worktree-of": _build_worktree_of_term,
+    }
+
+
+def _build_repo_term(op, value):
+    if op != "=":
+        return f"operator {op} not implemented for :repo", None
+    name = value.strip()
+    if not name:
+        return "missing value for :repo", None
+    return None, (lambda row: row.name == name or row.worktree_of == name)
+
+
+def _build_worktree_of_term(op, value):
+    if op != "=":
+        return f"operator {op} not implemented for :worktree-of", None
+    name = value.strip()
+    if not name:
+        return "missing value for :worktree-of", None
+    return None, (lambda row: row.worktree_of == name)
 
 
 def query_uses_filter_syntax(text: str) -> bool:

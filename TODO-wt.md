@@ -495,9 +495,9 @@ Each step ships independently and leaves the tool usable.
    `created=`/`opened=`/`last=` to the `:` prefix. Parse all
    operators; implement only `=`. Add registry. Update parser,
    normaliser, pretty-printer, saved/named filters in defaults,
-   docs. Hard cut, no migration helper.~~ — pending commit
-5. **Filter keys.** Register `:worktree-of=` (strict) and
-   `:repo=` (umbrella). Tests.
+   docs. Hard cut, no migration helper.~~ — `a86052f`
+5. ~~**Filter keys.** Register `:worktree-of=` (strict) and
+   `:repo=` (umbrella). Tests.~~ — pending commit
 6. **`b new --as worktree`** (CLI) + auto-default rule when cwd is
    inside a git-enabled project. Chained-parent resolution.
    Branch forks from the selected/cwd row's branch (not the root
@@ -746,7 +746,7 @@ design; verify with `grep` before editing.
 
 - Worktree rows render `featx*  ↪foo`; regular rows unchanged.
 
-### ~~11.4 Filter framework migration~~ — pending commit
+### ~~11.4 Filter framework migration~~ — `a86052f`
 
 **Files**
 
@@ -804,7 +804,7 @@ design; verify with `grep` before editing.
   `grep -rn 'last=@\|created=@\|opened=@' src/ docs/ README.md`
   returns nothing. Old tests rewritten to new syntax.
 
-### 11.5 Filter keys for worktrees
+### ~~11.5 Filter keys for worktrees~~ — pending commit
 
 **Files**
 
