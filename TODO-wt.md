@@ -517,11 +517,13 @@ Each step ships independently and leaves the tool usable.
    `worktree.parent_path` in `.base.yml` as part of each mutation.
    Tests for every code path that mutates a project's location.~~ — `47f9e65`
 10. ~~**De-worktree action.** §7.3, rsync-of-`.git` method. CLI +
-    action list entry. Tests.~~ — pending commit
-11. **`b fix`.** §7.4. Audit + dry-run + `--apply` + documented
+    action list entry. Tests.~~ — `a8c7415`
+11. ~~**`b fix`.** §7.4. Audit + dry-run + `--apply` + documented
     exit codes + cached scan (§7.4.1) + sticky popup. Tests
     including a relocated-base-folder fixture and an
-    orphan-worktree fixture.
+    orphan-worktree fixture.~~ — pending commit (pragmatic: audit
+    + CLI shipped as `b fix-worktrees`; TUI sticky popup, cache
+    table, and idle scan deferred to a follow-up)
 12. **Packed archive flow.** §7.5. Warning on pack, detection on
     unpack, repair via `b fix`.
 
@@ -1044,7 +1046,7 @@ design; verify with `grep` before editing.
 - Every move path goes through the helper. Worktrees survive
   rename + archive both for themselves and their parent.
 
-### ~~11.10 De-worktree action~~ — pending commit
+### ~~11.10 De-worktree action~~ — `a8c7415`
 
 **Files**
 
@@ -1090,7 +1092,7 @@ design; verify with `grep` before editing.
   repo, the parent has no record of it, the row renders as a
   regular project (no `↪parent` suffix).
 
-### 11.11 `b fix`
+### ~~11.11 `b fix`~~ — pending commit
 
 **Files**
 

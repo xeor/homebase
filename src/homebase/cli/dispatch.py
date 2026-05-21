@@ -33,6 +33,7 @@ def dispatch_command(
     cmd_rm: Callable[..., int],
     cmd_fix: Callable[..., int],
     cmd_deworktree: Callable[[Path, str], int],
+    cmd_fix_worktrees: Callable[[Path, bool], int],
     cmd_archive_ls: Callable[[Path, str], int],
     cmd_archive_undo: Callable[[Path, str], int],
     cmd_archive_restore_entry: Callable[[Path, str], int],
@@ -127,6 +128,8 @@ def dispatch_command(
         )
     if ns.command == "deworktree":
         return cmd_deworktree(base_dir, str(getattr(ns, "path", ".") or "."))
+    if ns.command == "fix-worktrees":
+        return cmd_fix_worktrees(base_dir, bool(getattr(ns, "apply", False)))
     if ns.command == "fix":
         import sys
 

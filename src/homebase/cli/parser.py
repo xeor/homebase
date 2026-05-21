@@ -203,6 +203,16 @@ def build_cli_parser() -> argparse.ArgumentParser:
         help="worktree project directory (default: cwd)",
     )
 
+    p_fix_worktrees = sub.add_parser(
+        "fix-worktrees",
+        help="audit and (with --apply) repair worktree pointers under base",
+    )
+    p_fix_worktrees.add_argument(
+        "--apply",
+        action="store_true",
+        help="mutate state to repair detected issues (default: dry-run)",
+    )
+
     p_rm = sub.add_parser("rm", help="delete a directory recursively")
     p_rm.add_argument("path", nargs="?", default=".", help="target path (default: cwd)")
     p_rm.add_argument("--force-outside-base", action="store_true", help="allow deleting outside base root")

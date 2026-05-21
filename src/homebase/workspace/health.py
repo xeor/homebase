@@ -1,0 +1,279 @@
+from __future__ import annotations
+
+import subprocess
+from dataclasses import dataclass
+from pathlib import Path
+
+from ..metadata.api import (
+    append_base_log,
+    load_base_worktree,
+    save_base_worktree,
+)
+from .worktree_paths import find_worktree_children
+
+ISSUE_STALE_GITDIR = "stale_gitdir"
+ISSUE_ORPHAN_ADMIN = "orphan_admin"
+ISSUE_MISSING_PARENT = "missing_parent"
+ISSUE_RELOCATED_PARENT = "relocated_parent"
+ISSUE_MISSING_GITDIR_FILE = "missing_gitdir_file"
+
+
+@dataclass(frozen=True)
+class WorktreeIssue:
+    path: Path
+    kind: str
+    detail: str
+    fix_summary: str
+    parent_path: Path | None = None
+
+
+def audit_workspace(base_dir: Path) -> list[WorktreeIssue]:
+    issues: list[WorktreeIssue] = []
+    if not base_dir.is_dir():
+        return issues
+    worktree_rows = _collect_worktree_rows(base_dir)
+    parent_rows = _collect_potential_parents(base_dir)
+
+    for row, block in worktree_rows:
+        issues.extend(_audit_worktree_row(base_dir, row, block))
+    for parent in parent_rows:
+        issues.extend(_audit_parent_admin(base_dir, parent, worktree_rows))
+    return issues
+
+
+def _collect_worktree_rows(base_dir: Path) -> list[tuple[Path, dict[str, str]]]:
+    out: list[tuple[Path, dict[str, str]]] = []
+    for entry in sorted(base_dir.iterdir(), key=lambda p: p.name):
+        if not entry.is_dir() or entry.name.startswith(".") or entry.name in {"_archive", "_tags"}:
+            continue
+        block = load_base_worktree(entry)
+        if block is not None:
+            out.append((entry, block))
+    return out
+
+
+def _collect_potential_parents(base_dir: Path) -> list[Path]:
+    out: list[Path] = []
+    for entry in sorted(base_dir.iterdir(), key=lambda p: p.name):
+        if not entry.is_dir() or entry.name.startswith(".") or entry.name in {"_archive", "_tags"}:
+            continue
+        if (entry / "repo" / ".git").is_dir():
+            out.append(entry)
+    return out
+
+
+def _audit_worktree_row(
+    base_dir: Path,
+    worktree: Path,
+    block: dict[str, str],
+) -> list[WorktreeIssue]:
+    issues: list[WorktreeIssue] = []
+    pointer_file = worktree / "repo" / ".git"
+    parent_name = block.get("of", "")
+    gitdir_id = block.get("gitdir_id", "")
+    parent_path_meta = block.get("parent_path", "")
+    inferred_parent = base_dir / parent_name / "repo" if parent_name else None
+
+    if inferred_parent is None or not inferred_parent.is_dir():
+        if parent_path_meta and Path(parent_path_meta).is_dir():
+            issues.append(
+                WorktreeIssue(
+                    path=worktree,
+                    kind=ISSUE_RELOCATED_PARENT,
+                    detail=(
+                        f"worktree.of={parent_name!r} but {parent_name}/ is missing; "
+                        f"parent_path still resolves at {parent_path_meta}"
+                    ),
+                    fix_summary="repair pointers from parent_path",
+                    parent_path=Path(parent_path_meta),
+                )
+            )
+            return issues
+        issues.append(
+            WorktreeIssue(
+                path=worktree,
+                kind=ISSUE_MISSING_PARENT,
+                detail=f"parent project {parent_name!r} is gone",
+                fix_summary="deworktree manually or drop worktree: block",
+            )
+        )
+        return issues
+
+    parent_path = inferred_parent
+    if not pointer_file.exists():
+        issues.append(
+            WorktreeIssue(
+                path=worktree,
+                kind=ISSUE_MISSING_GITDIR_FILE,
+                detail=f"{pointer_file} does not exist",
+                fix_summary="rebuild pointer via git worktree repair on parent",
+                parent_path=parent_path,
+            )
+        )
+        return issues
+    if not pointer_file.is_file():
+        return issues
+
+    try:
+        text = pointer_file.read_text(encoding="utf-8", errors="replace").strip()
+    except OSError:
+        text = ""
+    expected_admin = parent_path / ".git" / "worktrees" / gitdir_id if gitdir_id else None
+    points_at = None
+    if text.startswith("gitdir:"):
+        points_at = Path(text.split(":", 1)[1].strip())
+    if (
+        expected_admin is not None
+        and (points_at is None or points_at.resolve(strict=False) != expected_admin.resolve(strict=False))
+    ):
+        issues.append(
+            WorktreeIssue(
+                path=worktree,
+                kind=ISSUE_STALE_GITDIR,
+                detail=(
+                    f"pointer={points_at} expected={expected_admin}"
+                ),
+                fix_summary="re-anchor via git worktree repair on parent",
+                parent_path=parent_path,
+            )
+        )
+    elif expected_admin is not None and not expected_admin.is_dir():
+        issues.append(
+            WorktreeIssue(
+                path=worktree,
+                kind=ISSUE_MISSING_GITDIR_FILE,
+                detail=f"parent admin entry {expected_admin} missing",
+                fix_summary="recreate admin entry via git worktree repair",
+                parent_path=parent_path,
+            )
+        )
+    return issues
+
+
+def _audit_parent_admin(
+    base_dir: Path,
+    parent: Path,
+    worktree_rows: list[tuple[Path, dict[str, str]]],
+) -> list[WorktreeIssue]:
+    issues: list[WorktreeIssue] = []
+    admin_root = parent / "repo" / ".git" / "worktrees"
+    if not admin_root.is_dir():
+        return issues
+    known = {block.get("gitdir_id", ""): row for row, block in worktree_rows}
+    for entry in sorted(admin_root.iterdir(), key=lambda p: p.name):
+        if not entry.is_dir():
+            continue
+        gitdir_file = entry / "gitdir"
+        if not gitdir_file.is_file():
+            continue
+        try:
+            target = gitdir_file.read_text(encoding="utf-8", errors="replace").strip()
+        except OSError:
+            target = ""
+        target_path = Path(target) if target else None
+        target_exists = target_path is not None and target_path.exists()
+        worktree_row = known.get(entry.name)
+        if target_exists:
+            continue
+        if worktree_row is not None:
+            issues.append(
+                WorktreeIssue(
+                    path=worktree_row,
+                    kind=ISSUE_STALE_GITDIR,
+                    detail=(
+                        f"admin entry {entry} still points at {target_path}; row lives at {worktree_row}"
+                    ),
+                    fix_summary="re-anchor via git worktree repair on parent",
+                    parent_path=parent / "repo",
+                )
+            )
+        else:
+            issues.append(
+                WorktreeIssue(
+                    path=entry,
+                    kind=ISSUE_ORPHAN_ADMIN,
+                    detail=f"admin entry at {entry} has no matching row and no live path",
+                    fix_summary="prune via git worktree prune",
+                    parent_path=parent / "repo",
+                )
+            )
+    return issues
+
+
+def repair_issue(issue: WorktreeIssue) -> tuple[bool, str]:
+    if issue.kind in {ISSUE_STALE_GITDIR, ISSUE_MISSING_GITDIR_FILE, ISSUE_RELOCATED_PARENT}:
+        return _repair_via_repair(issue)
+    if issue.kind == ISSUE_ORPHAN_ADMIN:
+        return _repair_via_prune(issue)
+    return False, f"no automatic fix for {issue.kind}"
+
+
+def _repair_via_repair(issue: WorktreeIssue) -> tuple[bool, str]:
+    parent_repo = issue.parent_path
+    if parent_repo is None:
+        return False, "missing parent_path"
+    if not parent_repo.is_dir():
+        return False, f"parent_path not a directory: {parent_repo}"
+    try:
+        proc = subprocess.run(
+            ["git", "-C", str(parent_repo), "worktree", "repair", str(issue.path / "repo")],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except (subprocess.SubprocessError, OSError) as exc:
+        return False, f"git worktree repair failed: {exc}"
+    if proc.returncode != 0:
+        detail = (proc.stderr or proc.stdout or "").strip()
+        return False, f"git worktree repair exit={proc.returncode}: {detail}"
+    if issue.kind == ISSUE_RELOCATED_PARENT:
+        block = load_base_worktree(issue.path)
+        if block is not None:
+            save_base_worktree(
+                issue.path,
+                of=block["of"],
+                branch=block["branch"],
+                parent_path=str(parent_repo),
+                gitdir_id=block.get("gitdir_id"),
+            )
+    append_base_log(
+        issue.path,
+        "worktree_repair",
+        {"kind": issue.kind, "detail": issue.detail},
+    )
+    return True, "git worktree repair applied"
+
+
+def _repair_via_prune(issue: WorktreeIssue) -> tuple[bool, str]:
+    parent_repo = issue.parent_path
+    if parent_repo is None or not parent_repo.is_dir():
+        return False, "parent_path missing"
+    try:
+        proc = subprocess.run(
+            ["git", "-C", str(parent_repo), "worktree", "prune"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except (subprocess.SubprocessError, OSError) as exc:
+        return False, f"git worktree prune failed: {exc}"
+    if proc.returncode != 0:
+        return False, (proc.stderr or proc.stdout or "").strip()
+    return True, "git worktree prune applied"
+
+
+def list_workspace_parents(base_dir: Path) -> list[Path]:
+    return _collect_potential_parents(base_dir)
+
+
+__all__ = [
+    "WorktreeIssue",
+    "audit_workspace",
+    "repair_issue",
+    "find_worktree_children",
+    "ISSUE_STALE_GITDIR",
+    "ISSUE_ORPHAN_ADMIN",
+    "ISSUE_MISSING_PARENT",
+    "ISSUE_RELOCATED_PARENT",
+    "ISSUE_MISSING_GITDIR_FILE",
+]

@@ -35,6 +35,7 @@ def _stub_dispatch_kwargs(**overrides: object) -> dict[str, object]:
         cmd_rm=lambda _a, _b: 0,
         cmd_fix=lambda _a: 0,
         cmd_deworktree=lambda _bd, _path: 0,
+        cmd_fix_worktrees=lambda _bd, _apply: 0,
         cmd_archive_ls=lambda _a, _b: 0,
         cmd_archive_undo=lambda _a, _b: 0,
         cmd_archive_restore_entry=lambda _a, _b: 0,
