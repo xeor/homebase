@@ -471,6 +471,13 @@ BASE_META_ALLOWED_KEYS: set[str] = {
     "description",
     "wip",
     "log",
+    "worktree",
+}
+WORKTREE_META_ALLOWED_KEYS: set[str] = {
+    "of",
+    "branch",
+    "parent_path",
+    "gitdir_id",
 }
 HOOK_EVENTS: tuple[str, ...] = (
     "rename",

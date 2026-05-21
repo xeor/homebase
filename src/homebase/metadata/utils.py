@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from pathlib import Path
+
+from ..core.constants import LEVEL_ERROR, WORKTREE_META_ALLOWED_KEYS
 
 
 def extract_base_meta_fields(data: object) -> tuple[list[str], str, bool]:
@@ -81,6 +84,7 @@ def base_meta_schema_issues(
         return [(warning_level, "invalid_root", "root must be a mapping")]
 
     warns: list[str] = []
+    errors: list[tuple[str, str, str]] = []
     tags = raw.get("tags", [])
     if not (isinstance(tags, list) or isinstance(tags, str) or tags is None):
         warns.append("tags has non-standard type")
@@ -99,6 +103,9 @@ def base_meta_schema_issues(
         if "events" in log_val and not isinstance(events, list):
             warns.append("log.events should be list")
 
+    if "worktree" in raw:
+        errors.extend(_worktree_schema_issues(raw.get("worktree"), warns))
+
     extra_keys = sorted(key for key in raw.keys() if str(key) not in allowed_keys)
     if extra_keys:
         preview = ", ".join(str(key) for key in extra_keys[:4])
@@ -106,6 +113,47 @@ def base_meta_schema_issues(
             preview += f" (+{len(extra_keys) - 4} more)"
         warns.append(f"unknown key(s): {preview}")
 
+    issues: list[tuple[str, str, str]] = list(errors)
     if warns:
-        return [(warning_level, "schema_warn", "; ".join(warns[:3]))]
-    return []
+        issues.append((warning_level, "schema_warn", "; ".join(warns[:3])))
+    return issues
+
+
+def _worktree_schema_issues(
+    block: object, warns: list[str]
+) -> list[tuple[str, str, str]]:
+    if not isinstance(block, Mapping):
+        return [(LEVEL_ERROR, "worktree_invalid", "worktree must be a mapping")]
+
+    errors: list[tuple[str, str, str]] = []
+    for required in ("of", "branch"):
+        value = block.get(required)
+        if not isinstance(value, str) or not value.strip():
+            errors.append(
+                (
+                    LEVEL_ERROR,
+                    "worktree_invalid",
+                    f"worktree.{required} must be a non-empty string",
+                )
+            )
+
+    if "parent_path" in block:
+        value = block.get("parent_path")
+        if not isinstance(value, str) or not value.strip():
+            warns.append("worktree.parent_path must be a non-empty string")
+        elif not Path(value).is_absolute():
+            warns.append("worktree.parent_path must be an absolute path")
+
+    if "gitdir_id" in block:
+        value = block.get("gitdir_id")
+        if not isinstance(value, str) or not value.strip():
+            warns.append("worktree.gitdir_id must be a non-empty string")
+
+    extra = sorted(key for key in block.keys() if str(key) not in WORKTREE_META_ALLOWED_KEYS)
+    if extra:
+        preview = ", ".join(str(key) for key in extra[:4])
+        if len(extra) > 4:
+            preview += f" (+{len(extra) - 4} more)"
+        warns.append(f"unknown worktree key(s): {preview}")
+
+    return errors

@@ -423,3 +423,57 @@ def save_base_wip(path: Path, wip: bool) -> None:
     else:
         data.pop("wip", None)
     save_base_data(path, data)
+
+
+def save_base_worktree(
+    path: Path,
+    *,
+    of: str,
+    branch: str,
+    parent_path: str | None = None,
+    gitdir_id: str | None = None,
+) -> None:
+    of_value = of.strip()
+    branch_value = branch.strip()
+    if not of_value or not branch_value:
+        raise ValueError("worktree.of and worktree.branch must be non-empty")
+    block: dict[str, object] = {"of": of_value, "branch": branch_value}
+    if parent_path is not None:
+        parent_value = parent_path.strip()
+        if not parent_value:
+            raise ValueError("worktree.parent_path must be non-empty when provided")
+        if not Path(parent_value).is_absolute():
+            raise ValueError("worktree.parent_path must be absolute")
+        block["parent_path"] = parent_value
+    if gitdir_id is not None:
+        gitdir_value = gitdir_id.strip()
+        if not gitdir_value:
+            raise ValueError("worktree.gitdir_id must be non-empty when provided")
+        block["gitdir_id"] = gitdir_value
+    ensure_base_marker(path)
+    data = load_base_data(path)
+    data["worktree"] = block
+    save_base_data(path, data)
+
+
+def load_base_worktree(path: Path) -> dict[str, str] | None:
+    data = load_base_data(path)
+    raw = data.get("worktree")
+    if not isinstance(raw, dict):
+        return None
+    out: dict[str, str] = {}
+    for key in ("of", "branch", "parent_path", "gitdir_id"):
+        value = raw.get(key)
+        if isinstance(value, str) and value.strip():
+            out[key] = value
+    if "of" not in out or "branch" not in out:
+        return None
+    return out
+
+
+def clear_base_worktree(path: Path) -> None:
+    ensure_base_marker(path)
+    data = load_base_data(path)
+    if data.pop("worktree", None) is None:
+        return
+    save_base_data(path, data)

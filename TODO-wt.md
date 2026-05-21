@@ -483,9 +483,9 @@ won't exist on restore). Mitigations:
 
 Each step ships independently and leaves the tool usable.
 
-1. **Fix `.git` detection.** `git_info()` and any siblings that
+1. ~~**Fix `.git` detection.** `git_info()` and any siblings that
    special-case `.git` as a directory. Tests with a real worktree
-   under `tmp_path`.
+   under `tmp_path`.~~ — `61cf16c`
 2. **Schema.** Add `worktree` (with `of`, `branch`, `parent_path`,
    `gitdir_id`) to `BASE_META_ALLOWED_KEYS` and the validator.
    Tests.
@@ -616,7 +616,7 @@ that has already bitten us in the design phase), **done when**
 Pinned file references below are from a snapshot taken during
 design; verify with `grep` before editing.
 
-### 11.1 Fix `.git` detection
+### ~~11.1 Fix `.git` detection~~ — `61cf16c`
 
 **Files**
 

@@ -52,3 +52,61 @@ def test_base_meta_schema_issues_reports_warnings() -> None:
     assert level == "warning"
     assert code == "schema_warn"
     assert "tags has non-standard type" in message
+
+
+_ALLOWED = {"tags", "description", "wip", "log", "worktree"}
+
+
+def test_base_meta_schema_issues_accepts_full_worktree_block() -> None:
+    issues = metadata_utils.base_meta_schema_issues(
+        {
+            "worktree": {
+                "of": "foo",
+                "branch": "feature/auth",
+                "parent_path": "/abs/parent/repo",
+                "gitdir_id": "feature-auth",
+            }
+        },
+        allowed_keys=_ALLOWED,
+    )
+    assert issues == []
+
+
+def test_base_meta_schema_issues_requires_of_and_branch() -> None:
+    issues = metadata_utils.base_meta_schema_issues(
+        {"worktree": {"of": "", "branch": "  "}},
+        allowed_keys=_ALLOWED,
+    )
+    codes = [code for _level, code, _msg in issues]
+    assert codes.count("worktree_invalid") == 2
+
+
+def test_base_meta_schema_issues_flags_relative_parent_path() -> None:
+    issues = metadata_utils.base_meta_schema_issues(
+        {
+            "worktree": {
+                "of": "foo",
+                "branch": "x",
+                "parent_path": "relative/path",
+            }
+        },
+        allowed_keys=_ALLOWED,
+    )
+    assert any("absolute path" in msg for _l, _c, msg in issues)
+
+
+def test_base_meta_schema_issues_flags_unknown_worktree_subkey() -> None:
+    issues = metadata_utils.base_meta_schema_issues(
+        {"worktree": {"of": "foo", "branch": "x", "junk": 1}},
+        allowed_keys=_ALLOWED,
+    )
+    assert any("unknown worktree key" in msg for _l, _c, msg in issues)
+
+
+def test_base_meta_schema_issues_rejects_non_mapping_worktree() -> None:
+    issues = metadata_utils.base_meta_schema_issues(
+        {"worktree": "no"},
+        allowed_keys=_ALLOWED,
+    )
+    codes = [code for _level, code, _msg in issues]
+    assert "worktree_invalid" in codes
