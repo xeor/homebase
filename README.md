@@ -63,6 +63,23 @@ Shell completion:
   templates (`b new --template <tab>`), and project names
   (`b cd <tab>`, `b rm <tab>`).
 
+## Worktrees
+
+`b` treats every `git worktree` as a first-class project sibling under
+`<base>/<parent>-<sanitised-branch>/`. The `worktree:` block in
+`.base.yaml` keeps the pointers self-describing, and `git worktree
+repair` is called on rename/archive so the parent's admin entry stays
+in sync. Filters `:repo=<name>` (umbrella) and `:worktree-of=<name>`
+(strict) narrow to a family. If pointers drift (manual moves, packed
+archives, relocated base), run `b fix-worktrees [--apply]`.
+
+```sh
+uv run b new featx --as worktree --from foo
+uv run b new featx                # inside <base>/foo/repo, auto-detects
+uv run b deworktree foo-featx     # detach into a standalone clone
+uv run b fix-worktrees --apply    # audit + repair pointers
+```
+
 ## Shell integration (parent-shell cd handoff)
 
 Commands like `b cd <name>`, `b new --cd`, and the post-action cleanup

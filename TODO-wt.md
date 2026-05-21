@@ -1,6 +1,9 @@
 # TODO-wt — Worktree Support in `b`
 
-Status: design draft, not implemented. Iterate inline.
+Status: shipped (§11.1–§11.12 landed in `61cf16c..57ba194`; one
+follow-up is parked under §11.11 for the TUI sticky popup, the
+`worktree_health` cache table, and the idle-scan refresh). Left in
+the repo as a historical record per §10.4 — don't delete.
 
 ## 1. Goal
 
