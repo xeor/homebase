@@ -112,6 +112,24 @@ Existing bare-key filters (`last=@-7d`, `created>=2025-01-01`,
   old syntax
 - onboarding hints / placeholder text
 
+CLAUDE-COMMENT: User-side config carryover. A user's
+`<base>/.homebase/config.yaml` can already contain literal
+`last=@-7d` strings under `filters.saved` or `filters.named` (the
+README shows this). After the cut to `:last=…`, those entries
+silently match nothing. Three options:
+(a) Silent — entries don't match, no warning. User notices and
+   updates the config when they realise.
+(b) Warn at startup — scan `filters.*` once on load and emit a
+   non-fatal log line listing each stale entry and the new
+   spelling. No auto-fix.
+(c) One-shot rewrite — startup detects old syntax and rewrites
+   the user's `config.yaml` in place (with a backup copy). Logs
+   what was changed.
+Default proposal: (b). Aligns with the homebase rule "no migration
+blocks" ([[feedback_no_migration_blocks]]) but doesn't surprise
+the user by mutating their config.
+COMMENT: A. No need to migrate anything since there is noone except me using this yet.
+
 ### 4.2 Operators
 
 The query language parses all of `=`, `!=`, `<`, `<=`, `>`, `>=`,
@@ -186,6 +204,24 @@ Branch handling:
   etc.). The success message surfaces the actual base ref so the
   user sees what happened.
 
+CLAUDE-COMMENT: Base ref when creating from a worktree row.
+Scenario: I'm in `foo-featx` (a worktree on branch `featx`) and I
+run `b new bugfix-y`. The new worktree's *parent* is `foo` (root
+resolution from §5.1) — that's settled. But which ref does the
+new branch fork from?
+(a) The root parent's HEAD — same as if I had run the command from
+   `foo` directly. New branch starts from `main` (or whatever
+   `foo` has checked out).
+(b) The selected row's branch — new branch forks from `featx`.
+   This matches "I'm working on featx and want a side-branch off
+   of it" intuition.
+Default proposal: (b). The user's cwd / selection tells us what
+they're conceptually branching off of; (a) ignores that context.
+Plain git's `git worktree add -b new <path>` from inside the
+featx worktree also forks from `featx`, so (b) matches upstream
+behaviour too.
+COMMENT: Lets do B. It is the less magic.
+
 Constraints:
 
 - Single-target only. Worktree creation never operates on a
@@ -258,20 +294,39 @@ helper, same tests, no duplicate logic. Every successful rewrite
 also updates `.base.yml`'s `worktree.parent_path` / `worktree.of`
 to match.
 
+CLAUDE-COMMENT: Use git's own commands or hand-rewrite pointers?
+Git ships two commands that do most of this work natively:
+- `git worktree move <worktree> <new-path>` rewrites both
+  pointers atomically. We could use it instead of hand-editing
+  `parent/.git/worktrees/<id>/gitdir` ourselves.
+- `git worktree repair` walks every worktree of a repo and fixes
+  stale pointers. We could use it inside `b fix` (§7.4) instead
+  of hand-rewriting.
+Options:
+(a) Use git's commands wherever they apply (move + repair); only
+   hand-edit when we need to do something git won't (e.g. moving
+   both ends in a single transaction during parent rename).
+(b) Hand-rewrite everything — fewer subprocess calls, full
+   control, but we own all the edge cases.
+Default proposal: (a). Less surface, fewer ways to corrupt
+`.git/`, and git's behaviour is the spec we'd otherwise be
+re-implementing. Hand-rewrites stay reserved for cases git's CLI
+genuinely can't handle.
+COMMENT: Do A as much as possible
+
 ### 7.1 Rename / archive / move flows
 
 1. **Renaming a worktree project** (`b mv foo-featx foo-newname`):
-   rewrite the parent's `.git/worktrees/<id>/gitdir` to the new
-   worktree path. Worktree's own `repo/.git` is unchanged (it
-   still points at the same parent admin entry).
+   `git worktree move <old-path> <new-path>` if available; else
+   hand-rewrite the parent's `.git/worktrees/<id>/gitdir`.
 2. **Archiving a worktree project**: same as rename, with the new
    path under `_archive/…`. The archived worktree must still be a
    working git repo when the user `cd`s into it.
-3. **Renaming the parent project** (`b mv foo bar`): for every
-   row with `worktree.of == foo`:
-   - rewrite the worktree's `repo/.git` to the new parent path
-   - update `worktree.of` and `worktree.parent_path` in the
-     worktree's `.base.yml`
+3. **Renaming the parent project** (`b mv foo bar`): after the
+   parent directory moves, run `git -C <new-parent>/repo worktree
+   repair` to fix every linked worktree's `repo/.git`. Then walk
+   every row with `worktree.of == foo` and update `worktree.of`
+   and `worktree.parent_path` in their `.base.yml`.
 
 ### 7.2 Archiving the parent (with active worktrees)
 
@@ -304,8 +359,8 @@ no relationship to the former parent.
 Method: **wholesale copy of the parent's `.git/` directory**
 (option C in the prior round) — `rsync -a <parent>/.git/
 <worktree>/repo/.git/` (or equivalent `cp -a`). This carries the
-full history, reflog, stash list, hooks, and packed refs across.
-Then:
+full history, reflog, stash list, hooks, packed refs, and every
+branch ref across. Then:
 
 1. Delete `<worktree>/repo/.git/worktrees/` from the new
    standalone — those admin entries are about the parent's other
@@ -318,32 +373,10 @@ Then:
    worktree directory we just rebuilt is left untouched).
 4. Strip `worktree:` from the worktree's `.base.yml`.
 
-CLAUDE-COMMENT: Stash list duplication. Wholesale `.git/` copy
-mirrors the parent's stash list onto the new standalone, so both
-ends have identical stashes after de-worktreeing. Acceptable?
-Options:
-(a) Accept duplication — git stashes are just refs, the user can
-   `git stash drop` either side manually.
-(b) After copy, run `git stash clear` on the new standalone so it
-   starts with an empty stash list (loses any stash entries that
-   were created in this worktree's session — git can't tell
-   which stash came from which worktree).
-(c) Same as (b) but only when the user opts in via a confirm
-   prompt.
-Default proposal: (a). Duplication is harmless and reversible;
-silently clearing stashes could lose work.
-COMMENT: A
-
-CLAUDE-COMMENT: Branch refs duplication. Same shape as the stash
-question: wholesale copy means the new standalone has refs for
-every branch the parent has, not just the worktree's own. Options:
-(a) Keep all refs — it's effectively a full clone with shared
-   history, the user prunes what they don't need.
-(b) After copy, delete every local branch except the worktree's
-   own branch and remote-tracking branches.
-Default proposal: (a). Branches are cheap; matches a "git clone"
-result.
-COMMENT: A
+Stash list and branch refs are intentionally duplicated onto the
+new standalone (cheap, reversible, matches "git clone" expectations);
+the user can `git stash drop` or `git branch -d` either side
+later. Confirm prompt mentions both.
 
 ### 7.4 `b fix`
 
@@ -354,9 +387,9 @@ three ways:
 - `b fix` (CLI, dry-run by default; `--apply` to mutate)
 - TUI action in the standard action list, target scope = workspace
 - Auto-detect: on TUI startup the workspace is scanned; if any
-  broken worktrees are found, a non-modal banner appears
-  ("X broken worktrees — run `b fix`"). The banner never
-  auto-repairs.
+  broken worktrees are found, the existing timed-notification
+  popup system surfaces a notice (corner toast, not status menu).
+  See open question below for sticky-vs-timed behaviour.
 
 Scope:
 
@@ -376,13 +409,21 @@ Scope:
   `<base>/` to a new absolute path, all pointers are stale.
   `b fix` detects this by comparing the current `<base>` against
   each `.base.yml`'s `worktree.parent_path` and rewrites stale
-  pointers in one pass.
+  pointers in one pass (preferring `git worktree repair` on each
+  parent — see §7 framing question).
 - Packed-archive recovery: unpacking a worktree (§7.5) leaves
   stale pointers. `b fix` recomputes them from `worktree.of` +
   `worktree.gitdir_id` + the current parent's
   `.git/worktrees/<id>/`. If the gitdir_id no longer exists in
   the parent, `b fix` recreates the admin entry on the parent
   side using `git worktree repair`.
+
+Orphan recovery (worktree's `worktree.of` points at a project
+that no longer exists under `<base>/`): if `worktree.parent_path`
+still resolves to a git repo on disk (even outside `<base>/`),
+`b fix` suggests de-worktreeing using that parent. Otherwise it
+suggests dropping the `worktree:` block — making the row a
+regular project — and lets the user reconnect git manually.
 
 UX rules:
 
@@ -393,41 +434,30 @@ UX rules:
   logged to the project's `.base.yml` `log:` array
   ([[feedback_no_git_actions]]).
 
-CLAUDE-COMMENT: Banner placement. When startup detects broken
-worktrees, where does the "run b fix" notice live?
-(a) Persistent top banner above the table, dismissable per
-   session but reappears on next startup until resolved.
-(b) Status line at the bottom (one-line, low contrast).
-(c) Modal popup on startup, one click to dismiss.
-Default proposal: (a). Visible without being intrusive; (c) is
-disruptive, (b) is too quiet for "your git repos are broken".
-COMMENT: yes, lets do A. Or if possible, just reuse how the timed notifications work already. They show up in the corner (not the status-meny) but as popups.
+Exit codes (documented):
 
-CLAUDE-COMMENT: `b fix` exit code policy. When run from the CLI in
-dry-run (the default) and issues are found, should the process
-exit non-zero?
-(a) Exit 0 in dry-run regardless; non-zero only if `--apply`
-   failed during a write.
-(b) Exit non-zero whenever issues exist (even in dry-run), 0 when
-   clean. Makes `b fix && deploy` usable as a precondition check.
-Default proposal: (b). Scriptability wins; the user can pass a
-flag to opt out if they ever want dry-run-as-info.
-COMMENT: 0 when clean, other exitcodes on fails. Feel free to have multiple exit codes for different types of errors, as long as you document it.
+| Code | Meaning                                              |
+| ---- | ---------------------------------------------------- |
+| 0    | Clean — no issues detected.                          |
+| 1    | Dry-run found issues (no mutations attempted).       |
+| 2    | `--apply` ran and at least one fix failed mid-write. |
+| 3    | Invalid invocation — no `<base>`, bad CLI args, etc. |
 
-CLAUDE-COMMENT: Orphan recovery. What happens when a worktree's
-`worktree.of` points at a project that no longer exists under
-`<base>/` (e.g. parent was deleted via the §6.1 orphan path)?
-(a) Flag as broken; no auto-suggestion. User decides manually.
-(b) Suggest "de-worktree using preserved `parent_path`" if that
-   path still resolves to a git repo on disk (even outside
-   `<base>/`).
-(c) Suggest "drop the worktree: block" — making the row a regular
-   project — and let the user reconnect git manually.
-Default proposal: (b) when `parent_path` resolves, otherwise (c).
-This makes orphaned worktrees recoverable in the common case
-(parent was archived elsewhere) and degrades to a sane fallback
-otherwise.
-COMMENT: agree
+CLAUDE-COMMENT: Notification reuse. Existing timed-notification
+popups auto-dismiss after a few seconds. A "you have N broken
+worktrees" notice that vanishes that quickly is too easy to miss.
+Options:
+(a) Reuse the popup component verbatim — same auto-dismiss
+   timing as other notices. Briefer visibility, but consistent.
+(b) Reuse the popup component but mark the notice as "sticky":
+   it stays in the corner until the user dismisses it (or until
+   the underlying issue resolves on next scan).
+(c) Fire the toast on every startup until resolved, with the
+   normal timeout — repeated annoyance forces eventual action.
+Default proposal: (b). It matches your earlier "persistent
+banner" preference while still reusing the existing popup
+mechanism instead of building a new banner widget.
+COMMENT: Lets do B. Take special care when doing checks like this on startup to not slow the startuptime down.
 
 ### 7.5 Packed archives (`.tar.zst` etc.)
 
@@ -442,7 +472,7 @@ won't exist on restore). Mitigations:
 - **At unpack time**, detect that the unpacked dir is a worktree
   (has `worktree:` block) and that its `repo/.git` pointer is
   stale. Surface a "stale worktree, run `b fix`" notice; the
-  §7.4 auto-detect banner will also surface this on next TUI
+  §7.4 auto-detect popup will also surface this on next TUI
   startup. Do not auto-repair as part of unpack.
 - `b fix` (§7.4) does the actual repair using the four fields
   above + the now-resolved parent location.
@@ -481,7 +511,9 @@ Each step ships independently and leaves the tool usable.
 4. **Filter framework migration.** Move existing
    `created=`/`opened=`/`last=` to the `:` prefix. Parse all
    operators; implement only `=`. Add registry. Update parser,
-   normaliser, pretty-printer, saved/named filters, docs.
+   normaliser, pretty-printer, saved/named filters in defaults,
+   docs. Add the startup hint for stale user-config entries
+   (§4.1).
 5. **Filter keys.** Register `:worktree-of=` (strict) and
    `:repo=` (umbrella). Tests.
 6. **`b new --as worktree`** (CLI) + auto-default rule when cwd is
@@ -494,14 +526,16 @@ Each step ships independently and leaves the tool usable.
    + "de-worktree first" / "move all together" alternatives
    (the de-worktree branch lands in step 10).
 9. **Rename / archive pointer rewriting.** §7.1 items 1–3, single
-   helper used from both CLI and TUI. Updates `worktree.of` /
-   `worktree.parent_path` in `.base.yml` as part of each mutation.
-   Tests for every code path that mutates a project's location.
+   helper used from both CLI and TUI. Uses `git worktree
+   move` / `git worktree repair` per the §7 framing question.
+   Updates `worktree.of` / `worktree.parent_path` in `.base.yml`
+   as part of each mutation. Tests for every code path that
+   mutates a project's location.
 10. **De-worktree action.** §7.3, rsync-of-`.git` method. CLI +
     action list entry. Tests.
 11. **`b fix`.** §7.4. Audit + dry-run + `--apply` + startup
-    auto-detect banner. Tests including a relocated-base-folder
-    fixture and an orphan-worktree fixture.
+    popup + documented exit codes. Tests including a
+    relocated-base-folder fixture and an orphan-worktree fixture.
 12. **Packed archive flow.** §7.5. Warning on pack, detection on
     unpack, repair via `b fix`.
 
