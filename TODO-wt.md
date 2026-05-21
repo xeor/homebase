@@ -525,7 +525,7 @@ Each step ships independently and leaves the tool usable.
     + CLI shipped as `b fix-worktrees`; TUI sticky popup, cache
     table, and idle scan deferred to a follow-up)
 12. ~~**Packed archive flow.** §7.5. Warning on pack, detection on
-    unpack, repair via `b fix`.~~ — pending commit
+    unpack, repair via `b fix`.~~ — `57ba194`
 
 Items beyond 12 (merge, sync, prune, advanced status badges) are
 parked until we see real friction.
@@ -1164,7 +1164,7 @@ design; verify with `grep` before editing.
   exist; dismissal is session-only; documented exit codes
   honoured; startup is not measurably slower.
 
-### ~~11.12 Packed-archive flow~~ — pending commit
+### ~~11.12 Packed-archive flow~~ — `57ba194`
 
 **Files**
 
