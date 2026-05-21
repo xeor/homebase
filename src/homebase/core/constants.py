@@ -224,6 +224,14 @@ BUILTIN_ACTIONS: dict[str, BuiltinActionMeta] = {
         view_scope=("active", "archive"),
         default_confirm_prompt=None,
     ),
+    "new_worktree": BuiltinActionMeta(
+        id="new_worktree",
+        default_label="New worktree",
+        help_text="Open the new-project dialog pre-filled to make a worktree from this project",
+        scope="target",
+        view_scope=("active",),
+        default_confirm_prompt=None,
+    ),
     "review_meta": BuiltinActionMeta(
         id="review_meta",
         default_label="Open .base.yaml and review warnings",

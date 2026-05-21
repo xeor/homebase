@@ -149,7 +149,13 @@ class NewProjectScreen(ModalScreen[dict[str, object] | None]):
         Binding("escape", ACTION_CANCEL, "Cancel"),
     ]
 
-    def __init__(self, base_dir_ref: Path, allow_stay_in_b: bool = True) -> None:
+    def __init__(
+        self,
+        base_dir_ref: Path,
+        allow_stay_in_b: bool = True,
+        *,
+        prefill: dict[str, str] | None = None,
+    ) -> None:
         super().__init__()
         self.base_dir_ref = base_dir_ref
         self.allow_stay_in_b = bool(allow_stay_in_b)
@@ -175,6 +181,13 @@ class NewProjectScreen(ModalScreen[dict[str, object] | None]):
         # enter from any section submits.
         self.focus_section = 0
         self.toggle_index = 0
+        self.prefill = dict(prefill or {})
+        self.prefill_from_project = str(self.prefill.get("from_project", "")).strip()
+        if self.prefill_from_project:
+            self.toggle_values["cd"] = True
+        prefill_source = str(self.prefill.get("source", "")).strip()
+        if prefill_source and prefill_source in self.source_choices:
+            self.source_index = self.source_choices.index(prefill_source)
 
     # ---------- compose ----------
 
@@ -207,8 +220,17 @@ class NewProjectScreen(ModalScreen[dict[str, object] | None]):
             )
 
     def on_mount(self) -> None:
+        self._apply_prefill_values()
         self._set_section_focus()
         self._refresh()
+
+    def _apply_prefill_values(self) -> None:
+        raw_input = str(self.prefill.get("input", ""))
+        raw_name = str(self.prefill.get("name", ""))
+        if raw_input:
+            self.query_one("#new_input", Input).value = raw_input
+        if raw_name:
+            self.query_one("#new_name", Input).value = raw_name
 
     # ---------- helpers ----------
 
@@ -1030,6 +1052,8 @@ class NewProjectScreen(ModalScreen[dict[str, object] | None]):
                 "open" if self.toggle_values["cd"] else "stay"
             ),
         }
+        if self.prefill_from_project:
+            payload["from_project"] = self.prefill_from_project
         self.dismiss(payload)
 
     def action_cancel(self) -> None:

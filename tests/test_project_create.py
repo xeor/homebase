@@ -5,6 +5,11 @@ from types import SimpleNamespace
 
 from homebase.core.models import PreOutcome
 from homebase.ui.actions import project_create
+from homebase.ui.actions.project_create import (
+    _payload_to_namespace,
+    action_new_worktree,
+    build_new_worktree_prefill,
+)
 
 
 class _App:
@@ -56,6 +61,61 @@ def test_on_new_project_submit_aborts_on_pre_cancel(tmp_path: Path, monkeypatch)
     project_create.on_new_project_submit(app, payload, base_dir=tmp_path)
     assert called["plan"] == 0
     assert any("cancelled by hook" in msg for _lvl, msg in app.logs)
+
+
+def test_build_new_worktree_prefill_shape() -> None:
+    assert build_new_worktree_prefill("foo") == {
+        "source": "worktree",
+        "input": "",
+        "name": "",
+        "from_project": "foo",
+    }
+
+
+def test_payload_to_namespace_passes_from_project() -> None:
+    ns = _payload_to_namespace(
+        {
+            "input": "featx",
+            "source": "worktree",
+            "from_project": "foo",
+        }
+    )
+    assert ns.mode == "worktree"
+    assert ns.from_project == "foo"
+    assert ns.inputs == ["featx"]
+
+
+def test_action_new_worktree_pushes_screen_with_prefill(tmp_path: Path) -> None:
+    captured: dict[str, object] = {}
+
+    class _FakeScreen:
+        def __init__(self, base_dir: Path, allow_stay_in_b: bool = True, *, prefill=None):
+            captured["base_dir"] = base_dir
+            captured["allow_stay"] = allow_stay_in_b
+            captured["prefill"] = prefill
+
+    app = SimpleNamespace(
+        start_new_mode=False,
+        _on_new_project_submit=lambda _payload: None,
+    )
+
+    def _push(screen, _callback):
+        captured["screen"] = screen
+
+    app.push_screen = _push  # type: ignore[attr-defined]
+
+    action_new_worktree(
+        app,
+        base_dir=tmp_path,
+        new_project_screen=_FakeScreen,
+        parent_name="foo",
+    )
+    assert captured["prefill"] == {
+        "source": "worktree",
+        "input": "",
+        "name": "",
+        "from_project": "foo",
+    }
 
 
 def test_apply_pre_new_project_mutations_updates_namespace() -> None:

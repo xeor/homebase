@@ -503,9 +503,9 @@ Each step ships independently and leaves the tool usable.
    Branch forks from the selected/cwd row's branch (not the root
    parent's HEAD). Tests with real git, including a
    worktree-from-worktree fixture and parent-HEAD-detached
-   fixtures.~~ — pending commit
-7. **New action: "New worktree"** in the TUI action list,
-   single-target, opens prefilled `ctrl-n` dialog.
+   fixtures.~~ — `fcf6048`
+7. ~~**New action: "New worktree"** in the TUI action list,
+   single-target, opens prefilled `ctrl-n` dialog.~~ — pending commit
 8. **Delete-action wiring** for worktree rows
    (`git worktree remove` + admin cleanup). Parent-delete warning
    + "de-worktree first" / "move all together" alternatives
@@ -830,7 +830,7 @@ design; verify with `grep` before editing.
 
 - Tests pass; query bar accepts both keys.
 
-### ~~11.6 `b new --as worktree` (CLI)~~ — pending commit
+### ~~11.6 `b new --as worktree` (CLI)~~ — `fcf6048`
 
 **Files**
 
@@ -916,7 +916,7 @@ design; verify with `grep` before editing.
 - CLI path works end-to-end; auto-default works; tests cover
   the four scenarios above + collision.
 
-### 11.7 TUI "New worktree" action
+### ~~11.7 TUI "New worktree" action~~ — pending commit
 
 **Files**
 

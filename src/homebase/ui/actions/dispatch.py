@@ -68,6 +68,7 @@ def dispatch_action(app: Any, action_id: str) -> None:
             "reload_global_config",
             "hooks_refresh",
             "hooks_refresh_view",
+            "new_worktree",
         }:
             app._run_custom_action(aid)
             return

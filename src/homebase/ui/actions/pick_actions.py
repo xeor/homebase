@@ -232,6 +232,20 @@ def on_pick_actions(app: Any, value: str | None) -> None:
         app._hooks_refresh_action(workspace_scope=True)
         return True
 
+    def _handle_new_worktree() -> bool:
+        if len(targets) != 1:
+            app._log("new worktree requires a single target", "warn")
+            app._refresh_side()
+            return True
+        row = targets[0]
+        if row.archived:
+            app._log("cannot create worktree from archived project", "warn")
+            app._refresh_side()
+            return True
+        parent_name = row.worktree_of or row.name
+        app._action_new_worktree(parent_name)
+        return True
+
     handlers: dict[str, Callable[[], bool]] = {
         "tags_set": _handle_tags_set,
         "suffix_set": _handle_suffix_set,
@@ -247,6 +261,7 @@ def on_pick_actions(app: Any, value: str | None) -> None:
         "set_desc": _handle_set_desc,
         "hooks_refresh": _handle_hooks_refresh,
         "hooks_refresh_view": _handle_hooks_refresh_view,
+        "new_worktree": _handle_new_worktree,
     }
     handler = handlers.get(value)
     if handler is not None and handler():

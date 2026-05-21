@@ -27,6 +27,28 @@ def action_new_project(app: Any, *, base_dir: Path, new_project_screen: Any) -> 
     )
 
 
+def build_new_worktree_prefill(parent_name: str) -> dict[str, str]:
+    return {"source": "worktree", "input": "", "name": "", "from_project": parent_name}
+
+
+def action_new_worktree(
+    app: Any,
+    *,
+    base_dir: Path,
+    new_project_screen: Any,
+    parent_name: str,
+) -> None:
+    prefill = build_new_worktree_prefill(parent_name)
+    app.push_screen(
+        new_project_screen(
+            base_dir,
+            allow_stay_in_b=not app.start_new_mode,
+            prefill=prefill,
+        ),
+        app._on_new_project_submit,
+    )
+
+
 def _payload_to_namespace(payload: dict[str, object]) -> Namespace:
     """Translate the modal's payload into the same Namespace shape the
     CLI dispatcher produces, so `plan_and_apply_one` can consume it."""
@@ -80,6 +102,7 @@ def _payload_to_namespace(payload: dict[str, object]) -> Namespace:
         dry_run=None,
         archive=_flag(payload.get("archive")),
         multi=None,
+        from_project=str(payload.get("from_project", "") or ""),
     )
 
 

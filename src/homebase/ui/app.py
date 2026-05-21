@@ -240,7 +240,7 @@ _HOTBAR_PALETTE_TAG = f" \\[[{COLOR_ERROR_HEX}]@hotbar[/]]"
 
 def _build_view_config_default() -> dict[str, dict[str, list[tuple[str, str]]]]:
     ordered_ids = {
-        "active": ("archive", "set_desc", "delete"),
+        "active": ("new_worktree", "archive", "set_desc", "delete"),
         "archive": ("toggle_pack", "pack", "unpack", "restore", "set_desc", "delete"),
     }
     out: dict[str, dict[str, list[tuple[str, str]]]] = {"active": {"actions": []}, "archive": {"actions": []}}
@@ -2609,6 +2609,14 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
             self,
             base_dir=self.base_dir,
             new_project_screen=NewProjectScreen,
+        )
+
+    def _action_new_worktree(self, parent_name: str) -> None:
+        textual_ui_project_create.action_new_worktree(
+            self,
+            base_dir=self.base_dir,
+            new_project_screen=NewProjectScreen,
+            parent_name=parent_name,
         )
 
     def _on_new_project_submit(self, payload: dict[str, str | None] | None) -> None:
