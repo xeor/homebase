@@ -486,11 +486,11 @@ Each step ships independently and leaves the tool usable.
 1. ~~**Fix `.git` detection.** `git_info()` and any siblings that
    special-case `.git` as a directory. Tests with a real worktree
    under `tmp_path`.~~ — `61cf16c`
-2. **Schema.** Add `worktree` (with `of`, `branch`, `parent_path`,
+2. ~~**Schema.** Add `worktree` (with `of`, `branch`, `parent_path`,
    `gitdir_id`) to `BASE_META_ALLOWED_KEYS` and the validator.
-   Tests.
-3. **GIT column rendering.** Format `featx*  ↪foo` for worktree
-   rows. Tests with a row containing/lacking the `worktree:` block.
+   Tests.~~ — `a764893`
+3. ~~**GIT column rendering.** Format `featx*  ↪foo` for worktree
+   rows. Tests with a row containing/lacking the `worktree:` block.~~ — pending commit
 4. **Filter framework migration.** Move existing
    `created=`/`opened=`/`last=` to the `:` prefix. Parse all
    operators; implement only `=`. Add registry. Update parser,
@@ -659,7 +659,7 @@ design; verify with `grep` before editing.
   shows its branch in the existing GIT column (without §11.3's
   parent suffix yet — that's the next step).
 
-### 11.2 Schema additions
+### ~~11.2 Schema additions~~ — `a764893`
 
 **Files**
 
@@ -703,7 +703,7 @@ design; verify with `grep` before editing.
 - Schema accepts and validates the block. Read/write round-trip
   test passes.
 
-### 11.3 GIT column rendering
+### ~~11.3 GIT column rendering~~ — pending commit
 
 **Files**
 

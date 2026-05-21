@@ -8,7 +8,7 @@ from rich.text import Text
 from textual.widgets import DataTable
 
 from ...config.tag_rules import is_group_only, resolve_for_display
-from ...core.constants import COLOR_PENDING_HEX
+from ...core.constants import COLOR_PENDING_HEX, COLOR_WORKTREE_PARENT_HEX
 from ...core.models import ProjectRow
 from ...core.utils import WIDGET_API_ERRORS
 
@@ -56,6 +56,7 @@ def refresh_table(
             row.description,
             tuple(row.tags),
             tuple(row.properties),
+            row.worktree_of,
         )
 
     col_sig_parts: list[tuple[object, ...]] = []
@@ -331,6 +332,8 @@ def refresh_table(
             if row.stale:
                 git_style = "dim"
             git_cell = Text(git_text, style=git_style)
+            if row.worktree_of:
+                git_cell.append(f"  ↪{row.worktree_of}", style=COLOR_WORKTREE_PARENT_HEX)
 
         archived_at = "-"
         restore_short = "-"

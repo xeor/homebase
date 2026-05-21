@@ -239,3 +239,44 @@ def test_refresh_table_updates_cells_in_place_when_row_keys_match() -> None:
 
     assert app._table.clear_calls == 1
     assert app._table.update_calls > 0
+
+
+class _GitAppMixin(_FakeApp):
+    def _table_visible_columns_for_view(self, _view: str) -> list[dict[str, object]]:
+        return [{"id": "git", "label": "GIT", "enabled": True, "width": 20}]
+
+
+def _git_cell_for(row: ProjectRow) -> object:
+    app = _GitAppMixin([row])
+    _run_refresh(app)
+    return app._table._rows[0][1][0]
+
+
+def test_git_column_renders_worktree_suffix() -> None:
+    row = _row(Path("/tmp/foo-featx"), "foo-featx")
+    row.branch = "featx"
+    row.dirty = "*"
+    row.worktree_of = "foo"
+    cell = _git_cell_for(row)
+    assert "featx*" in str(cell)
+    assert "↪foo" in str(cell)
+
+
+def test_git_column_skips_worktree_suffix_for_regular_row() -> None:
+    row = _row(Path("/tmp/foo"), "foo")
+    row.branch = "main"
+    cell = _git_cell_for(row)
+    assert "main" in str(cell)
+    assert "↪" not in str(cell)
+
+
+def test_render_signature_changes_when_worktree_of_changes() -> None:
+    row = _row(Path("/tmp/foo-featx"), "foo-featx")
+    row.branch = "featx"
+    app = _GitAppMixin([row])
+    _run_refresh(app)
+    sig_before = app._table_render_signature
+
+    app._rows[0].worktree_of = "foo"
+    _run_refresh(app)
+    assert app._table_render_signature != sig_before

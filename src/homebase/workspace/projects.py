@@ -19,6 +19,7 @@ from ..metadata.api import (
     detect_properties,
     ensure_base_marker,
     load_base_meta,
+    load_base_worktree,
     normalize_property_keys,
     property_tokens,
     save_base_tags,
@@ -501,6 +502,8 @@ def project_row(
     else:
         branch, dirty, git_ts = git_info(path, include_dirty=include_git_dirty)
     tags, description, wip = load_base_meta(path)
+    wt_block = load_base_worktree(path) if not packed else None
+    worktree_of = wt_block.get("of", "") if wt_block else ""
     opened_ts = max(0, int(opened_ts_override or 0))
     properties = detect_properties(path, archived=archived)
     properties = normalize_property_keys(properties)
@@ -549,4 +552,5 @@ def project_row(
         size_bytes=size_bytes,
         size_refresh_count=size_refresh_count,
         haystack_lower=haystack_lower,
+        worktree_of=worktree_of,
     )

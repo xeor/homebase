@@ -137,6 +137,7 @@ class ProjectRow:
     size_refresh_count: int = 0
     haystack_lower: str = ""
     tags_lower: frozenset[str] = frozenset()
+    worktree_of: str = ""
 
     def __post_init__(self) -> None:
         if not self.tags_lower and self.tags:
