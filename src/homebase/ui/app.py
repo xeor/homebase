@@ -115,6 +115,7 @@ from ..core.constants import (
     UI_TICK_QUERY_FLUSH_S,
     UI_TICK_RECONCILE_USAGE_FLUSH_S,
     UI_TICK_STATE_FLUSH_S,
+    UI_TICK_WORKTREE_HEALTH_S,
     WIDGET_PROJECTS,
 )
 from ..core.models import (
@@ -218,6 +219,7 @@ from .sync import pane_probe as textual_ui_pane_probe
 from .sync import reconcile as textual_ui_reconcile
 from .sync import reconcile_worker as textual_ui_reconcile_worker
 from .sync import sync as textual_ui_sync
+from .sync import worktree_health as textual_ui_worktree_health
 from .system_commands_provider import get_homebase_system_commands_provider
 from .table import nav as textual_ui_table_nav
 from .table import row_helpers as textual_ui_row_helpers
@@ -547,6 +549,11 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
         self.metadata_health_refresh_running = False
         self.metadata_health_refresh_last_ts = 0.0
         self.metadata_health_refresh_next_due_at = 0.0
+        self.worktree_health_issues: list[dict[str, object]] = []
+        self.worktree_health_last_scan_ts = 0
+        self.worktree_health_refresh_running = False
+        self.worktree_health_refresh_last_ts = 0.0
+        self.worktree_health_dismissed = False
         self.detail_worker_running = False
         self.detail_worker_path: Path | None = None
         self.detail_worker_token = 0
@@ -894,6 +901,10 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
         self.set_interval(UI_TICK_GIT_REFRESH_S, self._maybe_refresh_visible_git)
         self.set_interval(UI_TICK_MICRO_RECONCILE_S, self._maybe_run_micro_reconcile)
         self.set_interval(UI_TICK_HOOK_REFRESH_S, self._maybe_run_hook_refresh)
+        self.set_interval(
+            UI_TICK_WORKTREE_HEALTH_S, self._maybe_refresh_worktree_health
+        )
+        self.call_after_refresh(self._initial_worktree_health_scan)
         for wid in (
             self.query_one("#side", Vertical),
             self.query_one("#side_main_tabs", Tabs),
@@ -2107,6 +2118,16 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
             self,
             base_meta_health=base_meta_health,
         )
+
+    def _maybe_refresh_worktree_health(self) -> None:
+        textual_ui_worktree_health.maybe_refresh_worktree_health(
+            self,
+            interval_s=UI_TICK_WORKTREE_HEALTH_S,
+        )
+
+    def _initial_worktree_health_scan(self) -> None:
+        textual_ui_worktree_health.load_initial_health(self)
+        self._maybe_refresh_worktree_health()
 
     def _on_metadata_health_refresh_done(
         self,

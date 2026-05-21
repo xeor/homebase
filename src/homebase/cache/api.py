@@ -258,3 +258,25 @@ def cache_delete_opened_ts(base_dir: Path, path: Path) -> None:
         cache_schema_version=CACHE_SCHEMA_VERSION,
         path=path,
     )
+
+
+def cache_load_worktree_health(
+    base_dir: Path,
+) -> tuple[int, list[dict[str, object]]] | None:
+    return cache_store.cache_load_worktree_health(
+        base_dir,
+        cache_schema_version=CACHE_SCHEMA_VERSION,
+    )
+
+
+def cache_save_worktree_health(
+    base_dir: Path,
+    scan_at: int,
+    issues: list[dict[str, object]],
+) -> None:
+    cache_store.cache_save_worktree_health(
+        base_dir,
+        scan_at,
+        issues,
+        cache_schema_version=CACHE_SCHEMA_VERSION,
+    )
