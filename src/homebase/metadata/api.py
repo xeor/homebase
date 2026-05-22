@@ -477,3 +477,48 @@ def clear_base_worktree(path: Path) -> None:
     if data.pop("worktree", None) is None:
         return
     save_base_data(path, data)
+
+
+def load_base_repo_dir(path: Path) -> str:
+    """Return the project's configured repo subpath (relative). Empty
+    string means 'not configured' — callers should treat the project
+    as having no git repo to show."""
+    data = load_base_data(path)
+    raw = data.get("repo_dir")
+    if not isinstance(raw, str):
+        return ""
+    value = raw.strip()
+    if not value:
+        return ""
+    if Path(value).is_absolute():
+        return ""
+    return value
+
+
+def resolve_project_repo(path: Path) -> Path | None:
+    """Absolute path to the project's main git repo, or None when
+    repo_dir is unset / invalid. Existence is the caller's check."""
+    repo_dir = load_base_repo_dir(path)
+    if not repo_dir:
+        return None
+    return path / repo_dir
+
+
+def save_base_repo_dir(path: Path, repo_dir: str) -> None:
+    value = repo_dir.strip()
+    if not value:
+        raise ValueError("repo_dir must be non-empty")
+    if Path(value).is_absolute():
+        raise ValueError("repo_dir must be relative")
+    ensure_base_marker(path)
+    data = load_base_data(path)
+    data["repo_dir"] = value
+    save_base_data(path, data)
+
+
+def clear_base_repo_dir(path: Path) -> None:
+    ensure_base_marker(path)
+    data = load_base_data(path)
+    if data.pop("repo_dir", None) is None:
+        return
+    save_base_data(path, data)

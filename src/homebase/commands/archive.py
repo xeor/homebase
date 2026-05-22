@@ -28,6 +28,7 @@ from ..metadata.api import (
     append_base_log,
     cleanup_tag_symlinks_pointing_at,
     ensure_base_marker,
+    load_base_repo_dir,
     load_base_worktree,
     sync_tag_symlinks,
 )
@@ -414,7 +415,8 @@ def _try_release_worktree(target: Path) -> None:
     if block is None:
         return
     parent_path = block.get("parent_path")
-    worktree_repo = target / "repo"
+    repo_dir = load_base_repo_dir(target) or "repo"
+    worktree_repo = target / repo_dir
     if not parent_path or not worktree_repo.exists():
         return
     try:

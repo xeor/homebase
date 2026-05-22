@@ -227,7 +227,10 @@ def run_cmd(cwd: Path, *cmd: str) -> tuple[str, str | None]:
 def build_side_git_text(app: Any, row: ProjectRow) -> str:
     if row.packed:
         return "[dim]packed archive: git details unavailable until unpacked[/]"
-    if not (row.path / ".git").exists():
+    if not row.repo_dir:
+        return "[dim]not a git repository (set repo_dir in .base.yaml, or run `b fix --repo-dir`)[/]"
+    repo_path = row.path / row.repo_dir
+    if not (repo_path / ".git").exists():
         return "[dim]not a git repository[/]"
     lines: list[str] = []
     max_branches = 5
@@ -240,7 +243,7 @@ def build_side_git_text(app: Any, row: ProjectRow) -> str:
     )
 
     upstream, _err_upstream = run_cmd(
-        row.path,
+        repo_path,
         "git",
         "rev-parse",
         "--abbrev-ref",
@@ -249,7 +252,7 @@ def build_side_git_text(app: Any, row: ProjectRow) -> str:
     )
     if upstream:
         ahead_behind, _err_ab = run_cmd(
-            row.path,
+            repo_path,
             "git",
             "rev-list",
             "--left-right",
@@ -267,7 +270,7 @@ def build_side_git_text(app: Any, row: ProjectRow) -> str:
         lines.append("[cyan]tracking[/]: [dim](none)[/]")
 
     last_commit, err_last = run_cmd(
-        row.path,
+        repo_path,
         "git",
         "log",
         "-1",
@@ -278,9 +281,9 @@ def build_side_git_text(app: Any, row: ProjectRow) -> str:
     if err_last:
         lines.append(f"[red]git log error:[/] {app._esc(err_last)}")
 
-    status, err_status = run_cmd(row.path, "git", "status", "--short")
-    staged_stat, _err_staged_stat = run_cmd(row.path, "git", "diff", "--cached", "--shortstat")
-    unstaged_stat, _err_unstaged_stat = run_cmd(row.path, "git", "diff", "--shortstat")
+    status, err_status = run_cmd(repo_path, "git", "status", "--short")
+    staged_stat, _err_staged_stat = run_cmd(repo_path, "git", "diff", "--cached", "--shortstat")
+    unstaged_stat, _err_unstaged_stat = run_cmd(repo_path, "git", "diff", "--shortstat")
     entries = status.splitlines() if status else []
     untracked_count = sum(1 for ln in entries if ln.startswith("??"))
     staged_count = sum(1 for ln in entries if len(ln) >= 2 and ln[0] not in {" ", "?"})
@@ -305,7 +308,7 @@ def build_side_git_text(app: Any, row: ProjectRow) -> str:
         lines.append(f"[red]git status error:[/] {app._esc(err_status)}")
 
     branches, err_branches = run_cmd(
-        row.path,
+        repo_path,
         "git",
         "for-each-ref",
         "--sort=-committerdate",
@@ -323,7 +326,7 @@ def build_side_git_text(app: Any, row: ProjectRow) -> str:
     if err_branches:
         lines.append(f"[red]branches error:[/] {app._esc(err_branches)}")
 
-    remotes, err_remotes = run_cmd(row.path, "git", "remote", "-v")
+    remotes, err_remotes = run_cmd(repo_path, "git", "remote", "-v")
     lines.append(f"[cyan]remotes[/]: [dim](max {max_remotes})[/]")
     if remotes:
         uniq: list[str] = []
@@ -343,7 +346,7 @@ def build_side_git_text(app: Any, row: ProjectRow) -> str:
         lines.append(f"[red]remotes error:[/] {app._esc(err_remotes)}")
 
     recent, err_recent = run_cmd(
-        row.path,
+        repo_path,
         "git",
         "log",
         f"-{max_commits}",

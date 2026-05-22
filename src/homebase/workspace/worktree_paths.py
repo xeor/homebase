@@ -3,7 +3,17 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-from ..metadata.api import load_base_worktree, save_base_worktree
+from ..metadata.api import (
+    load_base_repo_dir,
+    load_base_worktree,
+    resolve_project_repo,
+    save_base_worktree,
+)
+
+
+def _project_repo(project_dir: Path) -> Path:
+    repo = resolve_project_repo(project_dir)
+    return repo if repo is not None else project_dir
 
 
 def move_project(base_dir: Path, old: Path, new: Path) -> None:
@@ -18,16 +28,17 @@ def move_project(base_dir: Path, old: Path, new: Path) -> None:
         return
     block = load_base_worktree(old)
     children: list[Path] = [] if block is not None else find_worktree_children(base_dir, old.name)
+    old_repo_dir = load_base_repo_dir(old) or "repo"
 
     old.rename(new)
 
     if block is not None:
-        _repair_worktree_pointers(new / "repo")
+        _repair_worktree_pointers(new / old_repo_dir)
         _rewrite_worktree_meta(new)
         return
     if children:
-        _repair_worktree_pointers(new / "repo")
-        new_parent_repo = new / "repo"
+        _repair_worktree_pointers(new / old_repo_dir)
+        new_parent_repo = new / old_repo_dir
         for child in children:
             _rewrite_child_meta(
                 child,
@@ -40,14 +51,15 @@ def repair_after_move(base_dir: Path, new_path: Path) -> None:
     """Re-anchor worktree pointers after a project at ``new_path``
     has just been moved/renamed. Safe to call on plain projects (no-op)."""
     block = load_base_worktree(new_path)
+    repo_dir = load_base_repo_dir(new_path) or "repo"
     if block is not None:
-        _repair_worktree_pointers(new_path / "repo")
+        _repair_worktree_pointers(new_path / repo_dir)
         _rewrite_worktree_meta(new_path)
         return
     children = find_worktree_children(base_dir, new_path.name)
     if children:
-        _repair_worktree_pointers(new_path / "repo")
-        new_parent_repo = new_path / "repo"
+        _repair_worktree_pointers(new_path / repo_dir)
+        new_parent_repo = new_path / repo_dir
         for child in children:
             _rewrite_child_meta(
                 child,

@@ -138,6 +138,7 @@ class ProjectRow:
     haystack_lower: str = ""
     tags_lower: frozenset[str] = frozenset()
     worktree_of: str = ""
+    repo_dir: str = ""
 
     def __post_init__(self) -> None:
         if not self.tags_lower and self.tags:

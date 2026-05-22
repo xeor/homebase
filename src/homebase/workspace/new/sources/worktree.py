@@ -8,7 +8,9 @@ from ....cache.api import cache_upsert_project_fast
 from ....metadata.api import (
     append_base_log,
     ensure_base_marker,
+    load_base_repo_dir,
     load_base_worktree,
+    save_base_repo_dir,
     save_base_tags,
     save_base_worktree,
 )
@@ -117,9 +119,15 @@ class WorktreeSource(Source):
             raise ValueError("worktree branch name is empty")
 
         root_path, root_name = resolve_root_parent(ctx.base_dir, options.from_project)
-        root_repo = root_path / "repo"
+        root_repo_dir = load_base_repo_dir(root_path)
+        if not root_repo_dir:
+            raise ValueError(
+                f"parent {root_name} has no repo_dir configured — run "
+                f"`b fix --repo-dir` first"
+            )
+        root_repo = root_path / root_repo_dir
         if not (root_repo / ".git").exists():
-            raise ValueError(f"parent has no git repo: {root_repo}")
+            raise ValueError(f"parent has no git repo at: {root_repo}")
 
         sanitized = sanitize_branch_for_dir(branch)
         dir_name = f"{root_name}-{sanitized}"
@@ -192,6 +200,9 @@ class WorktreeSource(Source):
 
             gitdir_id = _read_gitdir_id(root_repo, worktree_repo)
             ensure_base_marker(target)
+            # Worktrees always land under <project>/repo/. Write the
+            # config explicitly so b fix doesn't have to guess.
+            save_base_repo_dir(target, "repo")
             save_base_worktree(
                 target,
                 of=root_name,

@@ -19,6 +19,7 @@ from ..metadata.api import (
     detect_properties,
     ensure_base_marker,
     load_base_meta,
+    load_base_repo_dir,
     load_base_worktree,
     normalize_property_keys,
     property_tokens,
@@ -366,12 +367,22 @@ def _git_clear_cache() -> None:
     _GIT_INFO_CACHE.clear()
 
 
-def git_info(path: Path, include_dirty: bool = True) -> tuple[str, str, int]:
-    git_entry = path / ".git"
+def git_info(
+    path: Path,
+    include_dirty: bool = True,
+    *,
+    repo_dir: str | None = None,
+) -> tuple[str, str, int]:
+    if repo_dir is None:
+        repo_dir = load_base_repo_dir(path)
+    if not repo_dir:
+        return "-", "-", 0
+    repo_path = (path / repo_dir).resolve() if not Path(repo_dir).is_absolute() else Path(repo_dir)
+    git_entry = repo_path / ".git"
     if not git_entry.exists():
         return "-", "-", 0
 
-    dirs = _resolve_git_dirs(path)
+    dirs = _resolve_git_dirs(repo_path)
     sig = _git_state_signature(*dirs) if dirs is not None else None
     cached = _GIT_INFO_CACHE.get(path) if sig is not None else None
     if (
@@ -386,16 +397,16 @@ def git_info(path: Path, include_dirty: bool = True) -> tuple[str, str, int]:
         if not include_dirty:
             return cached_branch, "~", cached_git_ts
         try:
-            working_dirty = _git_diff_quiet(path, cached=False)
+            working_dirty = _git_diff_quiet(repo_path, cached=False)
         except (subprocess.SubprocessError, OSError, ValueError):
             return cached_branch, "?", cached_git_ts
         if working_dirty == "?":
-            return cached_branch, _porcelain_dirty(path), cached_git_ts
+            return cached_branch, _porcelain_dirty(repo_path), cached_git_ts
         return cached_branch, _combine_dirty(working_dirty, cached_side_dirty), cached_git_ts
 
     try:
         branch = (
-            core_utils.run_out("git", "-C", str(path), "branch", "--show-current") or "(detached)"
+            core_utils.run_out("git", "-C", str(repo_path), "branch", "--show-current") or "(detached)"
         )
     except (subprocess.SubprocessError, OSError, ValueError):
         branch = "?"
@@ -403,10 +414,10 @@ def git_info(path: Path, include_dirty: bool = True) -> tuple[str, str, int]:
     cached_side_dirty = ""
     if include_dirty:
         try:
-            working_dirty = _git_diff_quiet(path, cached=False)
-            cached_side_dirty = _git_diff_quiet(path, cached=True)
+            working_dirty = _git_diff_quiet(repo_path, cached=False)
+            cached_side_dirty = _git_diff_quiet(repo_path, cached=True)
             if working_dirty == "?" or cached_side_dirty == "?":
-                dirty = _porcelain_dirty(path)
+                dirty = _porcelain_dirty(repo_path)
             else:
                 dirty = _combine_dirty(working_dirty, cached_side_dirty)
         except (subprocess.SubprocessError, OSError, ValueError):
@@ -415,7 +426,7 @@ def git_info(path: Path, include_dirty: bool = True) -> tuple[str, str, int]:
         dirty = "~"
 
     try:
-        git_ts_s = core_utils.run_out("git", "-C", str(path), "log", "-1", "--format=%ct")
+        git_ts_s = core_utils.run_out("git", "-C", str(repo_path), "log", "-1", "--format=%ct")
         git_ts = int(git_ts_s) if git_ts_s else 0
     except (subprocess.SubprocessError, OSError, ValueError):
         git_ts = 0
@@ -497,10 +508,15 @@ def project_row(
     created_ts = int(getattr(st, "st_birthtime", st.st_ctime))
     packed = core_utils.is_packed_archive_path(path, PACKED_ARCHIVE_SUFFIX)
     pack_format = "tgz" if packed else None
+    repo_dir = "" if packed else load_base_repo_dir(path)
     if packed:
         branch, dirty, git_ts = "-", "", 0
     else:
-        branch, dirty, git_ts = git_info(path, include_dirty=include_git_dirty)
+        branch, dirty, git_ts = git_info(
+            path,
+            include_dirty=include_git_dirty,
+            repo_dir=repo_dir,
+        )
     tags, description, wip = load_base_meta(path)
     wt_block = load_base_worktree(path) if not packed else None
     worktree_of = wt_block.get("of", "") if wt_block else ""
@@ -553,4 +569,5 @@ def project_row(
         size_refresh_count=size_refresh_count,
         haystack_lower=haystack_lower,
         worktree_of=worktree_of,
+        repo_dir=repo_dir,
     )

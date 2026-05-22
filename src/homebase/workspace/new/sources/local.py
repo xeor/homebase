@@ -12,6 +12,7 @@ from ....core.utils import is_under
 from ....metadata.api import (
     append_base_log,
     ensure_base_marker,
+    save_base_repo_dir,
     save_base_tags,
 )
 from ..base import NewContext, NewOptions, NewPlan, NewResult, Source
@@ -154,6 +155,11 @@ class LocalDirSource(Source):
             t0 = time.time()
             ensure_base_marker(target)
             _debug_log(f"marker done elapsed={max(0.0, time.time() - t0):.3f}s")
+            # Record where the moved-in repo actually lives if the
+            # source carried one. Without .git there's nothing to
+            # pin, so we leave repo_dir unset.
+            if (dest / ".git").exists():
+                save_base_repo_dir(target, "repo" if wrapped else ".")
             if plan.tags:
                 clean = sorted({t.strip() for t in plan.tags if t.strip()})
                 if clean:

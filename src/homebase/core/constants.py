@@ -497,6 +497,7 @@ BASE_META_ALLOWED_KEYS: set[str] = {
     "wip",
     "log",
     "worktree",
+    "repo_dir",
 }
 WORKTREE_META_ALLOWED_KEYS: set[str] = {
     "of",

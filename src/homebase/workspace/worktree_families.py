@@ -5,6 +5,7 @@ from pathlib import Path
 
 from ..metadata.api import (
     append_base_log,
+    load_base_repo_dir,
     load_base_worktree,
     save_base_worktree,
 )
@@ -43,8 +44,8 @@ def archive_family_together(
 
 
 def _reanchor_archived_worktree(archived_parent: Path, archived_wt: Path) -> None:
-    parent_repo = archived_parent / "repo"
-    worktree_repo = archived_wt / "repo"
+    parent_repo = archived_parent / (load_base_repo_dir(archived_parent) or "repo")
+    worktree_repo = archived_wt / (load_base_repo_dir(archived_wt) or "repo")
     if not parent_repo.is_dir():
         return
     try:

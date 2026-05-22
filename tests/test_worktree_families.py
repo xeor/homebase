@@ -30,7 +30,7 @@ def _init_project_repo(base: Path, name: str) -> Path:
     (repo / "f.txt").write_text("a\n", encoding="utf-8")
     subprocess.run(["git", "add", "f.txt"], cwd=repo, check=True)
     subprocess.run(["git", "commit", "-q", "-m", "init"], cwd=repo, check=True)
-    (project / ".base.yaml").write_text("tags: []\n", encoding="utf-8")
+    (project / ".base.yaml").write_text("tags: []\nrepo_dir: repo\n", encoding="utf-8")
     return project
 
 

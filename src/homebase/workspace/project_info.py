@@ -142,12 +142,13 @@ def build_project_info_text(
         keys = ", ".join(sorted(data.keys())) if data else ""
         lines.append(f"[cyan]{base_marker_file} keys[/]: {esc(keys)}")
 
-    if (row.path / ".git").exists():
+    repo_path = (row.path / row.repo_dir) if row.repo_dir else None
+    if repo_path is not None and (repo_path / ".git").exists():
         try:
             last_msg = run_out(
                 "git",
                 "-C",
-                str(row.path),
+                str(repo_path),
                 "log",
                 "-1",
                 "--pretty=%h %ad %s",

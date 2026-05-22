@@ -69,7 +69,7 @@ def test_fix_default_passes_all_kinds() -> None:
     rc = _run(["fix", "."], _capture)
     assert rc == 0
     assert seen["paths"] == ["."]
-    assert seen["include"] == {"marker", "archive-entry"}
+    assert seen["include"] == {"marker", "archive-entry", "repo-dir"}
     assert seen["yes"] is False
 
 
@@ -106,7 +106,7 @@ def test_fix_no_marker_blacklist() -> None:
 
     rc = _run(["fix", "--no-marker", "."], _capture)
     assert rc == 0
-    assert seen["include"] == {"archive-entry"}
+    assert seen["include"] == {"archive-entry", "repo-dir"}
 
 
 def test_fix_conflicting_flags_error(capsys) -> None:

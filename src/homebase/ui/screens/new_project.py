@@ -20,7 +20,7 @@ from ...core.constants import (
     CURSOR_BG_HEX,
     CURSOR_FG_HEX,
 )
-from ...metadata.api import load_base_worktree
+from ...metadata.api import load_base_worktree, resolve_project_repo
 from ...workspace.new.adapters import adapter_for_host, parse_url
 from ...workspace.new.cmd import autodetect_source_key
 from ...workspace.new.config_loader import NewConfigError, load_new_sources
@@ -214,15 +214,19 @@ class NewProjectScreen(ModalScreen[dict[str, object] | None]):
         self._last_was_worktree = self._current_source() == "worktree"
 
     def _compute_auto_parent_path(self, parent_name: str) -> str:
-        layout_a = self.base_dir_ref / parent_name / "repo"
+        # Honour the parent's repo_dir config when present; fall back
+        # to probing the two canonical layouts so we still produce a
+        # useful prefill on projects without the config yet.
+        project_dir = self.base_dir_ref / parent_name
+        configured = resolve_project_repo(project_dir)
+        if configured is not None and (configured / ".git").exists():
+            return str(configured)
+        layout_a = project_dir / "repo"
         if (layout_a / ".git").exists():
             return str(layout_a)
-        layout_b = self.base_dir_ref / parent_name
-        if (layout_b / ".git").exists():
-            return str(layout_b)
-        # Fall back to the canonical layout even if it doesn't exist
-        # yet — the validation panel will surface the right error.
-        return str(layout_a)
+        if (project_dir / ".git").exists():
+            return str(project_dir)
+        return str(configured) if configured is not None else str(layout_a)
 
     # ---------- compose ----------
 
@@ -502,9 +506,9 @@ class NewProjectScreen(ModalScreen[dict[str, object] | None]):
 
     def _resolve_parent_layout(self, raw: str) -> tuple[Path | None, Path | None]:
         """Return ``(project_dir, repo_dir)`` for a user-typed parent
-        path. Accepts both ``<base>/<name>`` (and we look for
-        repo/.git inside) and ``<base>/<name>/repo`` (project dir is
-        the parent)."""
+        path. Honours the project's repo_dir config first, then falls
+        back to probing both canonical layouts so a missing config
+        still produces useful errors instead of false negatives."""
         if not raw:
             return (None, None)
         try:
@@ -517,6 +521,16 @@ class NewProjectScreen(ModalScreen[dict[str, object] | None]):
             return (None, None)
         if not path.exists():
             return (None, None)
+        # If the typed path IS a project's repo (matches its repo_dir
+        # config), the parent is one level up.
+        if path.parent.is_dir():
+            configured = resolve_project_repo(path.parent)
+            if configured is not None and configured.resolve() == path.resolve() and (path / ".git").exists():
+                return (path.parent, path)
+        configured = resolve_project_repo(path)
+        if configured is not None and (configured / ".git").exists():
+            return (path, configured)
+        # Fall back to legacy probing.
         if path.name == "repo" and (path / ".git").exists():
             return (path.parent, path)
         if (path / "repo" / ".git").exists():

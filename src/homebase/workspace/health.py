@@ -6,10 +6,15 @@ from pathlib import Path
 
 from ..metadata.api import (
     append_base_log,
+    load_base_repo_dir,
     load_base_worktree,
     save_base_worktree,
 )
 from .worktree_paths import find_worktree_children
+
+
+def _project_repo(path: Path) -> Path:
+    return path / (load_base_repo_dir(path) or "repo")
 
 ISSUE_STALE_GITDIR = "stale_gitdir"
 ISSUE_ORPHAN_ADMIN = "orphan_admin"
@@ -45,7 +50,7 @@ def audit_unit_signature(base_dir: Path, unit_path: Path) -> str:
     """Stable signature for a worktree row or parent, keyed off the
     mtimes the audit actually depends on. Used by the cached scan to
     skip units that haven't changed since the last visit."""
-    repo_git = unit_path / "repo" / ".git"
+    repo_git = _project_repo(unit_path) / ".git"
     mt_repo = _mtime_ns(repo_git)
     block = load_base_worktree(unit_path)
     base_meta = unit_path / ".base.yaml"
@@ -61,7 +66,7 @@ def audit_unit_signature(base_dir: Path, unit_path: Path) -> str:
             mt_admin = 0
             mt_admin_gitdir = 0
         return f"wt:{mt_meta}:{mt_repo}:{mt_admin}:{mt_admin_gitdir}"
-    admin_root = unit_path / "repo" / ".git" / "worktrees"
+    admin_root = _project_repo(unit_path) / ".git" / "worktrees"
     mt_admin_dir = _mtime_ns(admin_root)
     admin_entries_sig = "|".join(
         f"{p.name}:{_mtime_ns(p / 'gitdir')}"
@@ -122,7 +127,7 @@ def _collect_potential_parents(base_dir: Path) -> list[Path]:
     for entry in sorted(base_dir.iterdir(), key=lambda p: p.name):
         if not entry.is_dir() or entry.name.startswith(".") or entry.name in {"_archive", "_tags"}:
             continue
-        if (entry / "repo" / ".git").is_dir():
+        if (_project_repo(entry) / ".git").is_dir():
             out.append(entry)
     return out
 
@@ -133,11 +138,11 @@ def _audit_worktree_row(
     block: dict[str, str],
 ) -> list[WorktreeIssue]:
     issues: list[WorktreeIssue] = []
-    pointer_file = worktree / "repo" / ".git"
+    pointer_file = _project_repo(worktree) / ".git"
     parent_name = block.get("of", "")
     gitdir_id = block.get("gitdir_id", "")
     parent_path_meta = block.get("parent_path", "")
-    inferred_parent = base_dir / parent_name / "repo" if parent_name else None
+    inferred_parent = _project_repo(base_dir / parent_name) if parent_name else None
 
     if inferred_parent is None or not inferred_parent.is_dir():
         if parent_path_meta and Path(parent_path_meta).is_dir():
@@ -221,7 +226,7 @@ def _audit_parent_admin(
     worktree_rows: list[tuple[Path, dict[str, str]]],
 ) -> list[WorktreeIssue]:
     issues: list[WorktreeIssue] = []
-    admin_root = parent / "repo" / ".git" / "worktrees"
+    admin_root = _project_repo(parent) / ".git" / "worktrees"
     if not admin_root.is_dir():
         return issues
     known = {block.get("gitdir_id", ""): row for row, block in worktree_rows}
@@ -259,7 +264,7 @@ def _audit_parent_admin(
                         ".base.yaml — not a managed homebase worktree"
                     ),
                     fix_summary="prune via git worktree prune or drop the admin entry",
-                    parent_path=parent / "repo",
+                    parent_path=_project_repo(parent),
                 )
             )
             continue
@@ -272,7 +277,7 @@ def _audit_parent_admin(
                         f"admin entry {entry} still points at {target_path}; row lives at {worktree_row}"
                     ),
                     fix_summary="re-anchor via git worktree repair on parent",
-                    parent_path=parent / "repo",
+                    parent_path=_project_repo(parent),
                 )
             )
         else:
@@ -282,7 +287,7 @@ def _audit_parent_admin(
                     kind=ISSUE_ORPHAN_ADMIN,
                     detail=f"admin entry at {entry} has no matching row and no live path",
                     fix_summary="prune via git worktree prune",
-                    parent_path=parent / "repo",
+                    parent_path=_project_repo(parent),
                 )
             )
     return issues
@@ -304,7 +309,7 @@ def _repair_via_repair(issue: WorktreeIssue) -> tuple[bool, str]:
         return False, f"parent_path not a directory: {parent_repo}"
     try:
         proc = subprocess.run(
-            ["git", "-C", str(parent_repo), "worktree", "repair", str(issue.path / "repo")],
+            ["git", "-C", str(parent_repo), "worktree", "repair", str(_project_repo(issue.path))],
             capture_output=True,
             text=True,
             check=False,

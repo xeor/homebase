@@ -26,6 +26,7 @@ class Row:
     tags: list[str] = field(default_factory=list)
     properties: list[str] = field(default_factory=list)
     description: str = ""
+    repo_dir: str = ""
 
 
 def _build(row: Row, **overrides):

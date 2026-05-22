@@ -185,7 +185,8 @@ def find_marker_root_upward(path: Path, marker_file: str) -> Path | None:
 
 FIX_MARKER = "marker"
 FIX_ARCHIVE_ENTRY = "archive-entry"
-FIX_KINDS: tuple[str, ...] = (FIX_MARKER, FIX_ARCHIVE_ENTRY)
+FIX_REPO_DIR = "repo-dir"
+FIX_KINDS: tuple[str, ...] = (FIX_MARKER, FIX_ARCHIVE_ENTRY, FIX_REPO_DIR)
 
 
 # ---- display helpers for ``b fix`` ----------------------------------
@@ -521,9 +522,47 @@ def _fix_active_project(
     ensure_base_marker: Callable[[Path], None],
 ) -> str:
     """Returns one of: 'ok' | 'changed' | 'skipped' | 'failed'."""
-    if FIX_MARKER not in include:
+    outcome = "ok"
+    if FIX_MARKER in include:
+        result = _apply_marker_fix(
+            target,
+            yes=yes,
+            base_marker_file=base_marker_file,
+            prompt_yes_no=prompt_yes_no,
+            ensure_base_marker=ensure_base_marker,
+        )
+        outcome = _combine_outcomes(outcome, result)
+    else:
         _print_skip("marker fixer disabled (--no-marker)")
-        return "skipped"
+    if FIX_REPO_DIR in include:
+        result = _apply_repo_dir_fix(
+            target,
+            yes=yes,
+            base_marker_file=base_marker_file,
+            prompt_yes_no=prompt_yes_no,
+            ensure_base_marker=ensure_base_marker,
+        )
+        outcome = _combine_outcomes(outcome, result)
+    else:
+        _print_skip("repo-dir fixer disabled (--no-repo-dir)")
+    return outcome
+
+
+_OUTCOME_RANK = {"ok": 0, "changed": 1, "skipped": 2, "failed": 3}
+
+
+def _combine_outcomes(a: str, b: str) -> str:
+    return a if _OUTCOME_RANK.get(a, 0) >= _OUTCOME_RANK.get(b, 0) else b
+
+
+def _apply_marker_fix(
+    target: Path,
+    *,
+    yes: bool,
+    base_marker_file: str,
+    prompt_yes_no: Callable[[str, bool], bool],
+    ensure_base_marker: Callable[[Path], None],
+) -> str:
     marker_file = target / base_marker_file
     if marker_file.exists():
         _print_ok(f"marker present ({base_marker_file})")
@@ -539,6 +578,51 @@ def _fix_active_project(
         _print_fail(f"create failed: {exc}")
         return "failed"
     _print_ok(f"created {marker_file.name}")
+    return "changed"
+
+
+def _apply_repo_dir_fix(
+    target: Path,
+    *,
+    yes: bool,
+    base_marker_file: str,
+    prompt_yes_no: Callable[[str, bool], bool],
+    ensure_base_marker: Callable[[Path], None],
+) -> str:
+    from ..metadata.api import load_base_repo_dir, save_base_repo_dir
+
+    if not (target / base_marker_file).exists():
+        _print_skip("repo-dir: no marker yet (run marker fixer first)")
+        return "skipped"
+    configured = load_base_repo_dir(target)
+    if configured:
+        if (target / configured / ".git").exists():
+            _print_ok(f"repo_dir: {configured!r}")
+            return "ok"
+        _print_warn(
+            f"repo_dir {configured!r} configured but no .git at {target / configured}"
+        )
+        return "skipped"
+    # Probe '.' first, then 'repo' — user's preferred order.
+    candidate = ""
+    if (target / ".git").exists():
+        candidate = "."
+    elif (target / "repo" / ".git").exists():
+        candidate = "repo"
+    if not candidate:
+        _print_skip("repo-dir: no .git at '.' or 'repo'")
+        return "ok"
+    _print_warn(f"repo_dir missing — found .git at {candidate!r}")
+    if not yes:
+        if not prompt_yes_no(f"    {_bold('write')} repo_dir: {candidate!r}?", True):
+            _print_skip("declined")
+            return "skipped"
+    try:
+        save_base_repo_dir(target, candidate)
+    except (OSError, ValueError) as exc:
+        _print_fail(f"write failed: {exc}")
+        return "failed"
+    _print_ok(f"wrote repo_dir: {candidate!r}")
     return "changed"
 
 

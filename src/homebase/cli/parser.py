@@ -296,6 +296,18 @@ def build_cli_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="skip the archive-entry fixer",
     )
+    p_fix.add_argument(
+        "--repo-dir",
+        dest="enable_repo_dir",
+        action="store_true",
+        help="include the repo-dir fixer (only this when no other --<fixer> set)",
+    )
+    p_fix.add_argument(
+        "--no-repo-dir",
+        dest="disable_repo_dir",
+        action="store_true",
+        help="skip the repo-dir fixer",
+    )
 
     # ``b archive`` with no subcommand → archive cwd (same as `b a`).
     # That's why ``archive_subcommand`` is not required.

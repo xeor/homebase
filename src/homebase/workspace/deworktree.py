@@ -7,6 +7,7 @@ from pathlib import Path
 from ..metadata.api import (
     append_base_log,
     clear_base_worktree,
+    load_base_repo_dir,
     load_base_worktree,
 )
 
@@ -25,7 +26,8 @@ def deworktree(base_dir: Path, target: Path) -> None:
     parent_git = parent_repo / ".git"
     if not parent_git.is_dir():
         raise ValueError(f"parent .git missing or not a directory: {parent_git}")
-    worktree_repo = target / "repo"
+    worktree_repo_dir = load_base_repo_dir(target) or "repo"
+    worktree_repo = target / worktree_repo_dir
     if not worktree_repo.is_dir():
         raise ValueError(f"worktree repo missing: {worktree_repo}")
     parent_admin = parent_git / "worktrees" / gitdir_id

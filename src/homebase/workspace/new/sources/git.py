@@ -4,7 +4,12 @@ import shutil
 import subprocess
 
 from ....cache.api import cache_upsert_project_fast
-from ....metadata.api import append_base_log, ensure_base_marker, save_base_tags
+from ....metadata.api import (
+    append_base_log,
+    ensure_base_marker,
+    save_base_repo_dir,
+    save_base_tags,
+)
 from ..adapters import adapter_for_host, parse_url
 from ..base import NewContext, NewOptions, NewPlan, NewResult, Source
 from ..name import resolve_final_name
@@ -135,6 +140,7 @@ class GitSource(Source):
                 msg = (proc.stderr or proc.stdout or "git clone failed").strip()
                 raise ValueError(f"git clone failed: {msg}")
             ensure_base_marker(target)
+            save_base_repo_dir(target, "repo")
             if plan.tags:
                 clean = sorted({t.strip() for t in plan.tags if t.strip()})
                 if clean:

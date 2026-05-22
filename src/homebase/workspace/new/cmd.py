@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Callable
 
 from ...core.logging import verbose_enabled
+from ...metadata.api import resolve_project_repo
 from ..projects import cmd_new as legacy_cmd_new
 from .adapters import adapter_for_host, parse_url
 from .archive_mod import apply_archive_modifier
@@ -117,8 +118,10 @@ def autodetect_source_key(
         return _pick_url_source(raw_input, git_hosts)
     if base_dir is not None and shape in {"bare", "path"}:
         enclosing = enclosing_base_project(cwd or Path.cwd().resolve(), base_dir)
-        if enclosing is not None and (enclosing / "repo" / ".git").exists():
-            return "worktree"
+        if enclosing is not None:
+            repo = resolve_project_repo(enclosing)
+            if repo is not None and (repo / ".git").exists():
+                return "worktree"
     source_key = _SHAPE_TO_SOURCE.get(shape)
     if source_key != "local" or raw_input is None:
         return source_key

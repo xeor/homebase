@@ -103,6 +103,13 @@ def base_meta_schema_issues(
         if "events" in log_val and not isinstance(events, list):
             warns.append("log.events should be list")
 
+    if "repo_dir" in raw:
+        value = raw.get("repo_dir")
+        if not isinstance(value, str) or not value.strip():
+            warns.append("repo_dir must be a non-empty string")
+        elif Path(value).is_absolute():
+            warns.append("repo_dir must be a relative path (e.g. '.' or 'repo')")
+
     if "worktree" in raw:
         errors.extend(_worktree_schema_issues(raw.get("worktree"), warns))
 
