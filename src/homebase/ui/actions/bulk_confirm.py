@@ -301,6 +301,12 @@ def build_bulk_confirm_payload(
         lines.append("  - expected keys (optional): tags, description, wip, log")
     elif action == "rename_meta_ext":
         lines.append("[cyan]effect[/]: rename legacy .base.yml file to .base.yaml")
+    elif action == "deworktree":
+        lines.append("[cyan]effect[/]: copy the parent's .git/ into each row, then detach")
+        lines.append(
+            "[cyan]kept[/]: stash list and branch refs are duplicated onto the "
+            "new standalone (drop with git stash drop / git branch -d on either side)"
+        )
 
     lines.append("")
     lines.append("[cyan]target preview[/]:")

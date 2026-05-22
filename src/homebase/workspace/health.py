@@ -237,8 +237,31 @@ def _audit_parent_admin(
             target = ""
         target_path = Path(target) if target else None
         target_exists = target_path is not None and target_path.exists()
+        # The admin entry's gitdir file points at a worktree's
+        # repo/.git file. Walk two levels up to find the worktree
+        # directory and verify it carries .base.yaml — a bare repo
+        # at the same path would otherwise slip the audit.
+        worktree_dir = target_path.parent.parent if target_path is not None else None
+        has_base_yaml = (
+            worktree_dir is not None
+            and (worktree_dir / ".base.yaml").is_file()
+        )
         worktree_row = known.get(entry.name)
-        if target_exists:
+        if target_exists and has_base_yaml:
+            continue
+        if target_exists and not has_base_yaml:
+            issues.append(
+                WorktreeIssue(
+                    path=worktree_dir if worktree_dir is not None else entry,
+                    kind=ISSUE_ORPHAN_ADMIN,
+                    detail=(
+                        f"admin entry {entry} points at {target_path} but no "
+                        ".base.yaml — not a managed homebase worktree"
+                    ),
+                    fix_summary="prune via git worktree prune or drop the admin entry",
+                    parent_path=parent / "repo",
+                )
+            )
             continue
         if worktree_row is not None:
             issues.append(

@@ -139,3 +139,17 @@ def test_cmd_fix_worktrees_clean_returns_zero(tmp_path: Path) -> None:
     _init_project_repo(tmp_path, "foo")
     assert _run_new(tmp_path, tmp_path, ["featx", "--as", "worktree", "--from", "foo"]) == 0
     assert cmd_fix_worktrees(tmp_path, apply=False) == 0
+
+
+def test_audit_flags_worktree_dir_missing_base_yaml(tmp_path: Path) -> None:
+    _init_project_repo(tmp_path, "foo")
+    assert _run_new(tmp_path, tmp_path, ["featx", "--as", "worktree", "--from", "foo"]) == 0
+    # Remove the worktree's .base.yaml so the admin entry still points
+    # at a real directory, but homebase no longer treats it as a managed
+    # worktree row.
+    wt_meta = tmp_path / "foo-featx" / ".base.yaml"
+    wt_meta.unlink()
+
+    issues = audit_workspace(tmp_path)
+    kinds = {i.kind for i in issues}
+    assert ISSUE_ORPHAN_ADMIN in kinds

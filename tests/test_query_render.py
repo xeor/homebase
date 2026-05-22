@@ -42,3 +42,26 @@ def test_cursor_inside_structured_value_is_highlighted() -> None:
 def test_cursor_at_end_appends_blank() -> None:
     out = _render_query_with_cursor("abc", cursor=3, **_colors())
     assert out.endswith("][/]") or "] [/]" in out
+
+
+def test_hash_tag_token_colorized() -> None:
+    out = _render_query_with_cursor("#work", cursor=99, **_colors())
+    assert "[#OP]#[/]" in out
+    assert "[#VAL]work[/]" in out
+
+
+def test_named_filter_token_colorized() -> None:
+    out = _render_query_with_cursor("@recent", cursor=99, **_colors())
+    assert "[#OP]@[/]" in out
+    assert "[#KEY]recent[/]" in out
+
+
+def test_suffix_token_colorized() -> None:
+    out = _render_query_with_cursor(".tmp", cursor=99, **_colors())
+    assert "[#OP].[/]" in out
+    assert "[#UNK]tmp[/]" in out
+
+
+def test_boolean_operator_token_colorized() -> None:
+    out = _render_query_with_cursor("#a OR #b", cursor=99, **_colors())
+    assert "[#OP]OR[/]" in out

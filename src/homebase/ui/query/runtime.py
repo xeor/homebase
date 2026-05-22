@@ -61,23 +61,39 @@ def _render_token(
     color_unknown: str,
     esc,
 ) -> str:
+    # Structured ':key<op>value' tokens get the three-colour treatment.
     match = STRUCTURED_TERM_RE.match(token.lower())
-    if not match:
-        # Non-structured token: render plain with cursor handling.
-        return _styled_chunk(token, None, cursor, offset, esc)
-    key_text = ":" + match.group(1)
-    op_text = match.group(2)
-    key_color = color_key if match.group(1) in _KNOWN_STRUCTURED_KEYS else color_unknown
-    # Slice original-case token to preserve any case info (currently the
-    # tokenizer is case-insensitive but we still echo the source).
-    key_raw = token[: len(key_text)]
-    op_raw = token[len(key_text) : len(key_text) + len(op_text)]
-    value_raw = token[len(key_text) + len(op_text) :]
-    pieces: list[str] = []
-    pieces.append(_styled_chunk(key_raw, key_color, cursor, offset, esc))
-    pieces.append(_styled_chunk(op_raw, color_op, cursor, offset + len(key_raw), esc))
-    pieces.append(_styled_chunk(value_raw, color_value, cursor, offset + len(key_raw) + len(op_raw), esc))
-    return "".join(pieces)
+    if match:
+        key_text = ":" + match.group(1)
+        op_text = match.group(2)
+        key_color = color_key if match.group(1) in _KNOWN_STRUCTURED_KEYS else color_unknown
+        key_raw = token[: len(key_text)]
+        op_raw = token[len(key_text) : len(key_text) + len(op_text)]
+        value_raw = token[len(key_text) + len(op_text) :]
+        pieces: list[str] = []
+        pieces.append(_styled_chunk(key_raw, key_color, cursor, offset, esc))
+        pieces.append(_styled_chunk(op_raw, color_op, cursor, offset + len(key_raw), esc))
+        pieces.append(_styled_chunk(value_raw, color_value, cursor, offset + len(key_raw) + len(op_raw), esc))
+        return "".join(pieces)
+    # Sigil-prefixed tokens (#tag, @named, .suffix, !prop) get a
+    # solid colour. The leading sigil keeps the operator colour so
+    # the visual rhythm matches the structured tokens.
+    if token and token[0] in "#@.!" and len(token) > 1:
+        sigil = token[0]
+        body_color = {
+            "#": color_value,
+            "@": color_key,
+            ".": color_unknown,
+            "!": color_value,
+        }[sigil]
+        pieces = []
+        pieces.append(_styled_chunk(token[0], color_op, cursor, offset, esc))
+        pieces.append(_styled_chunk(token[1:], body_color, cursor, offset + 1, esc))
+        return "".join(pieces)
+    # Boolean / grouping tokens stay neutral.
+    if token.upper() in {"OR", "AND"} or token in {"(", ")", "|"}:
+        return _styled_chunk(token, color_op, cursor, offset, esc)
+    return _styled_chunk(token, None, cursor, offset, esc)
 
 
 def _styled_chunk(text: str, color: str | None, cursor: int, offset: int, esc) -> str:

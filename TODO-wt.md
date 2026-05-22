@@ -1,11 +1,13 @@
 # TODO-wt — Worktree Support in `b`
 
-Status: shipped (§11.1–§11.13 in `61cf16c..2d8fe42`, §11.11 TUI
-follow-up in `ec859b6`, sticky-popup widget in `1b2317c`, post-audit
-gap fixes for docs + token highlighting + multi-option dialogs +
-per-project mtime cache + idle gating + TUI fix action in the final
-gap-closing commit). Every item from the original design has landed.
-Left in the repo as a historical record per §10.4 — don't delete.
+Status: fully shipped. §11.1–§11.13 in `61cf16c..2d8fe42`, §11.11
+TUI follow-up in `ec859b6`, sticky-popup widget in `1b2317c`, eight
+audit gaps in `aea4bfb`, and four residual design touches (audit
+`.base.yaml` check, de-worktree confirm wording, tag-symlink
+coexistence test, full token coloring for `#tag`/`@named`/`.suffix`)
+in the final gap-closing commit. Every item from the original design
+has landed. Left in the repo as a historical record per §10.4 —
+don't delete.
 
 ## 1. Goal
 
