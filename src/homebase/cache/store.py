@@ -7,6 +7,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from ..core.constants import CACHE_DB_FILE_NAME, HOMEBASE_DIR_NAME
+from . import concurrency as cache_concurrency
 
 PROJECT_CACHE_INSERT_SQL = (
     "INSERT OR REPLACE INTO project_cache("
@@ -56,11 +57,44 @@ def cache_init(conn: sqlite3.Connection, *, cache_schema_version: int) -> None:
         )
         """
     )
-    ver_row = conn.execute("SELECT value FROM cache_meta WHERE key='schema_version'").fetchone()
+    ver_row = conn.execute(
+        "SELECT value FROM cache_meta WHERE key='schema_version'"
+    ).fetchone()
     cur_ver = int(str(ver_row[0])) if ver_row and str(ver_row[0]).isdigit() else 0
-    if cur_ver != cache_schema_version:
-        conn.execute("DROP TABLE IF EXISTS project_cache")
+    cache_concurrency.record_observation(
+        observed_version=cur_ver,
+        expected_version=cache_schema_version,
+    )
 
+    _create_ancillary_tables(conn)
+
+    if cur_ver > cache_schema_version:
+        # A newer process owns the schema. Leaving project_cache alone
+        # is the priority — destructive migrations here would race the
+        # newer instance and lose its rows. Subsequent reads/writes from
+        # this older process may still fail if SELECT/INSERT column
+        # lists diverge from the on-disk shape, but data is preserved.
+        conn.commit()
+        return
+
+    if cur_ver == cache_schema_version:
+        _create_project_cache_current(conn)
+    else:
+        _migrate_project_cache(
+            conn,
+            from_version=cur_ver,
+            to_version=cache_schema_version,
+        )
+
+    conn.execute(
+        "INSERT OR REPLACE INTO cache_meta(key, value) VALUES('schema_version', ?)",
+        (str(cache_schema_version),),
+    )
+    conn.commit()
+    cache_concurrency.record_set(cache_schema_version)
+
+
+def _create_project_cache_current(conn: sqlite3.Connection) -> None:
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS project_cache (
@@ -96,9 +130,64 @@ def cache_init(conn: sqlite3.Connection, *, cache_schema_version: int) -> None:
         )
         """
     )
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_project_cache_archived ON project_cache(archived)")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_project_cache_last_ts ON project_cache(last_ts)")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_project_cache_wip ON project_cache(wip)")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_project_cache_archived ON project_cache(archived)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_project_cache_last_ts ON project_cache(last_ts)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_project_cache_wip ON project_cache(wip)"
+    )
+
+
+def _migrate_project_cache(
+    conn: sqlite3.Connection,
+    *,
+    from_version: int,
+    to_version: int,
+) -> None:
+    have_table = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='project_cache'"
+    ).fetchone()
+    if have_table is None:
+        _create_project_cache_current(conn)
+        return
+    v = max(0, int(from_version))
+    target = int(to_version)
+    while v < target:
+        step = _MIGRATIONS.get(v)
+        if step is None:
+            raise sqlite3.Error(
+                f"cache_init: no known migration from schema v{v} to v{v + 1}"
+            )
+        step(conn)
+        v += 1
+
+
+def _migrate_v5_to_v6(conn: sqlite3.Connection) -> None:
+    cols = {
+        row[1]
+        for row in conn.execute("PRAGMA table_info(project_cache)").fetchall()
+    }
+    if "worktree_of" not in cols:
+        conn.execute(
+            "ALTER TABLE project_cache "
+            "ADD COLUMN worktree_of TEXT NOT NULL DEFAULT ''"
+        )
+    if "repo_dir" not in cols:
+        conn.execute(
+            "ALTER TABLE project_cache "
+            "ADD COLUMN repo_dir TEXT NOT NULL DEFAULT ''"
+        )
+
+
+_MIGRATIONS: dict[int, Callable[[sqlite3.Connection], None]] = {
+    5: _migrate_v5_to_v6,
+}
+
+
+def _create_ancillary_tables(conn: sqlite3.Connection) -> None:
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS project_opened (
@@ -126,11 +215,6 @@ def cache_init(conn: sqlite3.Connection, *, cache_schema_version: int) -> None:
         )
         """
     )
-    conn.execute(
-        "INSERT OR REPLACE INTO cache_meta(key, value) VALUES('schema_version', ?)",
-        (str(cache_schema_version),),
-    )
-    conn.commit()
 
 
 def cache_load_worktree_health(

@@ -11,6 +11,7 @@ from typing import Any
 
 from textual.widgets import Static
 
+from ...cache import concurrency as cache_concurrency
 from ...cache.api import cache_db_path
 from ...core.models import ProjectRow
 from ...core.utils import fmt_age_short, fmt_age_short_from_iso, fmt_iso
@@ -50,6 +51,17 @@ def cache_info_lines(
     else:
         out.append("size: -")
     out.append(f"schema version: {cache_schema_version}")
+    snap = cache_concurrency.snapshot()
+    if snap.drift_count > 0 and snap.last_event is not None:
+        ev = snap.last_event
+        out.append(
+            f"[red]schema drift[/]: count={snap.drift_count} last={ev.kind} "
+            f"observed=v{ev.observed_version} expected=v{ev.expected_version} "
+            f"at {fmt_iso(ev.ts)} ({fmt_age_short(ev.ts)})"
+        )
+        out.append(f"drift detail: {app._esc(ev.detail)}")
+    else:
+        out.append("schema drift: none observed")
     out.append(
         f"policy: max_age={cache_max_age_s}s background_refresh={cache_bg_refresh_s}s"
     )

@@ -209,6 +209,7 @@ from .side import effects as textual_ui_side_effects
 from .side import panel as textual_ui_side_panel
 from .side import settings as textual_ui_settings_panel
 from .side import tabs as textual_ui_side_tabs
+from .sync import cache_concurrency as textual_ui_cache_concurrency
 from .sync import cache_refresh as textual_ui_cache_refresh
 from .sync import cache_state as textual_ui_cache_state
 from .sync import dynamic_props as textual_ui_dynamic_props
@@ -283,6 +284,17 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
         display: none;
     }
     #worktree_health_banner.visible {
+        display: block;
+        height: 1;
+    }
+    #cache_concurrency_banner {
+        height: 0;
+        padding: 0 1;
+        background: $error-darken-2;
+        color: $text;
+        display: none;
+    }
+    #cache_concurrency_banner.visible {
         display: block;
         height: 1;
     }
@@ -364,6 +376,12 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
         ("ctrl+a", "pick_actions", "Actions"),
         ("ctrl+o", "toggle_select_mode", "Select mode"),
         Binding("ctrl+x", "dismiss_worktree_health", "Dismiss banner", show=False),
+        Binding(
+            "ctrl+y",
+            "dismiss_cache_concurrency",
+            "Dismiss cache drift banner",
+            show=False,
+        ),
         Binding("ctrl+@", "cycle_hotbar", "Next hotbar", show=False, priority=True),
         ("enter", "open_selected", "Open"),
         ("ctrl+q", "quit_app", "Quit"),
@@ -574,6 +592,9 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
         self.worktree_health_refresh_last_ts = 0.0
         self.worktree_health_dismissed = False
         self.worktree_health_scan_cursor: list[str] = []
+        self.cache_concurrency_drift_seen = 0
+        self.cache_concurrency_last_event: object | None = None
+        self.cache_concurrency_dismissed = False
         self.detail_worker_running = False
         self.detail_worker_path: Path | None = None
         self.detail_worker_token = 0
@@ -777,6 +798,7 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
             yield Static("", id="global_meta_left")
             yield Static("", id="global_meta_right")
         yield Static("", id="worktree_health_banner")
+        yield Static("", id="cache_concurrency_banner")
         with Horizontal(id="main"):
             yield SafeDataTable(id="projects", cursor_type="row")
             with Vertical(id="side"):
@@ -964,6 +986,8 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
         finally:
             self._busy_stop()
         self.set_interval(CACHE_BG_REFRESH_S, self._maybe_refresh_cache)
+        self.set_interval(2.0, self._check_cache_concurrency)
+        self._check_cache_concurrency()
         if not self.active_rows and not self.archived_rows:
             self.call_after_refresh(
                 lambda: self._start_cache_refresh("cold start", force=True)
@@ -2155,6 +2179,12 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
 
     def action_dismiss_worktree_health(self) -> None:
         textual_ui_worktree_health.dismiss_worktree_health(self)
+
+    def _check_cache_concurrency(self) -> None:
+        textual_ui_cache_concurrency.check_cache_concurrency(self)
+
+    def action_dismiss_cache_concurrency(self) -> None:
+        textual_ui_cache_concurrency.dismiss(self)
 
     def _action_fix_worktrees(self) -> None:
         textual_ui_worktree_health.action_fix_worktrees(self)
