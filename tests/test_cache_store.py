@@ -54,11 +54,13 @@ def test_cache_store_and_load_rows(tmp_path: Path) -> None:
             0,
             1,
             1,
+            "",
+            "",
         )
     ]
     _ = cache_store.cache_store_rows(
         tmp_path,
-        cache_schema_version=5,
+        cache_schema_version=6,
         payload_rows=payload,
     )
 
@@ -67,7 +69,7 @@ def test_cache_store_and_load_rows(tmp_path: Path) -> None:
 
     active, archived, _ = cache_store.cache_load_rows(
         tmp_path,
-        cache_schema_version=5,
+        cache_schema_version=6,
         max_age_s=120,
         deserialize_row=deserialize,
     )
@@ -81,7 +83,7 @@ def test_cache_reconcile_usage_roundtrip(tmp_path: Path) -> None:
     last_used = {Path("/tmp/p1"): 100}
     cache_store.cache_save_reconcile_usage(
         tmp_path,
-        cache_schema_version=5,
+        cache_schema_version=6,
         score=score,
         hits=hits,
         last_used=last_used,
@@ -89,7 +91,7 @@ def test_cache_reconcile_usage_roundtrip(tmp_path: Path) -> None:
     )
     loaded_score, loaded_hits, loaded_last_used = cache_store.cache_load_reconcile_usage(
         tmp_path,
-        cache_schema_version=5,
+        cache_schema_version=6,
     )
     path = Path("/tmp/p1")
     assert loaded_score[path] > 0
@@ -103,27 +105,27 @@ def test_cache_opened_ts_roundtrip_and_move(tmp_path: Path) -> None:
 
     cache_store.cache_set_opened_ts(
         tmp_path,
-        cache_schema_version=5,
+        cache_schema_version=6,
         path=src,
         opened_ts=123,
     )
-    loaded = cache_store.cache_load_opened_map(tmp_path, cache_schema_version=5)
+    loaded = cache_store.cache_load_opened_map(tmp_path, cache_schema_version=6)
     assert loaded[src] == 123
 
     cache_store.cache_move_opened_ts(
         tmp_path,
-        cache_schema_version=5,
+        cache_schema_version=6,
         src=src,
         dst=dst,
     )
-    loaded = cache_store.cache_load_opened_map(tmp_path, cache_schema_version=5)
+    loaded = cache_store.cache_load_opened_map(tmp_path, cache_schema_version=6)
     assert src not in loaded
     assert loaded[dst] == 123
 
     cache_store.cache_delete_opened_ts(
         tmp_path,
-        cache_schema_version=5,
+        cache_schema_version=6,
         path=dst,
     )
-    loaded = cache_store.cache_load_opened_map(tmp_path, cache_schema_version=5)
+    loaded = cache_store.cache_load_opened_map(tmp_path, cache_schema_version=6)
     assert dst not in loaded

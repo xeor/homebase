@@ -11,8 +11,9 @@ from ..core.constants import CACHE_DB_FILE_NAME, HOMEBASE_DIR_NAME
 PROJECT_CACHE_INSERT_SQL = (
     "INSERT OR REPLACE INTO project_cache("
     "path, archived, packed, pack_format, name, branch, dirty, last, src, created, tags_json, properties_json, "
-    "description, created_ts, last_ts, git_ts, opened_ts, is_fork, is_tmp, restore_target, archived_ts, wip, suffix, size_bytes, size_refresh_count, cached_at, reconciled_at"
-    ") VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    "description, created_ts, last_ts, git_ts, opened_ts, is_fork, is_tmp, restore_target, archived_ts, wip, suffix, size_bytes, size_refresh_count, cached_at, reconciled_at, "
+    "worktree_of, repo_dir"
+    ") VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
 )
 
 
@@ -89,7 +90,9 @@ def cache_init(conn: sqlite3.Connection, *, cache_schema_version: int) -> None:
             size_bytes INTEGER NOT NULL,
             size_refresh_count INTEGER NOT NULL,
             cached_at INTEGER NOT NULL,
-            reconciled_at INTEGER NOT NULL
+            reconciled_at INTEGER NOT NULL,
+            worktree_of TEXT NOT NULL DEFAULT '',
+            repo_dir TEXT NOT NULL DEFAULT ''
         )
         """
     )
@@ -365,7 +368,8 @@ def cache_load_rows(
             SELECT path, archived, name, branch, dirty, last, src, created,
                    packed, pack_format,
                    tags_json, properties_json, description, created_ts, last_ts, git_ts, opened_ts,
-                   is_fork, is_tmp, restore_target, archived_ts, wip, suffix, size_bytes, size_refresh_count, cached_at, reconciled_at
+                   is_fork, is_tmp, restore_target, archived_ts, wip, suffix, size_bytes, size_refresh_count, cached_at, reconciled_at,
+                   worktree_of, repo_dir
             FROM project_cache
             """
         ).fetchall()

@@ -106,6 +106,8 @@ def cache_load_rows(
                 last_cached_ts=cached_at,
                 last_reconciled_ts=reconciled_at,
                 haystack_lower=haystack_lower,
+                worktree_of=str(rec["worktree_of"] or ""),
+                repo_dir=str(rec["repo_dir"] or ""),
             )
             row.opened_ts = _opened_ts_for_path(p)
             return row
@@ -167,6 +169,8 @@ def _cache_row_payload(row: ProjectRow, cached_at: int) -> tuple[object, ...]:
         max(0, int(row.size_refresh_count)),
         cached_at,
         reconciled_at,
+        row.worktree_of,
+        row.repo_dir,
     )
 
 
