@@ -112,6 +112,7 @@ class NewProjectScreen(ModalScreen[dict[str, object] | None]):
     #new_title { height: 1; padding: 0 1; }
     #new_top { height: 3; margin: 0 0 1 0; }
     #new_top Input { width: 1fr; }
+    #new_top.worktree-mode #new_input { display: none; }
     #new_left Static { height: auto; margin: 0 0 1 0; }
     #new_left #new_status_info {
         border-top: dashed $primary;
@@ -185,6 +186,7 @@ class NewProjectScreen(ModalScreen[dict[str, object] | None]):
         self.prefill_from_project = str(self.prefill.get("from_project", "")).strip()
         if self.prefill_from_project:
             self.toggle_values["cd"] = True
+            self.focus_section = 1
         prefill_source = str(self.prefill.get("source", "")).strip()
         if prefill_source and prefill_source in self.source_choices:
             self.source_index = self.source_choices.index(prefill_source)
@@ -231,6 +233,16 @@ class NewProjectScreen(ModalScreen[dict[str, object] | None]):
             self.query_one("#new_input", Input).value = raw_input
         if raw_name:
             self.query_one("#new_name", Input).value = raw_name
+        if self._is_worktree_mode():
+            top = self.query_one("#new_top", Horizontal)
+            top.add_class("worktree-mode")
+            name_input = self.query_one("#new_name", Input)
+            name_input.placeholder = f"branch name (required) — worktree of {self.prefill_from_project}"
+
+    def _is_worktree_mode(self) -> bool:
+        if self.prefill_from_project:
+            return True
+        return self._current_source() == "worktree"
 
     # ---------- helpers ----------
 
@@ -750,7 +762,10 @@ class NewProjectScreen(ModalScreen[dict[str, object] | None]):
         # it's obvious which name will actually be used and that they
         # can override it.
         name_input = self.query_one("#new_name", Input)
-        if self._name_value():
+        if self._is_worktree_mode():
+            name_input.placeholder = f"branch name (required) — worktree of {self.prefill_from_project}"
+            name_input.remove_class("auto-name")
+        elif self._name_value():
             name_input.placeholder = "name (optional)"
             name_input.remove_class("auto-name")
         else:
@@ -1029,12 +1044,21 @@ class NewProjectScreen(ModalScreen[dict[str, object] | None]):
         if marker and "invalid" in marker:
             plan_widget.update(f"[red]{marker}[/]")
             return
-        if not resolved and not self._input_value():
+        if self._is_worktree_mode():
+            if not self._name_value():
+                plan_widget.update("[red]branch name required[/]")
+                return
+        elif not resolved and not self._input_value():
             plan_widget.update("[red]input or name required[/]")
             return
 
+        # Worktree mode treats the name field as the branch input.
+        # Force input="" so the dispatcher's single-positional path
+        # picks up the typed branch via raw_input, and any stray text
+        # in the hidden URL/path field is dropped on the floor.
+        input_for_payload = "" if self._is_worktree_mode() else self._input_value()
         payload: dict[str, object] = {
-            "input": self._input_value(),
+            "input": input_for_payload,
             "name": self._name_value(),
             "source": self._current_source(),  # "auto" or specific key
             "tmp": self.toggle_values["tmp"],

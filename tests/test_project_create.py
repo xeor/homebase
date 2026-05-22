@@ -85,6 +85,24 @@ def test_payload_to_namespace_passes_from_project() -> None:
     assert ns.inputs == ["featx"]
 
 
+def test_payload_to_namespace_worktree_name_only_routes_to_raw_input() -> None:
+    # Worktree dialog forces input="" and the user types the branch
+    # name in the name field; the dispatcher should see the branch
+    # arrive as the single positional (raw_input) and from_project
+    # carrying the parent name.
+    ns = _payload_to_namespace(
+        {
+            "input": "",
+            "name": "featx",
+            "source": "worktree",
+            "from_project": "foo",
+        }
+    )
+    assert ns.mode == "worktree"
+    assert ns.from_project == "foo"
+    assert ns.inputs == ["featx"]
+
+
 def test_action_new_worktree_pushes_screen_with_prefill(tmp_path: Path) -> None:
     captured: dict[str, object] = {}
 
