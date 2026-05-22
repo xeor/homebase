@@ -20,6 +20,7 @@ from ...core.constants import (
     CURSOR_BG_HEX,
     CURSOR_FG_HEX,
 )
+from ...metadata.api import load_base_worktree
 from ...workspace.new.adapters import adapter_for_host, parse_url
 from ...workspace.new.cmd import autodetect_source_key
 from ...workspace.new.config_loader import NewConfigError, load_new_sources
@@ -91,13 +92,22 @@ _SOURCE_HELP: dict[str, str] = {
 }
 
 
+SECTION_SOURCE = 0
+SECTION_INPUT = 1
+SECTION_NAME = 2
+SECTION_TOGGLES = 3
+SECTION_TAGS = 4
+SECTION_TEMPLATE = 5
+SECTION_COUNT = 6
+
+
 _SECTION_HELP: dict[int, str] = {
-    0: "Project input — URL, path, or bare name. Source is auto-detected from the shape.",
-    1: "Name override — optional. Leave blank to let the source infer the name.",
-    2: "Source — pick the creation mode. 'auto' uses the auto-detected one.",
-    # 3 (toggles) is rendered per-toggle from _TOGGLES.help
-    4: "Tags — space/enter opens the tag picker.",
-    # 5 (template) is rendered per-template below
+    SECTION_SOURCE: "Source — pick the creation mode. 'auto' uses the auto-detected one.",
+    SECTION_INPUT: "Project input — URL, path, or bare name. Source is auto-detected from the shape.",
+    SECTION_NAME: "Name override — optional. Leave blank to let the source infer the name.",
+    # toggles rendered per-toggle from _TOGGLES.help
+    SECTION_TAGS: "Tags — space/enter opens the tag picker.",
+    # template rendered per-template below
 }
 
 
@@ -110,9 +120,10 @@ class NewProjectScreen(ModalScreen[dict[str, object] | None]):
         align: center middle;
     }
     #new_title { height: 1; padding: 0 1; }
+    #new_source_top { height: 1; margin: 0 0 1 0; padding: 0 1; }
     #new_top { height: 3; margin: 0 0 1 0; }
     #new_top Input { width: 1fr; }
-    #new_top.worktree-mode #new_input { display: none; }
+    #new_top.worktree-mode #new_input { color: $text-muted; }
     #new_left Static { height: auto; margin: 0 0 1 0; }
     #new_left #new_status_info {
         border-top: dashed $primary;
@@ -175,33 +186,34 @@ class NewProjectScreen(ModalScreen[dict[str, object] | None]):
         self.toggle_values: dict[str, bool] = {t.key: t.default for t in _TOGGLES}
         self.template_index = 0  # index into [None, *templates]
         self.selected_tags: set[str] = set()
-        # Sections:
-        #   0 = input, 1 = name, 2 = source, 3 = toggles,
-        #   4 = tags (opens TagPlanScreen), 5 = template
-        # The plan/status line at the bottom is not a tab stop —
-        # enter from any section submits.
-        self.focus_section = 0
+        # Section tab order is defined by the SECTION_* constants:
+        # source (0) → input (1) → name (2) → toggles (3) → tags (4)
+        # → template (5). Enter from any section submits; the plan
+        # / status line at the bottom is not a tab stop.
+        self.focus_section = SECTION_SOURCE
         self.toggle_index = 0
         self.prefill = dict(prefill or {})
         self.prefill_from_project = str(self.prefill.get("from_project", "")).strip()
-        if self.prefill_from_project:
-            self.toggle_values["cd"] = True
-            self.focus_section = 1
         prefill_source = str(self.prefill.get("source", "")).strip()
         if prefill_source and prefill_source in self.source_choices:
             self.source_index = self.source_choices.index(prefill_source)
+        if self.prefill_from_project:
+            self.toggle_values["cd"] = True
+            # Worktree-from-action: source + path are already settled;
+            # land the user directly on the name field.
+            self.focus_section = SECTION_NAME
 
     # ---------- compose ----------
 
     def compose(self) -> ComposeResult:
         with Vertical(id="new_project_box"):
             yield Static("[bold]Create new project[/]", id="new_title")
+            yield Static("", id="new_source_top")
             with Horizontal(id="new_top"):
                 yield Input(placeholder="URL / path / bare name", id="new_input")
                 yield Input(placeholder="name (optional)", id="new_name")
             with Horizontal(id="new_body"):
                 with Vertical(id="new_left"):
-                    yield Static("", id="new_source_line")
                     yield Static("Options:", id="new_toggles_header")
                     with Horizontal(id="new_toggles_wrap"):
                         for col_idx in range(_TOGGLE_COL_COUNT):
@@ -229,20 +241,38 @@ class NewProjectScreen(ModalScreen[dict[str, object] | None]):
     def _apply_prefill_values(self) -> None:
         raw_input = str(self.prefill.get("input", ""))
         raw_name = str(self.prefill.get("name", ""))
+        inp = self.query_one("#new_input", Input)
+        name = self.query_one("#new_name", Input)
+        # In worktree mode the path is owned by the action that
+        # launched the dialog — prefill it from the resolved parent
+        # location so the user sees what they are forking off, and
+        # lock the field so they can't accidentally edit it.
+        if self.prefill_from_project and not raw_input:
+            parent_path = self.base_dir_ref / self.prefill_from_project / "repo"
+            raw_input = str(parent_path)
         if raw_input:
-            self.query_one("#new_input", Input).value = raw_input
+            inp.value = raw_input
         if raw_name:
-            self.query_one("#new_name", Input).value = raw_name
-        if self._is_worktree_mode():
-            top = self.query_one("#new_top", Horizontal)
-            top.add_class("worktree-mode")
-            name_input = self.query_one("#new_name", Input)
-            name_input.placeholder = f"branch name (required) — worktree of {self.prefill_from_project}"
+            name.value = raw_name
+        self._sync_worktree_mode_chrome()
 
     def _is_worktree_mode(self) -> bool:
-        if self.prefill_from_project:
-            return True
-        return self._current_source() == "worktree"
+        return self._current_source() == "worktree" or bool(self.prefill_from_project)
+
+    def _input_locked(self) -> bool:
+        return bool(self.prefill_from_project) and self._is_worktree_mode()
+
+    def _sync_worktree_mode_chrome(self) -> None:
+        top = self.query_one("#new_top", Horizontal)
+        inp = self.query_one("#new_input", Input)
+        if self._is_worktree_mode():
+            top.add_class("worktree-mode")
+            inp.placeholder = "parent repo path (must be an existing git repo)"
+            inp.disabled = self._input_locked()
+        else:
+            top.remove_class("worktree-mode")
+            inp.placeholder = "URL / path / bare name"
+            inp.disabled = False
 
     # ---------- helpers ----------
 
@@ -254,20 +284,29 @@ class NewProjectScreen(ModalScreen[dict[str, object] | None]):
         # keys before the focused Input would see them.
         inp = self.query_one("#new_input", Input)
         name = self.query_one("#new_name", Input)
-        if self.focus_section == 0:
+        input_locked = self._input_locked()
+        if input_locked:
+            inp.can_focus = False
+        if self.focus_section == SECTION_INPUT and not input_locked:
             inp.can_focus = True
             name.can_focus = True
             name.blur()
             inp.focus()
-        elif self.focus_section == 1:
-            inp.can_focus = True
+        elif self.focus_section == SECTION_NAME:
+            inp.can_focus = not input_locked
             name.can_focus = True
             inp.blur()
             name.focus()
+        elif self.focus_section == SECTION_INPUT and input_locked:
+            # Skip a locked input — bounce to the next reachable section.
+            self.focus_section = SECTION_NAME
+            self._set_section_focus()
+            return
         else:
             inp.blur()
             name.blur()
-            inp.can_focus = False
+            if not input_locked:
+                inp.can_focus = False
             name.can_focus = False
             self.set_focus(None)
 
@@ -432,6 +471,75 @@ class NewProjectScreen(ModalScreen[dict[str, object] | None]):
         if self.toggle_values.get("archive"):
             return archive_destination(base_path, self.base_dir_ref)
         return base_path
+
+    def _derived_worktree_parent_name(self) -> str:
+        """Worktree path the user typed in the input field. Resolves
+        to the root parent project NAME (walks worktree.of chains the
+        same way the CLI does)."""
+        raw = self._input_value().strip()
+        if not raw:
+            return ""
+        try:
+            path = Path(raw).expanduser().resolve()
+        except (OSError, RuntimeError):
+            return ""
+        # Accept either '<base>/<parent>' or '<base>/<parent>/repo'.
+        candidate = path
+        if candidate.name == "repo":
+            candidate = candidate.parent
+        try:
+            base_res = self.base_dir_ref.resolve()
+            rel = candidate.relative_to(base_res)
+        except (OSError, RuntimeError, ValueError):
+            return ""
+        if not rel.parts:
+            return ""
+        name = rel.parts[0]
+        # Walk worktree.of to find the root.
+        seen: set[str] = set()
+        while True:
+            if name in seen:
+                return name
+            seen.add(name)
+            block = load_base_worktree(self.base_dir_ref / name)
+            if block is None:
+                return name
+            next_name = str(block.get("of", "")).strip()
+            if not next_name:
+                return name
+            name = next_name
+
+    def _worktree_validation(self) -> tuple[str, str]:
+        """Return ``(target_dir_name, error)``. ``error`` is empty
+        when the typed parent path + branch combination would create
+        a healthy worktree."""
+        raw = self._input_value().strip()
+        if not raw:
+            return ("", "parent repo path required")
+        try:
+            path = Path(raw).expanduser().resolve()
+        except (OSError, RuntimeError) as exc:
+            return ("", f"invalid path: {exc}")
+        if not path.exists():
+            return ("", "parent path does not exist")
+        if path.name == "repo":
+            repo_dir = path
+        else:
+            repo_dir = path / "repo"
+        if not (repo_dir / ".git").exists():
+            return ("", "parent has no git repo (expected repo/.git)")
+        parent_name = self._derived_worktree_parent_name()
+        if not parent_name:
+            return ("", "parent must live under base/")
+        branch = self._name_value().strip()
+        if not branch:
+            return ("", "branch name required")
+        sanitized = branch.replace("/", "--")
+        dir_name = f"{parent_name}-{sanitized}"
+        target = self.base_dir_ref / dir_name
+        if target.exists():
+            return (dir_name, f"target exists: {dir_name}")
+        return (dir_name, "")
 
     def _similar_matches(self, query: str, limit: int = 5) -> list[tuple[str, int]]:
         q = query.strip().lower()
@@ -745,25 +853,31 @@ class NewProjectScreen(ModalScreen[dict[str, object] | None]):
 
     def _help_text(self) -> str:
         sec = self.focus_section
-        if sec == 2:
+        if sec == SECTION_SOURCE:
             return self._source_details_text(self._current_source())
-        if sec == 3 and 0 <= self.toggle_index < len(_TOGGLES):
+        if sec == SECTION_TOGGLES and 0 <= self.toggle_index < len(_TOGGLES):
             spec = _TOGGLES[self.toggle_index]
             return f"[bold cyan]{spec.label}[/]\n{spec.help}"
-        if sec == 5:
+        if sec == SECTION_TEMPLATE:
             return self._template_details_text(self._current_template())
         return _SECTION_HELP.get(sec, "")
 
     # ---------- refresh ----------
 
     def _refresh(self) -> None:
+        # Keep the input lock + placeholder in sync with the currently
+        # selected source. Picking 'worktree' from the source row
+        # (without a prefill) toggles the chrome on; picking another
+        # source toggles it back.
+        self._sync_worktree_mode_chrome()
         # Name field — when the user hasn't typed an override we
         # display the auto-inferred name as an orange placeholder so
         # it's obvious which name will actually be used and that they
         # can override it.
         name_input = self.query_one("#new_name", Input)
         if self._is_worktree_mode():
-            name_input.placeholder = f"branch name (required) — worktree of {self.prefill_from_project}"
+            of = self.prefill_from_project or self._derived_worktree_parent_name() or "?"
+            name_input.placeholder = f"branch name (required) — worktree of {of}"
             name_input.remove_class("auto-name")
         elif self._name_value():
             name_input.placeholder = "name (optional)"
@@ -777,15 +891,15 @@ class NewProjectScreen(ModalScreen[dict[str, object] | None]):
                 name_input.placeholder = "name (optional)"
                 name_input.remove_class("auto-name")
 
-        # Source row.
+        # Source row (now at the very top of the dialog).
         detected = self._detected_source()
-        cursor = ">" if self.focus_section == 2 else " "
+        cursor = ">" if self.focus_section == SECTION_SOURCE else " "
         sel = self._current_source()
         choices_str = "  ".join(
             f"[{_SELECTION_STYLE}] {c} [/]" if c == sel else f" {c} "
             for c in self.source_choices
         )
-        self.query_one("#new_source_line", Static).update(
+        self.query_one("#new_source_top", Static).update(
             f"{cursor} source (auto detected: [cyan]{detected}[/]):  {choices_str}"
         )
 
@@ -805,7 +919,8 @@ class NewProjectScreen(ModalScreen[dict[str, object] | None]):
                 spec = _TOGGLES[global_idx]
                 cur = (
                     ">"
-                    if self.focus_section == 3 and global_idx == self.toggle_index
+                    if self.focus_section == SECTION_TOGGLES
+                    and global_idx == self.toggle_index
                     else " "
                 )
                 mark = r"\[x]" if self.toggle_values[spec.key] else r"\[ ]"
@@ -819,10 +934,10 @@ class NewProjectScreen(ModalScreen[dict[str, object] | None]):
             ).update("\n".join(col_lines))
 
         # Tags row.
-        tag_cursor = ">" if self.focus_section == 4 else " "
+        tag_cursor = ">" if self.focus_section == SECTION_TAGS else " "
         tag_summary = ", ".join(sorted(self.selected_tags)) or "-"
         tag_hint = (
-            " [dim](space/enter to edit)[/]" if self.focus_section == 4 else ""
+            " [dim](space/enter to edit)[/]" if self.focus_section == SECTION_TAGS else ""
         )
         self.query_one("#new_tags_line", Static).update(
             f"{tag_cursor} tags:  {tag_summary}{tag_hint}"
@@ -837,7 +952,7 @@ class NewProjectScreen(ModalScreen[dict[str, object] | None]):
                 opts_labels.append(f"[{_SELECTION_STYLE}] {label} [/]")
             else:
                 opts_labels.append(f" {label} ")
-        tcursor = ">" if self.focus_section == 5 else " "
+        tcursor = ">" if self.focus_section == SECTION_TEMPLATE else " "
         self.query_one("#new_template_line", Static).update(
             f"{tcursor} template: {' '.join(opts_labels)}"
         )
@@ -899,7 +1014,18 @@ class NewProjectScreen(ModalScreen[dict[str, object] | None]):
         self.query_one("#new_help", Static).update(self._help_text())
 
         # Plan line — status only, not a tab stop.
-        if not resolved or target is None:
+        if self._is_worktree_mode():
+            dir_name, err = self._worktree_validation()
+            if err:
+                plan_text = f"[bold red]worktree invalid:[/] {err}"
+            else:
+                branch = self._name_value().strip()
+                parent = self._derived_worktree_parent_name() or "?"
+                plan_text = (
+                    f"Will create worktree [bold green]{dir_name}[/] of "
+                    f"[bold cyan]{parent}[/] on branch [bold cyan]{branch}[/]"
+                )
+        elif not resolved or target is None:
             plan_text = "Waiting for name…"
         elif target.exists():
             plan_text = f"[bold yellow]Will open existing[/] {resolved}"
@@ -923,12 +1049,12 @@ class NewProjectScreen(ModalScreen[dict[str, object] | None]):
     # ---------- mouse ----------
 
     _SECTION_FOR_ID: dict[str, int] = {
-        "new_input": 0,
-        "new_name": 1,
-        "new_source_line": 2,
-        "new_toggles_header": 3,
-        "new_tags_line": 4,
-        "new_template_line": 5,
+        "new_source_top": SECTION_SOURCE,
+        "new_input": SECTION_INPUT,
+        "new_name": SECTION_NAME,
+        "new_toggles_header": SECTION_TOGGLES,
+        "new_tags_line": SECTION_TAGS,
+        "new_template_line": SECTION_TEMPLATE,
     }
 
     def on_click(self, event: events.Click) -> None:
@@ -944,7 +1070,7 @@ class NewProjectScreen(ModalScreen[dict[str, object] | None]):
                 col_idx = int(wid.rsplit("_", 1)[-1])
             except ValueError:
                 return
-            self.focus_section = 3
+            self.focus_section = SECTION_TOGGLES
             line = max(0, event.y)
             candidate = col_idx * _MAX_TOGGLE_ROWS + line
             if 0 <= candidate < len(_TOGGLES):
@@ -955,6 +1081,8 @@ class NewProjectScreen(ModalScreen[dict[str, object] | None]):
         section = self._SECTION_FOR_ID.get(wid)
         if section is None:
             return
+        if section == SECTION_INPUT and self._input_locked():
+            return
         self.focus_section = section
         self._set_section_focus()
         self._refresh()
@@ -962,40 +1090,47 @@ class NewProjectScreen(ModalScreen[dict[str, object] | None]):
     # ---------- navigation ----------
 
     def _section_count(self) -> int:
-        return 6  # 0..5
+        return SECTION_COUNT
+
+    def _advance_section(self, delta: int) -> None:
+        # Skip a locked input field rather than parking the cursor on
+        # a non-interactive widget.
+        for _ in range(self._section_count()):
+            self.focus_section = (self.focus_section + delta) % self._section_count()
+            if self.focus_section == SECTION_INPUT and self._input_locked():
+                continue
+            break
+        self._set_section_focus()
+        self._refresh()
 
     def action_next_section(self) -> None:
-        self.focus_section = (self.focus_section + 1) % self._section_count()
-        self._set_section_focus()
-        self._refresh()
+        self._advance_section(1)
 
     def action_prev_section(self) -> None:
-        self.focus_section = (self.focus_section - 1) % self._section_count()
-        self._set_section_focus()
-        self._refresh()
+        self._advance_section(-1)
 
     def action_move_left(self) -> None:
-        if self.focus_section == 2 and self.source_choices:
+        if self.focus_section == SECTION_SOURCE and self.source_choices:
             self.source_index = (self.source_index - 1) % len(self.source_choices)
-        elif self.focus_section == 3:
+        elif self.focus_section == SECTION_TOGGLES:
             # Jump to the same row in the previous toggle column.
             new_idx = self.toggle_index - _MAX_TOGGLE_ROWS
             if 0 <= new_idx < len(_TOGGLES):
                 self.toggle_index = new_idx
-        elif self.focus_section == 5:
+        elif self.focus_section == SECTION_TEMPLATE:
             opts = self._template_options()
             if opts:
                 self.template_index = (self.template_index - 1) % len(opts)
         self._refresh()
 
     def action_move_right(self) -> None:
-        if self.focus_section == 2 and self.source_choices:
+        if self.focus_section == SECTION_SOURCE and self.source_choices:
             self.source_index = (self.source_index + 1) % len(self.source_choices)
-        elif self.focus_section == 3:
+        elif self.focus_section == SECTION_TOGGLES:
             new_idx = self.toggle_index + _MAX_TOGGLE_ROWS
             if 0 <= new_idx < len(_TOGGLES):
                 self.toggle_index = new_idx
-        elif self.focus_section == 5:
+        elif self.focus_section == SECTION_TEMPLATE:
             opts = self._template_options()
             if opts:
                 self.template_index = (self.template_index + 1) % len(opts)
@@ -1005,7 +1140,7 @@ class NewProjectScreen(ModalScreen[dict[str, object] | None]):
         # Inside the toggle grid, up navigates within the current
         # column. At the column top, fall through to the previous
         # section.
-        if self.focus_section == 3:
+        if self.focus_section == SECTION_TOGGLES:
             row = self.toggle_index % _MAX_TOGGLE_ROWS
             if row > 0:
                 self.toggle_index -= 1
@@ -1014,7 +1149,7 @@ class NewProjectScreen(ModalScreen[dict[str, object] | None]):
         self.action_prev_section()
 
     def action_move_down(self) -> None:
-        if self.focus_section == 3:
+        if self.focus_section == SECTION_TOGGLES:
             row = self.toggle_index % _MAX_TOGGLE_ROWS
             if row < _MAX_TOGGLE_ROWS - 1 and self.toggle_index + 1 < len(_TOGGLES):
                 self.toggle_index += 1
@@ -1023,16 +1158,16 @@ class NewProjectScreen(ModalScreen[dict[str, object] | None]):
         self.action_next_section()
 
     def action_toggle(self) -> None:
-        if self.focus_section == 3:
+        if self.focus_section == SECTION_TOGGLES:
             spec = _TOGGLES[self.toggle_index]
             self.toggle_values[spec.key] = not self.toggle_values[spec.key]
             self._refresh()
             return
-        if self.focus_section == 4:
+        if self.focus_section == SECTION_TAGS:
             self._open_tag_picker()
             return
         # In source / template sections, space cycles forward.
-        if self.focus_section in {2, 5}:
+        if self.focus_section in {SECTION_SOURCE, SECTION_TEMPLATE}:
             self.action_move_right()
             return
 
@@ -1041,21 +1176,29 @@ class NewProjectScreen(ModalScreen[dict[str, object] | None]):
     def action_accept(self) -> None:
         resolved, marker = self._resolved_name_preview()
         plan_widget = self.query_one("#new_plan", Static)
-        if marker and "invalid" in marker:
-            plan_widget.update(f"[red]{marker}[/]")
-            return
+        from_project = ""
         if self._is_worktree_mode():
-            if not self._name_value():
-                plan_widget.update("[red]branch name required[/]")
+            _dir, err = self._worktree_validation()
+            if err:
+                plan_widget.update(f"[red]worktree invalid: {err}[/]")
                 return
-        elif not resolved and not self._input_value():
-            plan_widget.update("[red]input or name required[/]")
-            return
+            from_project = (
+                self.prefill_from_project
+                or self._derived_worktree_parent_name()
+            )
+        else:
+            if marker and "invalid" in marker:
+                plan_widget.update(f"[red]{marker}[/]")
+                return
+            if not resolved and not self._input_value():
+                plan_widget.update("[red]input or name required[/]")
+                return
 
-        # Worktree mode treats the name field as the branch input.
-        # Force input="" so the dispatcher's single-positional path
-        # picks up the typed branch via raw_input, and any stray text
-        # in the hidden URL/path field is dropped on the floor.
+        # Worktree mode: the input field carries the parent path (kept
+        # visible but ignored by the source plumbing), the name field
+        # carries the branch. Force input="" in the payload so the
+        # dispatcher's single-positional path picks up the branch via
+        # raw_input.
         input_for_payload = "" if self._is_worktree_mode() else self._input_value()
         payload: dict[str, object] = {
             "input": input_for_payload,
@@ -1076,8 +1219,8 @@ class NewProjectScreen(ModalScreen[dict[str, object] | None]):
                 "open" if self.toggle_values["cd"] else "stay"
             ),
         }
-        if self.prefill_from_project:
-            payload["from_project"] = self.prefill_from_project
+        if from_project:
+            payload["from_project"] = from_project
         self.dismiss(payload)
 
     def action_cancel(self) -> None:
