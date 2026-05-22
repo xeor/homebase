@@ -1271,7 +1271,7 @@ class NewProjectScreen(ModalScreen[dict[str, object] | None]):
                 self._refresh()
 
             confirm_destructive(
-                self,
+                self.app,
                 title="Reset worktree prefill?",
                 details=details,
                 on_yes=_apply_reset,

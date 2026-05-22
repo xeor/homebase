@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import subprocess
 from pathlib import Path
+from types import SimpleNamespace
 
 from homebase.cli.parser import build_cli_parser
 from homebase.ui.screens.new_project import (
@@ -521,15 +522,25 @@ def test_invalid_path_returns_empty_parent_name(tmp_path: Path) -> None:
 
 
 class _GuardStub(_ChromeStub):
-    """Stub that intercepts push_screen so we can drive the confirm
-    callback synchronously from tests, mirroring the real flow."""
+    """Stub that intercepts push_screen via self.app so we can drive
+    the confirm callback synchronously from tests, mirroring the
+    real ModalScreen flow (where self.push_screen does not exist —
+    only self.app.push_screen).
+
+    Textual's Screen base class exposes ``app`` as a read-only
+    property, so we override it here with a stand-in that records
+    every push call."""
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self.pushed: list[tuple[object, object]] = []
+        self._app_stub = SimpleNamespace(
+            push_screen=lambda screen, callback: self.pushed.append((screen, callback))
+        )
 
-    def push_screen(self, screen, callback) -> None:  # type: ignore[override]
-        self.pushed.append((screen, callback))
+    @property
+    def app(self):  # type: ignore[override]
+        return self._app_stub
 
 
 def test_source_change_from_worktree_with_prefill_prompts_confirm(tmp_path: Path) -> None:
