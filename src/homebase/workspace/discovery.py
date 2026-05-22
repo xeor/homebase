@@ -2,8 +2,43 @@ from __future__ import annotations
 
 import os
 import re
+import sqlite3
+import subprocess
+import sys
 from collections.abc import Callable
 from pathlib import Path
+
+import yaml
+
+# A single malformed project shouldn't abort the entire workspace
+# scan — that would leave fresh_active/fresh_archived empty in the
+# cache-refresh worker and cause the TUI to cold-start on every
+# launch. Catch the same exception set the cache worker already
+# tolerates at the top level, log the offender to stderr, and skip
+# the row.
+_ROW_SCAN_ERRORS: tuple[type[BaseException], ...] = (
+    OSError,
+    ValueError,
+    TypeError,
+    sqlite3.Error,
+    yaml.YAMLError,
+    subprocess.SubprocessError,
+)
+
+
+def _safe_project_row(
+    project_row: Callable[..., object],
+    path: Path,
+    /,
+    **kwargs: object,
+) -> object | None:
+    try:
+        return project_row(path, **kwargs)
+    except _ROW_SCAN_ERRORS as exc:
+        sys.stderr.write(
+            f"workspace scan: skipped {path}: {exc.__class__.__name__}: {exc}\n"
+        )
+        return None
 
 
 def resolve_include_nested(
@@ -136,14 +171,15 @@ def collect_projects(
         size_prev = (size_cache or {}).get(project_dir)
         prev_size = int(size_prev[0]) if size_prev is not None else None
         prev_count = int(size_prev[1]) if size_prev is not None else 0
-        rows.append(
-            project_row(
-                project_dir,
-                include_git_dirty=include_git_dirty,
-                prev_size_bytes=prev_size,
-                prev_size_refresh_count=prev_count,
-            )
+        row = _safe_project_row(
+            project_row,
+            project_dir,
+            include_git_dirty=include_git_dirty,
+            prev_size_bytes=prev_size,
+            prev_size_refresh_count=prev_count,
         )
+        if row is not None:
+            rows.append(row)
 
     nested = resolve_include_nested_fn(base_dir, include_nested)
     if not nested:
@@ -166,14 +202,15 @@ def collect_projects(
         size_prev = (size_cache or {}).get(cur)
         prev_size = int(size_prev[0]) if size_prev is not None else None
         prev_count = int(size_prev[1]) if size_prev is not None else 0
-        rows.append(
-            project_row(
-                cur,
-                include_git_dirty=include_git_dirty,
-                prev_size_bytes=prev_size,
-                prev_size_refresh_count=prev_count,
-            )
+        row = _safe_project_row(
+            project_row,
+            cur,
+            include_git_dirty=include_git_dirty,
+            prev_size_bytes=prev_size,
+            prev_size_refresh_count=prev_count,
         )
+        if row is not None:
+            rows.append(row)
         dirnames[:] = []
     return rows
 
@@ -220,7 +257,8 @@ def collect_archived(
             size_prev = (size_cache or {}).get(cur_res)
             prev_size = int(size_prev[0]) if size_prev is not None else None
             prev_count = int(size_prev[1]) if size_prev is not None else 0
-            row = project_row(
+            row = _safe_project_row(
+                project_row,
                 cur,
                 archived=True,
                 restore_target=restore,
@@ -229,10 +267,11 @@ def collect_archived(
                 prev_size_bytes=prev_size,
                 prev_size_refresh_count=prev_count,
             )
-            row.name = stem
-            row.is_fork, row.is_tmp, row.suffix = classify_name(row.name)
-            refresh_row_caches(row)
-            rows.append(row)
+            if row is not None:
+                row.name = stem
+                row.is_fork, row.is_tmp, row.suffix = classify_name(row.name)
+                refresh_row_caches(row)
+                rows.append(row)
             dirnames[:] = []
             continue
 
@@ -250,7 +289,8 @@ def collect_archived(
             size_prev = (size_cache or {}).get(path_res)
             prev_size = int(size_prev[0]) if size_prev is not None else None
             prev_count = int(size_prev[1]) if size_prev is not None else 0
-            row = project_row(
+            row = _safe_project_row(
+                project_row,
                 path,
                 archived=True,
                 restore_target=restore,
@@ -259,8 +299,9 @@ def collect_archived(
                 prev_size_bytes=prev_size,
                 prev_size_refresh_count=prev_count,
             )
-            row.name = stem
-            row.is_fork, row.is_tmp, row.suffix = classify_name(row.name)
-            refresh_row_caches(row)
-            rows.append(row)
+            if row is not None:
+                row.name = stem
+                row.is_fork, row.is_tmp, row.suffix = classify_name(row.name)
+                refresh_row_caches(row)
+                rows.append(row)
     return rows
