@@ -34,8 +34,26 @@ properties:
     label: Git repo
     key: git
     color: "#86b8ff"
-    # Detector: project contains .git directory.
+    # Detector: project contains .git directory (regular clone).
     dir-exists: [.git]
+
+  WT:
+    label: Git worktree
+    key: wt
+    color: "#8d84c6"
+    # Detector: project's .git is a file (worktree pointer), not a
+    # directory. file-exists catches worktree rows that the built-in
+    # GIT property (dir-exists) misses.
+    file-exists: [.git]
+
+  ANYGIT:
+    label: Git repo or worktree
+    key: anygit
+    color: "#7dd3a7"
+    # Detector: matches either form — regular clone or worktree.
+    # Detectors OR together within a property; path-exists is the
+    # cleanest single-line form.
+    path-exists: [.git]
 
   EDT:
     label: editor active

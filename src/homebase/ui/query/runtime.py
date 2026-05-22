@@ -7,8 +7,98 @@ from typing import Any, Callable
 from textual.widgets import Static
 
 from ...core.constants import CURSOR_BG_HEX, CURSOR_FG_HEX
+from ...filter.engine import STRUCTURED_TERM_RE
+from ...workspace.filter_compile import _FILTER_TOKEN_RE
 
 _CURSOR_STYLE = f"{CURSOR_FG_HEX} on {CURSOR_BG_HEX}"
+
+
+_KNOWN_STRUCTURED_KEYS: frozenset[str] = frozenset(
+    {"created", "opened", "last", "repo", "worktree-of"}
+)
+
+
+def _esc_default(text: str) -> str:
+    return text.replace("[", "\\[").replace("]", "\\]")
+
+
+def _render_query_with_cursor(
+    query: str,
+    cursor: int,
+    *,
+    color_key: str,
+    color_op: str,
+    color_value: str,
+    color_unknown: str,
+    esc=_esc_default,
+) -> str:
+    pieces: list[str] = []
+    last_end = 0
+    for match in _FILTER_TOKEN_RE.finditer(query):
+        start, end = match.span()
+        if start > last_end:
+            pieces.append(
+                _styled_chunk(query[last_end:start], None, cursor, last_end, esc)
+            )
+        token = match.group(0)
+        pieces.append(_render_token(token, cursor, start, color_key, color_op, color_value, color_unknown, esc))
+        last_end = end
+    if last_end < len(query):
+        pieces.append(_styled_chunk(query[last_end:], None, cursor, last_end, esc))
+    # Cursor at end-of-string: append a single highlighted space.
+    if cursor >= len(query):
+        pieces.append(f"[{_CURSOR_STYLE}] [/]")
+    return "".join(pieces)
+
+
+def _render_token(
+    token: str,
+    cursor: int,
+    offset: int,
+    color_key: str,
+    color_op: str,
+    color_value: str,
+    color_unknown: str,
+    esc,
+) -> str:
+    match = STRUCTURED_TERM_RE.match(token.lower())
+    if not match:
+        # Non-structured token: render plain with cursor handling.
+        return _styled_chunk(token, None, cursor, offset, esc)
+    key_text = ":" + match.group(1)
+    op_text = match.group(2)
+    key_color = color_key if match.group(1) in _KNOWN_STRUCTURED_KEYS else color_unknown
+    # Slice original-case token to preserve any case info (currently the
+    # tokenizer is case-insensitive but we still echo the source).
+    key_raw = token[: len(key_text)]
+    op_raw = token[len(key_text) : len(key_text) + len(op_text)]
+    value_raw = token[len(key_text) + len(op_text) :]
+    pieces: list[str] = []
+    pieces.append(_styled_chunk(key_raw, key_color, cursor, offset, esc))
+    pieces.append(_styled_chunk(op_raw, color_op, cursor, offset + len(key_raw), esc))
+    pieces.append(_styled_chunk(value_raw, color_value, cursor, offset + len(key_raw) + len(op_raw), esc))
+    return "".join(pieces)
+
+
+def _styled_chunk(text: str, color: str | None, cursor: int, offset: int, esc) -> str:
+    if not text:
+        return ""
+    chunk_start = offset
+    chunk_end = offset + len(text)
+    if cursor < chunk_start or cursor >= chunk_end:
+        body = esc(text)
+        return f"[{color}]{body}[/]" if color else body
+    rel = cursor - chunk_start
+    left = esc(text[:rel])
+    cur = esc(text[rel])
+    right = esc(text[rel + 1 :])
+    if color:
+        left_part = f"[{color}]{left}[/]" if left else ""
+        right_part = f"[{color}]{right}[/]" if right else ""
+    else:
+        left_part, right_part = left, right
+    return f"{left_part}[{_CURSOR_STYLE}]{cur}[/]{right_part}"
+
 _HOTBAR_ROW_STYLE_EVEN = "white on #2A2A2A"
 _HOTBAR_ROW_STYLE_ODD = "white on #353535"
 
@@ -113,13 +203,15 @@ def refresh_search_display(
 
     app._normalize_query_cursor()
     if app.query:
-        if app.query_cursor < len(app.query):
-            left = esc(app.query[: app.query_cursor])
-            cur = esc(app.query[app.query_cursor])
-            right = esc(app.query[app.query_cursor + 1 :])
-            active = f"{left}[{_CURSOR_STYLE}]{cur}[/]{right}"
-        else:
-            active = f"{esc(app.query)}[{_CURSOR_STYLE}] [/]"
+        active = _render_query_with_cursor(
+            app.query,
+            app.query_cursor,
+            color_key=color_nav_hex,
+            color_op=color_archive_hex,
+            color_value=color_success_hex,
+            color_unknown=color_warn_hex,
+            esc=esc,
+        )
     else:
         active = ""
     count = app.query_last_rows_count

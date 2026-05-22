@@ -4,6 +4,8 @@ from pathlib import Path
 from typing import Any, Callable
 
 from ...core.models import ProjectRow
+from ...workspace.worktree_paths import find_worktree_children
+from ..screens.choices import SingleChoiceScreen
 from ..screens.rename import RenameInputScreen
 from .dispatch import dispatch_action
 
@@ -260,6 +262,91 @@ def on_pick_actions(app: Any, value: str | None) -> None:
         )
         return True
 
+    def _handle_fix_worktrees() -> bool:
+        app._action_fix_worktrees()
+        return True
+
+    def _parent_targets_with_children(target_rows: list[ProjectRow]) -> list[tuple[ProjectRow, list[Path]]]:
+        out: list[tuple[ProjectRow, list[Path]]] = []
+        for row in target_rows:
+            if getattr(row, "archived", False):
+                continue
+            if getattr(row, "worktree_of", ""):
+                continue
+            children = find_worktree_children(app.base_dir, row.name)
+            if children:
+                out.append((row, children))
+        return out
+
+    def _handle_delete() -> bool:
+        if not targets:
+            return False
+        parents = _parent_targets_with_children(targets)
+        if not parents:
+            return False
+        parent_row, worktrees = parents[0]
+        names = ", ".join(p.name for p in worktrees[:6])
+        if len(worktrees) > 6:
+            names += f" (+{len(worktrees) - 6} more)"
+        title = f"Delete {parent_row.name}: {len(worktrees)} active worktree(s) — {names}"
+        options = [
+            ("delete_orphan", "Delete parent only (worktrees become orphaned)"),
+            ("deworktree_first", "De-worktree all first, then delete parent"),
+        ]
+        paths = [r.path for r in targets]
+        worktree_paths_list = [wt for wt in worktrees]
+
+        def _on_choice(choice: str | None) -> None:
+            if not choice:
+                app._log("delete cancelled", "warn")
+                app._refresh_side()
+                return
+            if choice == "deworktree_first":
+                app._run_family_deworktree_then("delete", worktree_paths_list, paths)
+                return
+            # delete_orphan: fall through to standard bulk confirm.
+            t2, d2 = app._build_bulk_confirm_payload("delete", paths)
+            app.push_screen(
+                app._confirm_screen_cls(t2, d2),
+                lambda ok: app._on_confirm_bulk(ok, "delete", paths),
+            )
+
+        app.push_screen(SingleChoiceScreen(title, options, box_height=8), _on_choice)
+        return True
+
+    def _handle_archive() -> bool:
+        if not targets:
+            return False
+        parents = _parent_targets_with_children(targets)
+        if not parents:
+            return False
+        parent_row, worktrees = parents[0]
+        names = ", ".join(p.name for p in worktrees[:6])
+        if len(worktrees) > 6:
+            names += f" (+{len(worktrees) - 6} more)"
+        title = f"Archive {parent_row.name}: {len(worktrees)} active worktree(s) — {names}"
+        options = [
+            ("deworktree_first", "De-worktree all first, then archive parent"),
+            ("archive_together", "Archive parent + all worktrees together"),
+        ]
+        paths = [r.path for r in targets]
+        worktree_paths_list = [wt for wt in worktrees]
+
+        def _on_choice(choice: str | None) -> None:
+            if not choice:
+                app._log("archive cancelled", "warn")
+                app._refresh_side()
+                return
+            if choice == "deworktree_first":
+                app._run_family_deworktree_then("archive", worktree_paths_list, paths)
+                return
+            if choice == "archive_together":
+                app._run_family_archive_together(parent_row.path, worktree_paths_list)
+                return
+
+        app.push_screen(SingleChoiceScreen(title, options, box_height=8), _on_choice)
+        return True
+
     handlers: dict[str, Callable[[], bool]] = {
         "tags_set": _handle_tags_set,
         "suffix_set": _handle_suffix_set,
@@ -277,6 +364,9 @@ def on_pick_actions(app: Any, value: str | None) -> None:
         "hooks_refresh_view": _handle_hooks_refresh_view,
         "new_worktree": _handle_new_worktree,
         "deworktree": _handle_deworktree,
+        "fix_worktrees": _handle_fix_worktrees,
+        "delete": _handle_delete,
+        "archive": _handle_archive,
     }
     handler = handlers.get(value)
     if handler is not None and handler():

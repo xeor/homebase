@@ -280,3 +280,40 @@ def cache_save_worktree_health(
         issues,
         cache_schema_version=CACHE_SCHEMA_VERSION,
     )
+
+
+def cache_load_worktree_health_rows(
+    base_dir: Path,
+) -> dict[str, tuple[str, int, list[dict[str, object]]]]:
+    return cache_store.cache_load_worktree_health_rows(
+        base_dir,
+        cache_schema_version=CACHE_SCHEMA_VERSION,
+    )
+
+
+def cache_upsert_worktree_health_row(
+    base_dir: Path,
+    path: str,
+    inputs_sig: str,
+    scan_at: int,
+    issues: list[dict[str, object]],
+) -> None:
+    cache_store.cache_upsert_worktree_health_row(
+        base_dir,
+        path,
+        inputs_sig,
+        scan_at,
+        issues,
+        cache_schema_version=CACHE_SCHEMA_VERSION,
+    )
+
+
+def cache_prune_worktree_health_rows(
+    base_dir: Path,
+    keep_paths: set[str],
+) -> None:
+    cache_store.cache_prune_worktree_health_rows(
+        base_dir,
+        keep_paths,
+        cache_schema_version=CACHE_SCHEMA_VERSION,
+    )

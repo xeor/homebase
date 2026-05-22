@@ -224,19 +224,21 @@ def archive_move_internal(
     sync_tags: bool = True,
     *,
     archive_destination_override: Callable[[Path, Path], Path] | None = None,
+    allow_worktree_children: bool = False,
 ) -> Path:
     # ``sync_tags=False`` to the inner service so it skips the full
     # ``sync_tag_symlinks`` rebuild (walks every project under
     # ``base/`` — 10+ seconds on a real workspace). We follow up with
     # a targeted cleanup that only touches symlinks pointing at the
     # path we just moved.
-    blockers = worktree_paths.find_worktree_children(base_dir, src.name)
-    if blockers:
-        names = ", ".join(b.name for b in blockers)
-        raise ValueError(
-            f"cannot archive {src.name}: it has active worktrees ({names}). "
-            f"De-worktree them first or remove them."
-        )
+    if not allow_worktree_children:
+        blockers = worktree_paths.find_worktree_children(base_dir, src.name)
+        if blockers:
+            names = ", ".join(b.name for b in blockers)
+            raise ValueError(
+                f"cannot archive {src.name}: it has active worktrees ({names}). "
+                f"De-worktree them first or remove them."
+            )
     src_resolved = src.resolve() if src.exists() else src
     dest_fn = archive_destination_override or archive_destination
     dst = archive_service.archive_move_internal(

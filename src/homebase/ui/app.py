@@ -243,7 +243,14 @@ _HOTBAR_PALETTE_TAG = f" \\[[{COLOR_ERROR_HEX}]@hotbar[/]]"
 
 def _build_view_config_default() -> dict[str, dict[str, list[tuple[str, str]]]]:
     ordered_ids = {
-        "active": ("new_worktree", "deworktree", "archive", "set_desc", "delete"),
+        "active": (
+            "new_worktree",
+            "deworktree",
+            "fix_worktrees",
+            "archive",
+            "set_desc",
+            "delete",
+        ),
         "archive": ("toggle_pack", "pack", "unpack", "restore", "set_desc", "delete"),
     }
     out: dict[str, dict[str, list[tuple[str, str]]]] = {"active": {"actions": []}, "archive": {"actions": []}}
@@ -566,6 +573,7 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
         self.worktree_health_refresh_running = False
         self.worktree_health_refresh_last_ts = 0.0
         self.worktree_health_dismissed = False
+        self.worktree_health_scan_cursor: list[str] = []
         self.detail_worker_running = False
         self.detail_worker_path: Path | None = None
         self.detail_worker_token = 0
@@ -2144,6 +2152,83 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
 
     def action_dismiss_worktree_health(self) -> None:
         textual_ui_worktree_health.dismiss_worktree_health(self)
+
+    def _action_fix_worktrees(self) -> None:
+        textual_ui_worktree_health.action_fix_worktrees(self)
+
+    def _run_family_deworktree_then(
+        self,
+        followup: str,
+        worktrees: list[Path],
+        original_paths: list[Path],
+    ) -> None:
+        from ..workspace.worktree_families import deworktree_family
+
+        try:
+            self._busy_start(f"de-worktree before {followup}")
+            deworktree_family(self.base_dir, worktrees)
+        except (OSError, ValueError, subprocess.SubprocessError) as exc:
+            self._show_runtime_error(f"de-worktree before {followup}", exc)
+            self._busy_stop()
+            return
+        finally:
+            if self._busy_depth > 0:
+                self._busy_stop()
+        for wt in worktrees:
+            try:
+                new_row = project_row(wt, archived=False)
+                self._upsert_row_local(new_row)
+            except _ROW_BUILD_ERRORS:
+                pass
+        self._log(
+            f"de-worktreed {len(worktrees)} worktree(s); proceeding with {followup}",
+            "info",
+        )
+        title, details = self._build_bulk_confirm_payload(followup, original_paths)
+        self.push_screen(
+            self._confirm_screen_cls(title, details),
+            lambda ok: self._on_confirm_bulk(ok, followup, original_paths),
+        )
+
+    def _run_family_archive_together(
+        self,
+        parent_path: Path,
+        worktrees: list[Path],
+    ) -> None:
+        from ..workspace.worktree_families import archive_family_together
+
+        def _archive(base_dir: Path, src: Path) -> Path:
+            return archive_move_internal(
+                base_dir, src, sync_tags=False, allow_worktree_children=True
+            )
+
+        try:
+            self._busy_start("archive family together")
+            archived_parent, archived_worktrees = archive_family_together(
+                self.base_dir, parent_path, worktrees, archive_move=_archive
+            )
+        except (OSError, ValueError, subprocess.SubprocessError) as exc:
+            self._show_runtime_error("archive family together", exc)
+            return
+        finally:
+            if self._busy_depth > 0:
+                self._busy_stop()
+        moved = [parent_path, *worktrees]
+        self._remove_paths_local(moved)
+        for archived in (archived_parent, *archived_worktrees):
+            try:
+                self._upsert_row_local(self._build_archived_row_from_entry(archived))
+            except _ROW_BUILD_ERRORS:
+                pass
+        self._request_tag_sync("archive family together")
+        self._touch_rows_cache([], removed=moved)
+        self._start_cache_refresh("archive family together", force=False)
+        self._log(
+            f"archived family: {parent_path.name} + {len(worktrees)} worktree(s)",
+            "info",
+        )
+        self._refresh_table()
+        self._refresh_side()
 
     def _on_metadata_health_refresh_done(
         self,

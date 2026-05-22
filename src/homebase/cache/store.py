@@ -114,6 +114,16 @@ def cache_init(conn: sqlite3.Connection, *, cache_schema_version: int) -> None:
         """
     )
     conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS worktree_health_rows (
+            path TEXT PRIMARY KEY,
+            inputs_sig TEXT NOT NULL,
+            scan_at INTEGER NOT NULL,
+            issues_json TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
         "INSERT OR REPLACE INTO cache_meta(key, value) VALUES('schema_version', ?)",
         (str(cache_schema_version),),
     )
@@ -162,6 +172,84 @@ def cache_save_worktree_health(
             "INSERT OR REPLACE INTO worktree_health(id, scan_at, issues_json) VALUES(1, ?, ?)",
             (int(scan_at), json.dumps(issues)),
         )
+        conn.commit()
+        conn.close()
+    except sqlite3.Error:
+        return
+
+
+def cache_load_worktree_health_rows(
+    base_dir: Path,
+    *,
+    cache_schema_version: int,
+) -> dict[str, tuple[str, int, list[dict[str, object]]]]:
+    db = cache_db_path(base_dir)
+    if not db.is_file():
+        return {}
+    try:
+        conn = cache_connect(base_dir)
+        cache_init(conn, cache_schema_version=cache_schema_version)
+        rows = conn.execute(
+            "SELECT path, inputs_sig, scan_at, issues_json FROM worktree_health_rows"
+        ).fetchall()
+        conn.close()
+    except sqlite3.Error:
+        return {}
+    out: dict[str, tuple[str, int, list[dict[str, object]]]] = {}
+    for row in rows:
+        try:
+            issues = json.loads(str(row["issues_json"]))
+        except (TypeError, ValueError):
+            continue
+        if not isinstance(issues, list):
+            continue
+        out[str(row["path"])] = (
+            str(row["inputs_sig"]),
+            int(row["scan_at"]),
+            [entry for entry in issues if isinstance(entry, dict)],
+        )
+    return out
+
+
+def cache_upsert_worktree_health_row(
+    base_dir: Path,
+    path: str,
+    inputs_sig: str,
+    scan_at: int,
+    issues: list[dict[str, object]],
+    *,
+    cache_schema_version: int,
+) -> None:
+    try:
+        conn = cache_connect(base_dir)
+        cache_init(conn, cache_schema_version=cache_schema_version)
+        conn.execute(
+            "INSERT OR REPLACE INTO worktree_health_rows("
+            "path, inputs_sig, scan_at, issues_json) VALUES(?, ?, ?, ?)",
+            (path, inputs_sig, int(scan_at), json.dumps(issues)),
+        )
+        conn.commit()
+        conn.close()
+    except sqlite3.Error:
+        return
+
+
+def cache_prune_worktree_health_rows(
+    base_dir: Path,
+    keep_paths: set[str],
+    *,
+    cache_schema_version: int,
+) -> None:
+    try:
+        conn = cache_connect(base_dir)
+        cache_init(conn, cache_schema_version=cache_schema_version)
+        existing = {
+            str(row["path"])
+            for row in conn.execute("SELECT path FROM worktree_health_rows").fetchall()
+        }
+        stale = existing - keep_paths
+        for path in stale:
+            conn.execute("DELETE FROM worktree_health_rows WHERE path = ?", (path,))
         conn.commit()
         conn.close()
     except sqlite3.Error:

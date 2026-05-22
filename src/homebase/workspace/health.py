@@ -41,6 +41,71 @@ def audit_workspace(base_dir: Path) -> list[WorktreeIssue]:
     return issues
 
 
+def audit_unit_signature(base_dir: Path, unit_path: Path) -> str:
+    """Stable signature for a worktree row or parent, keyed off the
+    mtimes the audit actually depends on. Used by the cached scan to
+    skip units that haven't changed since the last visit."""
+    repo_git = unit_path / "repo" / ".git"
+    mt_repo = _mtime_ns(repo_git)
+    block = load_base_worktree(unit_path)
+    base_meta = unit_path / ".base.yaml"
+    mt_meta = _mtime_ns(base_meta)
+    if block is not None:
+        parent_path_str = block.get("parent_path", "")
+        gitdir_id = block.get("gitdir_id", "")
+        if parent_path_str and gitdir_id:
+            parent_admin = Path(parent_path_str) / ".git" / "worktrees" / gitdir_id
+            mt_admin = _mtime_ns(parent_admin)
+            mt_admin_gitdir = _mtime_ns(parent_admin / "gitdir")
+        else:
+            mt_admin = 0
+            mt_admin_gitdir = 0
+        return f"wt:{mt_meta}:{mt_repo}:{mt_admin}:{mt_admin_gitdir}"
+    admin_root = unit_path / "repo" / ".git" / "worktrees"
+    mt_admin_dir = _mtime_ns(admin_root)
+    admin_entries_sig = "|".join(
+        f"{p.name}:{_mtime_ns(p / 'gitdir')}"
+        for p in sorted(admin_root.iterdir(), key=lambda x: x.name)
+        if p.is_dir()
+    ) if admin_root.is_dir() else ""
+    return f"parent:{mt_meta}:{mt_repo}:{mt_admin_dir}:{admin_entries_sig}"
+
+
+def _mtime_ns(path: Path) -> int:
+    try:
+        return int(path.stat().st_mtime_ns)
+    except OSError:
+        return 0
+
+
+def audit_unit(
+    base_dir: Path,
+    unit_path: Path,
+    worktree_rows: list[tuple[Path, dict[str, str]]] | None = None,
+) -> list[WorktreeIssue]:
+    block = load_base_worktree(unit_path)
+    if block is not None:
+        return list(_audit_worktree_row(base_dir, unit_path, block))
+    rows = worktree_rows if worktree_rows is not None else _collect_worktree_rows(base_dir)
+    return list(_audit_parent_admin(base_dir, unit_path, rows))
+
+
+def list_audit_units(base_dir: Path) -> list[Path]:
+    if not base_dir.is_dir():
+        return []
+    units: list[Path] = []
+    seen: set[Path] = set()
+    for entry, _block in _collect_worktree_rows(base_dir):
+        if entry not in seen:
+            units.append(entry)
+            seen.add(entry)
+    for parent in _collect_potential_parents(base_dir):
+        if parent not in seen:
+            units.append(parent)
+            seen.add(parent)
+    return units
+
+
 def _collect_worktree_rows(base_dir: Path) -> list[tuple[Path, dict[str, str]]]:
     out: list[tuple[Path, dict[str, str]]] = []
     for entry in sorted(base_dir.iterdir(), key=lambda p: p.name):
@@ -269,6 +334,9 @@ def list_workspace_parents(base_dir: Path) -> list[Path]:
 __all__ = [
     "WorktreeIssue",
     "audit_workspace",
+    "audit_unit",
+    "audit_unit_signature",
+    "list_audit_units",
     "repair_issue",
     "find_worktree_children",
     "ISSUE_STALE_GITDIR",

@@ -240,6 +240,14 @@ BUILTIN_ACTIONS: dict[str, BuiltinActionMeta] = {
         view_scope=("active",),
         default_confirm_prompt="Confirm de-worktree",
     ),
+    "fix_worktrees": BuiltinActionMeta(
+        id="fix_worktrees",
+        default_label="Fix worktree health",
+        help_text="Audit and repair worktree pointers across the workspace",
+        scope="workspace",
+        view_scope=("active",),
+        default_confirm_prompt="Confirm worktree fix",
+    ),
     "review_meta": BuiltinActionMeta(
         id="review_meta",
         default_label="Open .base.yaml and review warnings",
