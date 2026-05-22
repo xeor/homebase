@@ -197,11 +197,32 @@ class NewProjectScreen(ModalScreen[dict[str, object] | None]):
         prefill_source = str(self.prefill.get("source", "")).strip()
         if prefill_source and prefill_source in self.source_choices:
             self.source_index = self.source_choices.index(prefill_source)
+        # Auto-prefilled parent path for worktree mode. Tracked so we
+        # can repopulate the input on source-toggle back to worktree
+        # and erase it cleanly when the user picks a different source.
+        self._auto_input_value = ""
         if self.prefill_from_project:
             self.toggle_values["cd"] = True
-            # Worktree-from-action: source + path are already settled;
-            # land the user directly on the name field.
             self.focus_section = SECTION_NAME
+            self._auto_input_value = self._compute_auto_parent_path(
+                self.prefill_from_project
+            )
+        # Initial widget values — passed into the Input constructors in
+        # compose() so they stick before any reactive callback fires.
+        self._initial_input_text = str(self.prefill.get("input", "")) or self._auto_input_value
+        self._initial_name_text = str(self.prefill.get("name", ""))
+        self._last_was_worktree = self._current_source() == "worktree"
+
+    def _compute_auto_parent_path(self, parent_name: str) -> str:
+        layout_a = self.base_dir_ref / parent_name / "repo"
+        if (layout_a / ".git").exists():
+            return str(layout_a)
+        layout_b = self.base_dir_ref / parent_name
+        if (layout_b / ".git").exists():
+            return str(layout_b)
+        # Fall back to the canonical layout even if it doesn't exist
+        # yet — the validation panel will surface the right error.
+        return str(layout_a)
 
     # ---------- compose ----------
 
@@ -210,8 +231,16 @@ class NewProjectScreen(ModalScreen[dict[str, object] | None]):
             yield Static("[bold]Create new project[/]", id="new_title")
             yield Static("", id="new_source_top")
             with Horizontal(id="new_top"):
-                yield Input(placeholder="URL / path / bare name", id="new_input")
-                yield Input(placeholder="name (optional)", id="new_name")
+                yield Input(
+                    placeholder="URL / path / bare name",
+                    id="new_input",
+                    value=self._initial_input_text,
+                )
+                yield Input(
+                    placeholder="name (optional)",
+                    id="new_name",
+                    value=self._initial_name_text,
+                )
             with Horizontal(id="new_body"):
                 with Vertical(id="new_left"):
                     yield Static("Options:", id="new_toggles_header")
@@ -239,21 +268,8 @@ class NewProjectScreen(ModalScreen[dict[str, object] | None]):
         self._refresh()
 
     def _apply_prefill_values(self) -> None:
-        raw_input = str(self.prefill.get("input", ""))
-        raw_name = str(self.prefill.get("name", ""))
-        inp = self.query_one("#new_input", Input)
-        name = self.query_one("#new_name", Input)
-        # In worktree mode the path is owned by the action that
-        # launched the dialog — prefill it from the resolved parent
-        # location so the user sees what they are forking off, and
-        # lock the field so they can't accidentally edit it.
-        if self.prefill_from_project and not raw_input:
-            parent_path = self.base_dir_ref / self.prefill_from_project / "repo"
-            raw_input = str(parent_path)
-        if raw_input:
-            inp.value = raw_input
-        if raw_name:
-            name.value = raw_name
+        # Initial Input values are passed in compose(), so this hook
+        # is now just the chrome sync trigger.
         self._sync_worktree_mode_chrome()
 
     def _is_worktree_mode(self) -> bool:
@@ -265,7 +281,19 @@ class NewProjectScreen(ModalScreen[dict[str, object] | None]):
     def _sync_worktree_mode_chrome(self) -> None:
         top = self.query_one("#new_top", Horizontal)
         inp = self.query_one("#new_input", Input)
-        if self._is_worktree_mode():
+        is_worktree = self._is_worktree_mode()
+        # Detect source transitions so we can reset / repopulate the
+        # input field when the user toggles between worktree and any
+        # other source. Without this the URL/path field would carry
+        # over text that no longer fits the new source's contract.
+        if is_worktree and not self._last_was_worktree:
+            if not inp.value.strip() and self._auto_input_value:
+                inp.value = self._auto_input_value
+        elif not is_worktree and self._last_was_worktree:
+            if inp.value == self._auto_input_value:
+                inp.value = ""
+        self._last_was_worktree = is_worktree
+        if is_worktree:
             top.add_class("worktree-mode")
             inp.placeholder = "parent repo path (must be an existing git repo)"
             inp.disabled = self._input_locked()
@@ -472,30 +500,45 @@ class NewProjectScreen(ModalScreen[dict[str, object] | None]):
             return archive_destination(base_path, self.base_dir_ref)
         return base_path
 
-    def _derived_worktree_parent_name(self) -> str:
-        """Worktree path the user typed in the input field. Resolves
-        to the root parent project NAME (walks worktree.of chains the
-        same way the CLI does)."""
-        raw = self._input_value().strip()
+    def _resolve_parent_layout(self, raw: str) -> tuple[Path | None, Path | None]:
+        """Return ``(project_dir, repo_dir)`` for a user-typed parent
+        path. Accepts both ``<base>/<name>`` (and we look for
+        repo/.git inside) and ``<base>/<name>/repo`` (project dir is
+        the parent)."""
         if not raw:
-            return ""
+            return (None, None)
         try:
-            path = Path(raw).expanduser().resolve()
+            path = Path(raw).expanduser()
+            if not path.is_absolute():
+                path = (self.base_dir_ref / path).resolve()
+            else:
+                path = path.resolve()
         except (OSError, RuntimeError):
+            return (None, None)
+        if not path.exists():
+            return (None, None)
+        if path.name == "repo" and (path / ".git").exists():
+            return (path.parent, path)
+        if (path / "repo" / ".git").exists():
+            return (path, path / "repo")
+        if (path / ".git").exists():
+            return (path, path)
+        return (path, None)
+
+    def _derived_worktree_parent_name(self) -> str:
+        """Walk the typed path back to the root parent project NAME
+        under base/ (mirrors how the CLI resolves the parent chain)."""
+        project_dir, _ = self._resolve_parent_layout(self._input_value().strip())
+        if project_dir is None:
             return ""
-        # Accept either '<base>/<parent>' or '<base>/<parent>/repo'.
-        candidate = path
-        if candidate.name == "repo":
-            candidate = candidate.parent
         try:
             base_res = self.base_dir_ref.resolve()
-            rel = candidate.relative_to(base_res)
+            rel = project_dir.relative_to(base_res)
         except (OSError, RuntimeError, ValueError):
             return ""
         if not rel.parts:
             return ""
         name = rel.parts[0]
-        # Walk worktree.of to find the root.
         seen: set[str] = set()
         while True:
             if name in seen:
@@ -512,22 +555,26 @@ class NewProjectScreen(ModalScreen[dict[str, object] | None]):
     def _worktree_validation(self) -> tuple[str, str]:
         """Return ``(target_dir_name, error)``. ``error`` is empty
         when the typed parent path + branch combination would create
-        a healthy worktree."""
+        a healthy worktree at ``<base>/<parent>-<sanitised>/repo``."""
         raw = self._input_value().strip()
         if not raw:
             return ("", "parent repo path required")
         try:
-            path = Path(raw).expanduser().resolve()
+            probe = Path(raw).expanduser()
+            if not probe.is_absolute():
+                probe = (self.base_dir_ref / probe).resolve()
+            else:
+                probe = probe.resolve()
         except (OSError, RuntimeError) as exc:
             return ("", f"invalid path: {exc}")
-        if not path.exists():
-            return ("", "parent path does not exist")
-        if path.name == "repo":
-            repo_dir = path
-        else:
-            repo_dir = path / "repo"
-        if not (repo_dir / ".git").exists():
-            return ("", "parent has no git repo (expected repo/.git)")
+        if not probe.exists():
+            return ("", f"parent path does not exist: {probe}")
+        project_dir, repo_dir = self._resolve_parent_layout(raw)
+        if repo_dir is None:
+            return (
+                "",
+                "parent has no git repo (looked for .git or repo/.git)",
+            )
         parent_name = self._derived_worktree_parent_name()
         if not parent_name:
             return ("", "parent must live under base/")
