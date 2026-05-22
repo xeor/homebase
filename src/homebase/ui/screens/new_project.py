@@ -20,6 +20,7 @@ from ...core.constants import (
     CURSOR_BG_HEX,
     CURSOR_FG_HEX,
 )
+from ...core.utils import WIDGET_API_ERRORS
 from ...metadata.api import load_base_worktree, resolve_project_repo
 from ...workspace.new.adapters import adapter_for_host, parse_url
 from ...workspace.new.cmd import autodetect_source_key
@@ -31,6 +32,7 @@ from ...workspace.new.sources.download import resolve_download_url
 from ...workspace.new.sources.git import detect_git_url
 from ...workspace.projects import discover_copier_templates
 from ...workspace.rows import archive_destination, collect_workspace_rows
+from .guard import confirm_destructive
 from .tag_plan import TagPlanScreen
 
 # Same style as the hotbar's currently-selected cell — see
@@ -1211,8 +1213,10 @@ class NewProjectScreen(ModalScreen[dict[str, object] | None]):
 
     def action_move_left(self) -> None:
         if self.focus_section == SECTION_SOURCE and self.source_choices:
-            self.source_index = (self.source_index - 1) % len(self.source_choices)
-        elif self.focus_section == SECTION_TOGGLES:
+            target = (self.source_index - 1) % len(self.source_choices)
+            self._set_source_index(target)
+            return
+        if self.focus_section == SECTION_TOGGLES:
             # Jump to the same row in the previous toggle column.
             new_idx = self.toggle_index - _MAX_TOGGLE_ROWS
             if 0 <= new_idx < len(_TOGGLES):
@@ -1225,8 +1229,10 @@ class NewProjectScreen(ModalScreen[dict[str, object] | None]):
 
     def action_move_right(self) -> None:
         if self.focus_section == SECTION_SOURCE and self.source_choices:
-            self.source_index = (self.source_index + 1) % len(self.source_choices)
-        elif self.focus_section == SECTION_TOGGLES:
+            target = (self.source_index + 1) % len(self.source_choices)
+            self._set_source_index(target)
+            return
+        if self.focus_section == SECTION_TOGGLES:
             new_idx = self.toggle_index + _MAX_TOGGLE_ROWS
             if 0 <= new_idx < len(_TOGGLES):
                 self.toggle_index = new_idx
@@ -1235,6 +1241,62 @@ class NewProjectScreen(ModalScreen[dict[str, object] | None]):
             if opts:
                 self.template_index = (self.template_index + 1) % len(opts)
         self._refresh()
+
+    def _set_source_index(self, new_index: int) -> None:
+        """Apply a source change. When leaving worktree-with-prefill
+        (action-launched flow), confirm before clearing the pinned
+        path so the user can't accidentally orphan typed data."""
+        if new_index == self.source_index:
+            return
+        prev_source = self._current_source()
+        new_source = self.source_choices[new_index % len(self.source_choices)]
+        # Only the worktree-from-action launch path locks the input
+        # field and pre-fills it — that's the only state we have to
+        # guard against losing on source change.
+        if prev_source == "worktree" and self.prefill_from_project and new_source != "worktree":
+            details = (
+                f"You opened this dialog via 'New worktree' on "
+                f"[bold cyan]{self.prefill_from_project}[/]. Picking a "
+                f"different source will clear the pinned parent path "
+                f"and re-enable the input field."
+            )
+
+            def _apply_reset() -> None:
+                self._reset_worktree_prefill()
+                self.source_index = new_index
+                self._set_section_focus()
+                self._refresh()
+
+            def _decline() -> None:
+                self._refresh()
+
+            confirm_destructive(
+                self,
+                title="Reset worktree prefill?",
+                details=details,
+                on_yes=_apply_reset,
+                on_no=_decline,
+            )
+            return
+        self.source_index = new_index
+        self._refresh()
+
+    def _reset_worktree_prefill(self) -> None:
+        """Drop every trace of the worktree-launch prefill so the
+        dialog behaves like a fresh ctrl+n session for the new
+        source. Called only after the user confirms via
+        confirm_destructive."""
+        self.prefill_from_project = ""
+        self._auto_input_value = ""
+        try:
+            inp = self.query_one("#new_input", Input)
+            name = self.query_one("#new_name", Input)
+        except WIDGET_API_ERRORS:
+            return
+        inp.value = ""
+        inp.disabled = False
+        name.value = ""
+        self._last_was_worktree = False
 
     def action_move_up(self) -> None:
         # Inside the toggle grid, up navigates within the current

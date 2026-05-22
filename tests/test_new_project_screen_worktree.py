@@ -231,11 +231,14 @@ class _ChromeStub(_ScreenStub):
     def __init__(self, base_dir: Path, *, prefill=None, input_value="", name_value="") -> None:
         super().__init__(base_dir, prefill=prefill, input_value=input_value, name_value=name_value)
         self._fake_input = _FakeInput(input_value)
+        self._fake_name = _FakeInput(name_value)
         self._fake_box = _FakeBox()
 
     def query_one(self, selector: str, _typ):
         if selector == "#new_input":
             return self._fake_input
+        if selector == "#new_name":
+            return self._fake_name
         if selector == "#new_top":
             return self._fake_box
         raise LookupError(selector)
@@ -506,3 +509,139 @@ def test_invalid_path_returns_empty_parent_name(tmp_path: Path) -> None:
     _dir, err = screen._worktree_validation()
     assert "parent path does not exist" in err
     assert "/no/such/path" in err
+
+
+# ============================================================
+# Source-change confirm guard. When the dialog was opened via the
+# worktree action (prefill_from_project pinned the path + locked the
+# input field), switching to a different source must NOT silently
+# wipe state — confirm_destructive intercepts and only resets after
+# explicit user acceptance.
+# ============================================================
+
+
+class _GuardStub(_ChromeStub):
+    """Stub that intercepts push_screen so we can drive the confirm
+    callback synchronously from tests, mirroring the real flow."""
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.pushed: list[tuple[object, object]] = []
+
+    def push_screen(self, screen, callback) -> None:  # type: ignore[override]
+        self.pushed.append((screen, callback))
+
+
+def test_source_change_from_worktree_with_prefill_prompts_confirm(tmp_path: Path) -> None:
+    _init_project_repo(tmp_path, "foo")
+    auto_path = str(tmp_path / "foo" / "repo")
+    screen = _GuardStub(
+        tmp_path,
+        prefill={"source": "worktree", "from_project": "foo"},
+        input_value=auto_path,
+    )
+    screen._auto_input_value = auto_path
+    screen._fake_input.value = auto_path
+    screen._fake_input.disabled = True
+
+    # Bypass _refresh's widget queries.
+    screen._refresh = lambda: None
+    screen._set_section_focus = lambda: None
+
+    # Attempt to switch to 'empty' — must prompt, not mutate yet.
+    empty_idx = screen.source_choices.index("empty")
+    screen._set_source_index(empty_idx)
+    assert len(screen.pushed) == 1
+    assert screen.source_index == screen.source_choices.index("worktree")
+    assert screen.prefill_from_project == "foo"
+    assert screen._fake_input.disabled is True
+
+
+def test_confirm_yes_resets_prefill_and_applies_source_change(tmp_path: Path) -> None:
+    _init_project_repo(tmp_path, "foo")
+    auto_path = str(tmp_path / "foo" / "repo")
+    screen = _GuardStub(
+        tmp_path,
+        prefill={"source": "worktree", "from_project": "foo"},
+        input_value=auto_path,
+        name_value="featx",
+    )
+    screen._auto_input_value = auto_path
+    screen._fake_input.value = auto_path
+    screen._fake_input.disabled = True
+    screen._refresh = lambda: None
+    screen._set_section_focus = lambda: None
+
+    empty_idx = screen.source_choices.index("empty")
+    screen._set_source_index(empty_idx)
+    _screen_obj, callback = screen.pushed[-1]
+    callback(True)
+
+    assert screen.source_index == empty_idx
+    assert screen.prefill_from_project == ""
+    assert screen._auto_input_value == ""
+    assert screen._fake_input.value == ""
+    assert screen._fake_input.disabled is False
+    assert screen._last_was_worktree is False
+
+
+def test_confirm_no_leaves_source_and_prefill_alone(tmp_path: Path) -> None:
+    _init_project_repo(tmp_path, "foo")
+    auto_path = str(tmp_path / "foo" / "repo")
+    screen = _GuardStub(
+        tmp_path,
+        prefill={"source": "worktree", "from_project": "foo"},
+        input_value=auto_path,
+    )
+    screen._auto_input_value = auto_path
+    screen._fake_input.value = auto_path
+    screen._fake_input.disabled = True
+    screen._refresh = lambda: None
+    screen._set_section_focus = lambda: None
+
+    initial_idx = screen.source_index
+    empty_idx = screen.source_choices.index("empty")
+    screen._set_source_index(empty_idx)
+    _screen_obj, callback = screen.pushed[-1]
+    callback(False)
+
+    assert screen.source_index == initial_idx
+    assert screen.prefill_from_project == "foo"
+    assert screen._fake_input.value == auto_path
+    assert screen._fake_input.disabled is True
+
+
+def test_source_change_without_prefill_skips_the_confirm(tmp_path: Path) -> None:
+    _init_project_repo(tmp_path, "foo")
+    screen = _GuardStub(
+        tmp_path,
+        prefill={"source": "worktree"},  # no from_project → no lock
+        input_value="",
+    )
+    screen._refresh = lambda: None
+    screen._set_section_focus = lambda: None
+
+    empty_idx = screen.source_choices.index("empty")
+    screen._set_source_index(empty_idx)
+    # No confirm pushed; the change applies immediately.
+    assert screen.pushed == []
+    assert screen.source_index == empty_idx
+
+
+def test_source_change_into_worktree_does_not_prompt(tmp_path: Path) -> None:
+    # ctrl+n flow with no prefill — picking 'worktree' for the
+    # first time should never prompt because there's no state to
+    # lose. The guard only triggers when LEAVING worktree+prefill.
+    _init_project_repo(tmp_path, "foo")
+    screen = _GuardStub(
+        tmp_path,
+        prefill=None,
+        input_value="",
+    )
+    screen._refresh = lambda: None
+    screen._set_section_focus = lambda: None
+
+    wt_idx = screen.source_choices.index("worktree")
+    screen._set_source_index(wt_idx)
+    assert screen.pushed == []
+    assert screen.source_index == wt_idx
