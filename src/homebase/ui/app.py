@@ -1155,6 +1155,9 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
                 scope = custom_scope_by_id[action_id]
                 if scope in {"target", "global"}:
                     return scope
+            meta = BUILTIN_ACTIONS.get(action_id)
+            if meta is not None and meta.scope == "workspace":
+                return "global"
             if action_id in target_actions:
                 return "target"
             if action_id in global_actions:

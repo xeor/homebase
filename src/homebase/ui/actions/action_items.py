@@ -167,12 +167,33 @@ def valid_action_items(
         if app.view_mode == "active":
             out.append(("suffix_set", f"[white]{builtin_label('suffix_set', 'Suffix...')}[/]"))
 
-        for key, label in app.view_config[app.view_mode]["actions"]:
-            if key in {"archive", "restore", "pack", "unpack", "toggle_pack", "delete"}:
-                runnable, _skipped = app._preflight_bulk_action(key, [r.path for r in targets])
-                if not runnable:
-                    continue
-            out.append((key, f"[white]{label}[/]"))
+    for key, label in app.view_config[app.view_mode]["actions"]:
+        meta = BUILTIN_ACTIONS.get(key)
+        scope = meta.scope if meta is not None else "target"
+        if scope == "target" and not targets:
+            continue
+        if scope == "target" and key in {"archive", "restore", "pack", "unpack", "toggle_pack", "delete"}:
+            runnable, _skipped = app._preflight_bulk_action(key, [r.path for r in targets])
+            if not runnable:
+                continue
+        if key == "deworktree":
+            # Only valid when at least one target row is a worktree.
+            if not any(getattr(r, "worktree_of", "") for r in targets):
+                continue
+        if key == "new_worktree":
+            # Single-target only, must be a live row with a git repo
+            # under the configured repo_dir.
+            if len(targets) != 1:
+                continue
+            row = targets[0]
+            if getattr(row, "archived", False):
+                continue
+            if not getattr(row, "repo_dir", ""):
+                continue
+            repo_subdir = (row.path / row.repo_dir) if row.repo_dir else None
+            if repo_subdir is None or not (repo_subdir / ".git").exists():
+                continue
+        out.append((key, f"[white]{label}[/]"))
 
     if targets:
         out.append(("rename_item", f"[white]{builtin_label('rename_item', 'Rename item...')}[/]"))
