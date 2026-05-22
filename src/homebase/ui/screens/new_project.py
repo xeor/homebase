@@ -566,6 +566,31 @@ class NewProjectScreen(ModalScreen[dict[str, object] | None]):
                 return name
             name = next_name
 
+    def _worktree_status_lines(self) -> tuple[list[str], str, Path | None]:
+        """Render the side-status block for worktree mode. Returns
+        ``(lines, resolved_dir_name, target_path)`` so the caller can
+        keep its 'plan steps' block consistent with the rest of the
+        dialog."""
+        dir_name, err = self._worktree_validation()
+        if err:
+            return ([f"[bold red]worktree invalid:[/] {err}"], "", None)
+        parent = self._derived_worktree_parent_name() or "?"
+        branch = self._name_value().strip()
+        target = self.base_dir_ref / dir_name
+        repo_target = target / "repo"
+        exists_marker = (
+            "[bold red]YES[/]" if target.exists() else "[bold green]no[/]"
+        )
+        lines = [
+            f"[bold green]parent[/]: [cyan]{parent}[/]",
+            f"[bold green]branch[/]: [cyan]{branch}[/]",
+            f"[bold green]dir name[/]: {dir_name}",
+            f"[bold green]project path[/]: [dim]{target}[/]",
+            f"[bold green]repo path[/]: [dim]{repo_target}[/]",
+            f"[bold green]exists[/]: {exists_marker}",
+        ]
+        return (lines, dir_name, target)
+
     def _worktree_validation(self) -> tuple[str, str]:
         """Return ``(target_dir_name, error)``. ``error`` is empty
         when the typed parent path + branch combination would create
@@ -781,6 +806,14 @@ class NewProjectScreen(ModalScreen[dict[str, object] | None]):
             steps.append(f"mkdir {target}")
             steps.append(f"move newest file from {folder} → {target}/")
             steps.append(f"write {target.name}/.base.yaml")
+        elif base == "worktree":
+            branch = self._name_value().strip()
+            parent = self._derived_worktree_parent_name() or "?"
+            steps.append(f"mkdir {target}")
+            steps.append(
+                f"git -C <{parent}/repo> worktree add -b {branch} {target}/repo"
+            )
+            steps.append(f"write {target.name}/.base.yaml (worktree block + repo_dir)")
         else:
             steps.append(f"create {target} via [bold]{eff_source}[/]")
         if self.selected_tags:
@@ -1019,22 +1052,28 @@ class NewProjectScreen(ModalScreen[dict[str, object] | None]):
         )
 
         # Status panels (left = key:value info, right = similar matches).
-        resolved, marker = self._resolved_name_preview()
-        target = self._target_path(resolved) if resolved else None
-        info_lines: list[str] = []
-        if marker:
-            info_lines.append(f"[dim]{marker}[/]")
-        elif target is not None:
-            exists_marker = (
-                "[bold red]YES[/]" if target.exists() else "[bold green]no[/]"
-            )
-            info_lines.extend(
-                [
-                    f"[bold green]name[/]: {resolved}",
-                    f"[bold green]path[/]: [dim]{target}[/]",
-                    f"[bold green]exists[/]: {exists_marker}",
-                ]
-            )
+        # Worktree mode short-circuits to its own renderer because the
+        # generic resolved-name preview returns just the branch name —
+        # the actual dir is <parent>-<sanitised-branch>.
+        if self._is_worktree_mode():
+            info_lines, resolved, target = self._worktree_status_lines()
+        else:
+            info_lines = []
+            resolved, marker = self._resolved_name_preview()
+            target = self._target_path(resolved) if resolved else None
+            if marker:
+                info_lines.append(f"[dim]{marker}[/]")
+            elif target is not None:
+                exists_marker = (
+                    "[bold red]YES[/]" if target.exists() else "[bold green]no[/]"
+                )
+                info_lines.extend(
+                    [
+                        f"[bold green]name[/]: {resolved}",
+                        f"[bold green]path[/]: [dim]{target}[/]",
+                        f"[bold green]exists[/]: {exists_marker}",
+                    ]
+                )
         eff_source = self._effective_source()
         info_lines.append(f"[bold green]source[/]: {eff_source}")
         tags = self._tag_list()

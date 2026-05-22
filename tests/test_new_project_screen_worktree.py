@@ -286,3 +286,223 @@ def test_switching_back_to_worktree_restores_auto_path(tmp_path: Path) -> None:
     screen._sync_worktree_mode_chrome()
     assert screen._fake_input.value == auto_path
     assert "worktree-mode" in screen._fake_box.classes
+
+
+# ============================================================
+# Edge cases: dir name + status lines + validation should match
+# what WorktreeSource actually creates. The user reported that the
+# dialog's status panel was showing 'name: featx' / 'path: <base>/
+# featx' when the real worktree lands at <base>/foo-featx/. These
+# tests pin every transformation that produces the displayed text.
+# ============================================================
+
+
+def test_status_lines_match_real_dir_name(tmp_path: Path) -> None:
+    _init_project_repo(tmp_path, "foo")
+    screen = _ScreenStub(
+        tmp_path,
+        prefill={"source": "worktree", "from_project": "foo"},
+        input_value=str(tmp_path / "foo" / "repo"),
+        name_value="featx",
+    )
+    lines, dir_name, target = screen._worktree_status_lines()
+    assert dir_name == "foo-featx"
+    assert target == tmp_path / "foo-featx"
+    text = "\n".join(lines)
+    assert "parent[/]: [cyan]foo[/]" in text
+    assert "branch[/]: [cyan]featx[/]" in text
+    assert "dir name[/]: foo-featx" in text
+    assert str(tmp_path / "foo-featx") in text
+    assert str(tmp_path / "foo-featx" / "repo") in text
+
+
+def test_status_lines_error_path_shows_reason(tmp_path: Path) -> None:
+    screen = _ScreenStub(
+        tmp_path,
+        prefill={"source": "worktree"},
+        input_value="",
+        name_value="featx",
+    )
+    lines, dir_name, target = screen._worktree_status_lines()
+    assert target is None
+    assert dir_name == ""
+    assert "worktree invalid" in lines[0]
+    assert "parent repo path required" in lines[0]
+
+
+def test_target_existing_dir_marks_exists_yes(tmp_path: Path) -> None:
+    _init_project_repo(tmp_path, "foo")
+    (tmp_path / "foo-featx").mkdir()
+    screen = _ScreenStub(
+        tmp_path,
+        prefill={"source": "worktree", "from_project": "foo"},
+        input_value=str(tmp_path / "foo" / "repo"),
+        name_value="featx",
+    )
+    # Validation flags the collision via the err string, so the
+    # status panel routes through the invalid branch (no exists
+    # row). dir_name still computed for the err message.
+    _dir, err = screen._worktree_validation()
+    assert err == "target exists: foo-featx"
+
+
+def test_branch_with_multiple_slashes_sanitises_each(tmp_path: Path) -> None:
+    _init_project_repo(tmp_path, "foo")
+    screen = _ScreenStub(
+        tmp_path,
+        prefill={"source": "worktree", "from_project": "foo"},
+        input_value=str(tmp_path / "foo" / "repo"),
+        name_value="feat/api/v2",
+    )
+    dir_name, err = screen._worktree_validation()
+    assert err == ""
+    assert dir_name == "foo-feat--api--v2"
+
+
+def test_path_with_trailing_slash_resolves(tmp_path: Path) -> None:
+    _init_project_repo(tmp_path, "foo")
+    screen = _ScreenStub(
+        tmp_path,
+        prefill={"source": "worktree"},
+        input_value=str(tmp_path / "foo" / "repo") + "/",
+        name_value="featx",
+    )
+    dir_name, err = screen._worktree_validation()
+    assert err == ""
+    assert dir_name == "foo-featx"
+
+
+def test_path_relative_resolves_under_base(tmp_path: Path) -> None:
+    _init_project_repo(tmp_path, "foo")
+    # User types just 'foo' or 'foo/repo' (relative); validator
+    # joins under base_dir_ref.
+    screen = _ScreenStub(
+        tmp_path,
+        prefill={"source": "worktree"},
+        input_value="foo/repo",
+        name_value="featx",
+    )
+    dir_name, err = screen._worktree_validation()
+    assert err == ""
+    assert dir_name == "foo-featx"
+
+
+def test_path_at_project_root_with_repo_subdir(tmp_path: Path) -> None:
+    _init_project_repo(tmp_path, "foo")
+    screen = _ScreenStub(
+        tmp_path,
+        prefill={"source": "worktree"},
+        input_value=str(tmp_path / "foo"),
+        name_value="featx",
+    )
+    dir_name, err = screen._worktree_validation()
+    assert err == ""
+    assert dir_name == "foo-featx"
+
+
+def test_path_outside_base_is_rejected(tmp_path: Path) -> None:
+    elsewhere = tmp_path / "elsewhere"
+    proj = elsewhere / "foo"
+    repo = proj / "repo"
+    repo.mkdir(parents=True)
+    subprocess.run(["git", "init", "-q", "-b", "main"], cwd=repo, check=True)
+    base = tmp_path / "base"
+    base.mkdir()
+    screen = _ScreenStub(
+        base,
+        prefill={"source": "worktree"},
+        input_value=str(repo),
+        name_value="featx",
+    )
+    _dir, err = screen._worktree_validation()
+    assert "parent must live under base" in err
+
+
+def test_empty_branch_field_is_required(tmp_path: Path) -> None:
+    _init_project_repo(tmp_path, "foo")
+    screen = _ScreenStub(
+        tmp_path,
+        prefill={"source": "worktree"},
+        input_value=str(tmp_path / "foo" / "repo"),
+        name_value="   ",
+    )
+    _dir, err = screen._worktree_validation()
+    assert "branch name required" in err
+
+
+def test_plan_steps_include_git_worktree_add(tmp_path: Path) -> None:
+    _init_project_repo(tmp_path, "foo")
+    screen = _ScreenStub(
+        tmp_path,
+        prefill={"source": "worktree", "from_project": "foo"},
+        input_value=str(tmp_path / "foo" / "repo"),
+        name_value="featx",
+    )
+    target = tmp_path / "foo-featx"
+    steps = screen._plan_steps_lines("worktree", target)
+    text = "\n".join(steps)
+    assert "git -C <foo/repo> worktree add -b featx" in text
+    assert "/foo-featx/repo" in text
+    assert "worktree block + repo_dir" in text
+
+
+def test_dir_name_prefix_uses_root_parent_not_intermediate(tmp_path: Path) -> None:
+    # Build a worktree row 'foo-a' under foo. Now point the dialog
+    # at foo-a's repo and pick a new branch — the dir_name must use
+    # the ROOT parent name 'foo', not the intermediate 'foo-a'.
+    _init_project_repo(tmp_path, "foo")
+    assert _run_new(tmp_path, tmp_path, ["a", "--as", "worktree", "--from", "foo"]) == 0
+
+    screen = _ScreenStub(
+        tmp_path,
+        prefill={"source": "worktree"},
+        input_value=str(tmp_path / "foo-a" / "repo"),
+        name_value="b",
+    )
+    dir_name, err = screen._worktree_validation()
+    assert err == ""
+    assert dir_name == "foo-b"
+
+
+def test_dir_name_does_not_double_prefix_when_branch_starts_with_parent(tmp_path: Path) -> None:
+    # User picks a branch literally named 'foo-something' under
+    # parent 'foo'. The dir name still gets the canonical prefix —
+    # no special-casing to detect the redundancy.
+    _init_project_repo(tmp_path, "foo")
+    screen = _ScreenStub(
+        tmp_path,
+        prefill={"source": "worktree", "from_project": "foo"},
+        input_value=str(tmp_path / "foo" / "repo"),
+        name_value="foo-things",
+    )
+    dir_name, err = screen._worktree_validation()
+    assert err == ""
+    assert dir_name == "foo-foo-things"
+
+
+def test_branch_with_dots_and_dashes_unchanged_in_dir(tmp_path: Path) -> None:
+    _init_project_repo(tmp_path, "foo")
+    screen = _ScreenStub(
+        tmp_path,
+        prefill={"source": "worktree", "from_project": "foo"},
+        input_value=str(tmp_path / "foo" / "repo"),
+        name_value="v1.2-rc",
+    )
+    dir_name, err = screen._worktree_validation()
+    assert err == ""
+    assert dir_name == "foo-v1.2-rc"
+
+
+def test_invalid_path_returns_empty_parent_name(tmp_path: Path) -> None:
+    screen = _ScreenStub(
+        tmp_path,
+        prefill={"source": "worktree"},
+        input_value="/no/such/path",
+        name_value="featx",
+    )
+    # Path doesn't exist → derived parent name is empty; validation
+    # short-circuits with 'parent path does not exist'.
+    assert screen._derived_worktree_parent_name() == ""
+    _dir, err = screen._worktree_validation()
+    assert "parent path does not exist" in err
+    assert "/no/such/path" in err

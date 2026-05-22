@@ -16,3 +16,4 @@ log:
     duration_s: 0.001
     error: ''
     source: cli
+repo_dir: .
