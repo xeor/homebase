@@ -27,6 +27,7 @@ class Row:
     properties: list[str] = field(default_factory=list)
     description: str = ""
     repo_dir: str = ""
+    worktree_of: str = ""
 
 
 def _build(row: Row, **overrides):
@@ -95,3 +96,60 @@ def test_build_project_info_falls_back_when_no_cache(tmp_path: Path) -> None:
     )
     text = _build(row, cached_meta_health=None)
     assert "loading" in text or "flagged" in text
+
+
+def test_build_project_info_shows_repo_path_for_repo_dir_repo(tmp_path: Path) -> None:
+    row = Row(name="foo", path=tmp_path / "foo", repo_dir="repo")
+    text = _build(row)
+    assert "repo path" in text
+    assert str(tmp_path / "foo" / "repo") in text
+
+
+def test_build_project_info_shows_flat_repo_dir_hint(tmp_path: Path) -> None:
+    row = Row(name="flat", path=tmp_path / "flat", repo_dir=".")
+    text = _build(row)
+    assert ".git at project root" in text
+
+
+def test_build_project_info_renders_worktree_lineage(tmp_path: Path) -> None:
+    row = Row(
+        name="foo-featx",
+        path=tmp_path / "foo-featx",
+        repo_dir="repo",
+        worktree_of="foo",
+    )
+
+    def _meta(_path):
+        return {
+            "worktree": {
+                "of": "foo",
+                "branch": "featx",
+                "parent_path": str(tmp_path / "foo" / "repo"),
+                "gitdir_id": "featx",
+            }
+        }
+
+    text = _build(row, load_base_data=_meta)
+    assert "worktree of" in text
+    assert "foo" in text
+    assert "worktree branch" in text
+    assert "featx" in text
+    assert "parent repo" in text
+    assert str(tmp_path / "foo" / "repo") in text
+    assert "parent admin" in text
+
+
+def test_build_project_info_omits_worktree_block_when_meta_unavailable(
+    tmp_path: Path,
+) -> None:
+    row = Row(
+        name="foo-featx",
+        path=tmp_path / "foo-featx",
+        repo_dir="repo",
+        worktree_of="foo",
+    )
+    # load_base_data returns no worktree block — only the row-level
+    # 'worktree of: foo' line appears, no parent_path detail.
+    text = _build(row, load_base_data=lambda _p: {})
+    assert "worktree of" in text
+    assert "parent repo" not in text

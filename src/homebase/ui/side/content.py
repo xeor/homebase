@@ -19,6 +19,7 @@ from ...core.constants import (
     COLOR_WARN_HEX,
 )
 from ...core.models import ProjectRow
+from ...metadata.api import load_base_worktree as _load_worktree_block
 from ..actions import template as action_template
 
 
@@ -238,6 +239,20 @@ def build_side_git_text(app: Any, row: ProjectRow) -> str:
     max_commits = 10
     max_remotes = 8
 
+    lines.append(
+        f"[cyan]repo path[/]: [dim]{app._esc(repo_path)}[/]"
+        f"{'  [dim](.git at project root)[/]' if row.repo_dir == '.' else ''}"
+    )
+    if row.worktree_of:
+        lines.append(
+            f"[cyan]worktree of[/]: [magenta]{app._esc(row.worktree_of)}[/] "
+            f"[dim](this is a `git worktree` of the root project)[/]"
+        )
+        wt_block = _load_worktree_block(row.path)
+        if wt_block is not None:
+            parent_repo = str(wt_block.get("parent_path", "")).strip()
+            if parent_repo:
+                lines.append(f"[cyan]parent repo[/]: [dim]{app._esc(parent_repo)}[/]")
     lines.append(
         f"[cyan]branch[/]: [green]{app._esc(row.branch)}[/]{'[yellow]*[/]' if row.dirty else ''}"
     )

@@ -6,6 +6,18 @@ import time
 from typing import Any, Callable
 
 
+def _read_worktree_block(
+    load_base_data: Callable[[Any], dict[str, object]],
+    path: Any,
+) -> dict[str, object] | None:
+    try:
+        data = load_base_data(path)
+    except (OSError, ValueError):
+        return None
+    raw = data.get("worktree") if isinstance(data, dict) else None
+    return raw if isinstance(raw, dict) else None
+
+
 def build_project_info_text(
     row: Any,
     *,
@@ -67,6 +79,25 @@ def build_project_info_text(
     branch = clean(row.branch)
     dirty_mark = "[yellow]*[/]" if row.dirty == "*" else ""
     lines.append(f"[cyan]git[/]: [green]{esc(branch)}[/]{dirty_mark}")
+    if row.repo_dir:
+        repo_loc = row.path / row.repo_dir
+        suffix = " [dim](repo_dir='.', .git at project root)[/]" if row.repo_dir == "." else ""
+        lines.append(f"[cyan]repo path[/]: [dim]{esc(repo_loc)}[/]{suffix}")
+    if row.worktree_of:
+        lines.append(f"[cyan]worktree of[/]: [magenta]{esc(row.worktree_of)}[/]")
+        wt_block = _read_worktree_block(load_base_data, row.path)
+        if wt_block is not None:
+            parent_repo = str(wt_block.get("parent_path", "")).strip()
+            wt_branch = str(wt_block.get("branch", "")).strip()
+            gitdir_id = str(wt_block.get("gitdir_id", "")).strip()
+            if wt_branch:
+                lines.append(f"[cyan]worktree branch[/]: [green]{esc(wt_branch)}[/]")
+            if parent_repo:
+                lines.append(f"[cyan]parent repo[/]: [dim]{esc(parent_repo)}[/]")
+            if gitdir_id:
+                lines.append(
+                    f"[cyan]parent admin[/]: [dim]{esc(parent_repo)}/.git/worktrees/{esc(gitdir_id)}/[/]"
+                )
     lines.append(
         f"[cyan]cache stale[/]: {'[yellow]yes[/]' if row.stale else '[green]no[/]'} [dim](age={row.cache_age_s}s)[/]"
     )
