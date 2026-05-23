@@ -80,6 +80,11 @@ uv run b deworktree foo-featx     # detach into a standalone clone
 uv run b fix-worktrees --apply    # audit + repair pointers
 ```
 
+The worktree shortcut for `b new <input>` only fires when `<input>` is
+a **bare token** (no `/`, no `\`). A trailing slash or any path-shaped
+input is the user's explicit "this is a folder" hint and always routes
+to a local move instead — see [`b new` input shapes](#b-new-input-shapes).
+
 ## Shell integration (parent-shell cd handoff)
 
 Commands like `b cd <name>`, `b new --cd`, and the post-action cleanup
@@ -470,10 +475,34 @@ Built-in sources (auto-detected from `<input>`):
 | Source       | Detected from                       | Action                                              |
 |--------------|-------------------------------------|-----------------------------------------------------|
 | `empty`      | bare token (`myproj`)               | mkdir + marker                                      |
-| `local`      | path (`./x`, `/abs`, `~/x`)         | move existing dir into base                         |
+| `local`      | path (`./x`, `/abs`, `~/x`, `x/`)   | move existing dir into base                         |
+| `worktree`   | bare token while cwd is inside `<base>/<proj>/repo/` (proj has `.git`) | `git worktree add` of that repo |
 | `git`        | URL with `.git` / SSH / forge adapter says clone | `git clone` into `<name>/repo/`           |
 | `download`   | URL the forge adapter recognises as a file (github blob, gitlab/gitea raw, …) | fetch file into `<name>/`        |
 | `downloaded` | only via `--downloaded` flag        | interactively pick a recent file from `~/Downloads` |
+
+### `b new` input shapes
+
+The trailing slash matters. From inside `<base>/foo/repo/`:
+
+```sh
+b new featx       # bare token  -> worktree of foo on branch `featx`
+                  #                creates <base>/foo-featx/repo/
+b new featx/      # trailing /   -> local move of ./featx into a new
+                  #                sibling project <base>/featx/
+b new ./featx     # path-shaped  -> same as featx/
+b new /abs/dir    # absolute path -> local move of /abs/dir into <base>/dir/
+b new https://… # URL         -> git clone or download (see table)
+```
+
+Same rules apply when cwd is anywhere else — minus the worktree row,
+which only fires when the enclosing base project has a `.git` repo.
+The path-shaped routes are unchanged; only the bare-token shape gets
+the worktree shortcut.
+
+Override the auto-detect with `--as <source>` or one of the explicit
+flags (`--empty`, `--local`, `--git`, `--download`, `--downloaded`,
+`--as worktree --from <parent>`).
 
 Full option reference (all of these can be set per-source under
 `new.sources.<key>` in the config **and** overridden on the CLI as
@@ -511,6 +540,8 @@ b new https://github.com/x/repo               # git clone
 b new https://github.com/x/repo/blob/main/README.md
                                               # downloads the raw file
 b new ./existing                              # move into base
+b new existing/                               # same; trailing / = folder
+b new featx     # inside <base>/foo/repo     # worktree of foo @ featx
 b new --downloaded                            # picker over ~/Downloads
 b new myproj --archive                        # lands under _archive/…
 ```

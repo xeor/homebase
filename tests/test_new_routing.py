@@ -9,6 +9,7 @@ codeberg, bitbucket — and crucially the self-hosted gitea case via
 """
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 
 from homebase.workspace.new.adapters import (
@@ -319,6 +320,82 @@ def test_missing_relative_path_routes_to_empty() -> None:
 
 def test_missing_absolute_path_routes_to_local() -> None:
     assert autodetect_source_key("/no/such/dir-xyz", _cfg()) == "local"
+
+
+# ============================================================
+# Inside-a-base-git-project shortcut — `b new <name>` from within a
+# project's repo creates a git worktree. The three input shapes must
+# route differently:
+#
+#   bare       (`featx`)   -> worktree   (branch name in current repo)
+#   path-slash (`featx/`)  -> local      (move that folder in)
+#   path       (`./x`, `/abs/x`) -> local (move that folder in)
+#
+# A trailing slash is the user's explicit "this is a folder" hint, so
+# it must NEVER fall into the worktree shortcut even when the cwd is
+# inside a base git project. Regression for the case where `b new
+# featx/` inside `<base>/foo/repo/` silently tried to create a worktree.
+# ============================================================
+
+
+def _init_base_git_project(base: Path, name: str) -> Path:
+    project = base / name
+    repo = project / "repo"
+    repo.mkdir(parents=True)
+    subprocess.run(["git", "init", "-q", "-b", "main"], cwd=repo, check=True)
+    (project / ".base.yaml").write_text("tags: []\nrepo_dir: repo\n", encoding="utf-8")
+    return project
+
+
+def test_bare_input_inside_repo_routes_to_worktree(tmp_path: Path) -> None:
+    project = _init_base_git_project(tmp_path, "foo")
+    assert autodetect_source_key(
+        "featx", _cfg(), cwd=project / "repo", base_dir=tmp_path
+    ) == "worktree"
+
+
+def test_trailing_slash_inside_repo_does_not_route_to_worktree(tmp_path: Path) -> None:
+    project = _init_base_git_project(tmp_path, "foo")
+    (project / "repo" / "featx").mkdir()
+    # `b new featx/` from inside <base>/foo/repo/ — explicit folder
+    # hint, must be a local move not a worktree.
+    assert autodetect_source_key(
+        "featx/", _cfg(), cwd=project / "repo", base_dir=tmp_path
+    ) == "local"
+
+
+def test_existing_relative_path_inside_repo_routes_to_local(tmp_path: Path) -> None:
+    project = _init_base_git_project(tmp_path, "foo")
+    (project / "repo" / "sub").mkdir()
+    assert autodetect_source_key(
+        "./sub", _cfg(), cwd=project / "repo", base_dir=tmp_path
+    ) == "local"
+
+
+def test_absolute_path_inside_repo_routes_to_local(tmp_path: Path) -> None:
+    project = _init_base_git_project(tmp_path, "foo")
+    extern = tmp_path / "outside"
+    extern.mkdir()
+    assert autodetect_source_key(
+        str(extern), _cfg(), cwd=project / "repo", base_dir=tmp_path
+    ) == "local"
+
+
+def test_trailing_slash_missing_folder_inside_repo_routes_to_empty(tmp_path: Path) -> None:
+    # Path-shaped input with no matching folder on disk falls through
+    # to ``empty`` (mkdir + marker) — same as outside a repo. The point
+    # is that it must NOT silently become a worktree.
+    project = _init_base_git_project(tmp_path, "foo")
+    assert autodetect_source_key(
+        "nope/", _cfg(), cwd=project / "repo", base_dir=tmp_path
+    ) == "empty"
+
+
+def test_bare_input_outside_base_routes_to_empty(tmp_path: Path) -> None:
+    # cwd outside any base project — bare token is just a new empty.
+    assert autodetect_source_key(
+        "featx", _cfg(), cwd=tmp_path, base_dir=tmp_path
+    ) == "empty"
 
 
 # ============================================================

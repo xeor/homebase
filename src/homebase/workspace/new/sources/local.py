@@ -7,6 +7,7 @@ import time
 from pathlib import Path
 
 from ....cache.api import cache_upsert_project_fast
+from ....core.constants import BASE_MARKER_FILE, LEGACY_BASE_MARKER_FILE
 from ....core.logging import verbose_enabled
 from ....core.utils import is_under
 from ....metadata.api import (
@@ -89,7 +90,16 @@ class LocalDirSource(Source):
         if not src.is_dir():
             raise ValueError(f"not a directory: {src}")
         if is_under(src, ctx.base_dir):
-            raise ValueError(f"already under base: {src}")
+            # Reshuffling an existing base project via `b new` is wrong
+            # — `b mv` is the right tool. But a non-project subfolder
+            # inside a project's working tree (e.g. `b new featx/` from
+            # inside `<base>/foo/repo/`) is the user's documented way
+            # to spin a working-copy folder out as its own sibling
+            # project.
+            if src == ctx.base_dir.resolve():
+                raise ValueError(f"cannot move base dir itself: {src}")
+            if (src / BASE_MARKER_FILE).exists() or (src / LEGACY_BASE_MARKER_FILE).exists():
+                raise ValueError(f"already a base project: {src}")
 
         final_name = resolve_final_name(
             ctx.base_dir,

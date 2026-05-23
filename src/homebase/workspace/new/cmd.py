@@ -116,7 +116,11 @@ def autodetect_source_key(
             sources_cfg.get("git", {}).get("config", {}).get("hosts") or {}
         )
         return _pick_url_source(raw_input, git_hosts)
-    if base_dir is not None and shape in {"bare", "path"}:
+    # Worktree shortcut only fires for a bare token — `b new featx` inside
+    # a base git project creates a worktree of that project's repo. A
+    # path-shaped input (`b new featx/`, `./x`, `/abs/x`) is a request to
+    # move that folder in as a new sibling project; never a worktree.
+    if base_dir is not None and shape == "bare":
         enclosing = enclosing_base_project(cwd or Path.cwd().resolve(), base_dir)
         if enclosing is not None:
             repo = resolve_project_repo(enclosing)
