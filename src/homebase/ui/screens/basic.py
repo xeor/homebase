@@ -2,24 +2,16 @@ from __future__ import annotations
 
 from textual.app import ComposeResult
 from textual.containers import Vertical
-from textual.screen import ModalScreen
 from textual.widgets import Input, Static
 
 from ...core.constants import ACTION_CANCEL
+from .base import BaseModalScreen, LargeModalScreen
 
 
-class ConfirmScreen(ModalScreen[bool]):
+class ConfirmScreen(LargeModalScreen[bool]):
     CSS = """
-    Screen {
-        align: center middle;
-    }
-    #confirm_box {
-        width: 110;
-        height: 22;
-        border: round $warning;
-        background: $surface;
-        padding: 1 2;
-    }
+    ConfirmScreen #modal_box { border: round $warning; }
+    ConfirmScreen #confirm_details { height: 1fr; overflow-y: auto; }
     """
     BINDINGS = [
         ("y", "yes", "Yes"),
@@ -35,12 +27,17 @@ class ConfirmScreen(ModalScreen[bool]):
         self.details = details
 
     def compose(self) -> ComposeResult:
-        with Vertical(id="confirm_box"):
+        with Vertical(id="modal_box"):
             yield Static(f"[bold]{self.title}[/]")
-            if self.details:
-                yield Static(self.details)
-            yield Static(
-                "[bold green]Y = Yes[/]  [bold red]N = No[/]  [dim](Enter/Space = Yes, Esc/N = No)[/]"
+            yield Static(self.details or "", id="confirm_details")
+            yield self.hotkey_footer(
+                [
+                    ("y", "yes"),
+                    ("n", "no"),
+                    ("enter", "yes"),
+                    ("space", "yes"),
+                    ("esc", "no"),
+                ]
             )
 
     def action_yes(self) -> None:
@@ -49,24 +46,17 @@ class ConfirmScreen(ModalScreen[bool]):
     def action_no(self) -> None:
         self.dismiss(False)
 
-class RuntimeErrorScreen(ModalScreen[None]):
+
+class RuntimeErrorScreen(BaseModalScreen[None]):
     CSS = """
-    Screen {
-        align: center middle;
-    }
-    #runtime_error_box {
-        width: 112;
-        height: 28;
-        border: round $error;
-        background: $surface;
-        padding: 1 2;
-    }
-    #runtime_error_context {
+    RuntimeErrorScreen #modal_box { border: round $error; }
+    RuntimeErrorScreen #runtime_error_context {
         color: $warning;
         margin: 1 0;
     }
-    #runtime_error_details {
+    RuntimeErrorScreen #runtime_error_details {
         height: 1fr;
+        overflow-y: auto;
     }
     """
     BINDINGS = [
@@ -83,25 +73,30 @@ class RuntimeErrorScreen(ModalScreen[None]):
         self.details = details
 
     def compose(self) -> ComposeResult:
-        with Vertical(id="runtime_error_box"):
+        with Vertical(id="modal_box"):
             yield Static(f"[bold red]{self.title}[/]")
             yield Static(
                 f"[bold]Operation:[/] {self.context}", id="runtime_error_context"
             )
             yield Static(self.details, id="runtime_error_details", markup=False)
-            yield Static("[dim]enter/space/esc/q = close[/]")
+            yield self.hotkey_footer(
+                [
+                    ("enter", "close"),
+                    ("space", "close"),
+                    ("esc", "close"),
+                    ("q", "close"),
+                ]
+            )
 
     def action_close(self) -> None:
         self.dismiss(None)
 
-class InputScreen(ModalScreen[str | None]):
+
+class InputScreen(BaseModalScreen[str | None]):
     CSS = """
-    Screen {
-        align: center middle;
-    }
-    #input_side_info {
+    InputScreen #input_side_info {
         margin: 1 0 0 0;
-        max-height: 14;
+        height: 1fr;
         overflow-y: auto;
     }
     """
@@ -122,14 +117,19 @@ class InputScreen(ModalScreen[str | None]):
         self.side_info = side_info
 
     def compose(self) -> ComposeResult:
-        with Vertical(id="confirm_box"):
+        with Vertical(id="modal_box"):
             yield Static(self.title)
             yield Input(
                 placeholder=self.placeholder, value=self.value, id="value_input"
             )
             if self.side_info is not None:
                 yield Static(self.side_info, id="input_side_info")
-            yield Static("enter=save, esc=cancel")
+            yield self.hotkey_footer(
+                [
+                    ("enter", "save"),
+                    ("esc", "cancel"),
+                ]
+            )
 
     def on_mount(self) -> None:
         self.query_one("#value_input", Input).focus()
@@ -141,19 +141,9 @@ class InputScreen(ModalScreen[str | None]):
         self.dismiss(None)
 
 
-class ProcessWaitScreen(ModalScreen[None]):
+class ProcessWaitScreen(BaseModalScreen[None]):
     CSS = """
-    Screen {
-        align: center middle;
-    }
-    #wait_box {
-        width: 112;
-        height: 18;
-        border: round $accent;
-        background: $surface;
-        padding: 1 2;
-    }
-    #wait_details { height: 1fr; }
+    ProcessWaitScreen #wait_details { height: 1fr; overflow-y: auto; }
     """
 
     def __init__(self, title: str, details: str) -> None:
@@ -162,7 +152,9 @@ class ProcessWaitScreen(ModalScreen[None]):
         self.details = details
 
     def compose(self) -> ComposeResult:
-        with Vertical(id="wait_box"):
+        with Vertical(id="modal_box"):
             yield Static(f"[bold]{self.title}[/]")
             yield Static(self.details, id="wait_details")
-            yield Static("[dim]waiting for process to finish...[/]")
+            yield self.hotkey_footer(
+                [("...", "waiting for process to finish")]
+            )

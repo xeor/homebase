@@ -7,7 +7,6 @@ from rich.markup import escape as rich_escape
 from textual.app import ComposeResult
 from textual.containers import Vertical
 from textual.events import Key
-from textual.screen import ModalScreen
 from textual.widgets import Static
 
 from ...config.tag_rules import resolve_for_display
@@ -18,14 +17,15 @@ from ...core.constants import (
     COLOR_SUCCESS_HEX,
 )
 from . import tag_tree as tag_tree_view
+from .base import LargeModalScreen
 from .basic import ConfirmScreen, InputScreen
 
 
-class TagPlanScreen(ModalScreen[dict[str, str] | None]):
+class TagPlanScreen(LargeModalScreen[dict[str, str] | None]):
     CSS = """
-    Screen {
-        align: center middle;
-    }
+    TagPlanScreen #tag_list { height: 1fr; overflow-y: auto; }
+    TagPlanScreen #tag_help { height: 5; color: $text-muted; }
+    TagPlanScreen #tag_status { height: 1; }
     """
     BINDINGS = [
         ("up", "move_up", "Up"),
@@ -157,15 +157,23 @@ class TagPlanScreen(ModalScreen[dict[str, str] | None]):
     # ---- composition / render -------------------------------------
 
     def compose(self) -> ComposeResult:
-        with Vertical(id="tag_plan_box"):
+        with Vertical(id="modal_box"):
             yield Static("Tag planner (multi-select safe)", id="choice_title")
             yield Static("", id="tag_filter", markup=False)
             yield Static("", id="tag_list")
             yield Static("", id="tag_help")
             yield Static("", id="tag_status")
-            yield Static(
-                "hotkeys: up/down move, space cycle, ctrl+c clear filter, ctrl+a add, ctrl+r rename, ctrl+d delete, enter apply, esc cancel",
-                id="tag_hotkeys",
+            yield self.hotkey_footer(
+                [
+                    ("up/down", "move"),
+                    ("space", "cycle"),
+                    ("ctrl+c", "clear filter"),
+                    ("ctrl+a", "add"),
+                    ("ctrl+r", "rename"),
+                    ("ctrl+d", "delete"),
+                    ("enter", "apply"),
+                    ("esc", "cancel"),
+                ]
             )
 
     def on_mount(self) -> None:

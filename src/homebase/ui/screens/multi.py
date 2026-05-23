@@ -2,17 +2,15 @@ from __future__ import annotations
 
 from textual.app import ComposeResult
 from textual.containers import Vertical
-from textual.screen import ModalScreen
 from textual.widgets import Static
 
 from ...core.constants import ACTION_ACCEPT, ACTION_CANCEL
+from .base import LargeModalScreen
 
 
-class MultiChoiceScreen(ModalScreen[set[str] | None]):
+class MultiChoiceScreen(LargeModalScreen[set[str] | None]):
     CSS = """
-    Screen {
-        align: center middle;
-    }
+    MultiChoiceScreen #choice_body { height: 1fr; overflow-y: auto; }
     """
     BINDINGS = [
         ("up", "move_up", "Up"),
@@ -35,12 +33,16 @@ class MultiChoiceScreen(ModalScreen[set[str] | None]):
         self.selected: set[str] = set(selected or set())
 
     def compose(self) -> ComposeResult:
-        with Vertical(id="confirm_box"):
+        with Vertical(id="modal_box"):
             yield Static(f"[bold]{self.title}[/]", id="choice_title")
             yield Static("", id="choice_body", markup=False)
-            yield Static(
-                "[dim]up/down move, space toggle, enter apply, esc cancel[/]",
-                id="choice_hint",
+            yield self.hotkey_footer(
+                [
+                    ("up/down", "move"),
+                    ("space", "toggle"),
+                    ("enter", "apply"),
+                    ("esc", "cancel"),
+                ]
             )
 
     def on_mount(self) -> None:
@@ -81,4 +83,3 @@ class MultiChoiceScreen(ModalScreen[set[str] | None]):
 
     def action_cancel(self) -> None:
         self.dismiss(None)
-

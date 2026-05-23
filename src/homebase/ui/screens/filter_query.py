@@ -6,7 +6,6 @@ from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Vertical
 from textual.events import Key
-from textual.screen import ModalScreen
 from textual.widgets import Input, Static
 
 from ...config.prefs import load_saved_filter_queries, save_filter_query
@@ -15,6 +14,7 @@ from ...core.models import ProjectRow
 from ...workspace.rows import compile_filter_expr
 from ..screens.basic import InputScreen
 from ..widgets import TokenFilterSuggester
+from .base import LargeModalScreen
 
 _BASE_DIR: Path | None = None
 
@@ -30,18 +30,9 @@ def _require_base_dir() -> Path:
     return _BASE_DIR
 
 
-class FilterQueryScreen(ModalScreen[str | None]):
+class FilterQueryScreen(LargeModalScreen[str | None]):
     CSS = """
-    Screen {
-        align: center middle;
-    }
-    #filter_box {
-        width: 120;
-        height: 34;
-        border: round $accent;
-        background: $surface;
-        padding: 1 2;
-    }
+    FilterQueryScreen #filter_stats { height: 1fr; overflow-y: auto; }
     """
     BINDINGS = [
         Binding("ctrl+s", "save_query", "Save query", show=False),
@@ -79,7 +70,7 @@ class FilterQueryScreen(ModalScreen[str | None]):
         self._skip_changed_resets = 0
 
     def compose(self) -> ComposeResult:
-        with Vertical(id="filter_box"):
+        with Vertical(id="modal_box"):
             yield Static("[bold]Filter query[/]")
             yield Input(
                 value=self.initial,
@@ -90,6 +81,15 @@ class FilterQueryScreen(ModalScreen[str | None]):
             )
             yield Static("", id="filter_hint")
             yield Static("", id="filter_stats")
+            yield self.hotkey_footer(
+                [
+                    ("tab", "complete"),
+                    ("shift+tab", "prev completion"),
+                    ("ctrl+s", "save query"),
+                    ("enter", "apply"),
+                    ("esc", "cancel"),
+                ]
+            )
 
     def on_mount(self) -> None:
         self.query_one("#filter_query", Input).focus()

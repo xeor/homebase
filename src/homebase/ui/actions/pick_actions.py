@@ -311,7 +311,7 @@ def on_pick_actions(app: Any, value: str | None) -> None:
                 lambda ok: app._on_confirm_bulk(ok, "delete", paths),
             )
 
-        app.push_screen(SingleChoiceScreen(title, options, box_height=8), _on_choice)
+        app.push_screen(SingleChoiceScreen(title, options), _on_choice)
         return True
 
     def _handle_archive() -> bool:
@@ -344,7 +344,7 @@ def on_pick_actions(app: Any, value: str | None) -> None:
                 app._run_family_archive_together(parent_row.path, worktree_paths_list)
                 return
 
-        app.push_screen(SingleChoiceScreen(title, options, box_height=8), _on_choice)
+        app.push_screen(SingleChoiceScreen(title, options), _on_choice)
         return True
 
     handlers: dict[str, Callable[[], bool]] = {

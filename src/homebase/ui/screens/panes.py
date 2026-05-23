@@ -5,28 +5,17 @@ import difflib
 from textual.app import ComposeResult
 from textual.containers import Vertical
 from textual.events import Key
-from textual.screen import ModalScreen
 from textual.widgets import Static
 
 from ...core.constants import ACTION_ACCEPT, ACTION_CANCEL, COLOR_ACCENT_HEX
 from ...core.models import PaneRef
+from .base import LargeModalScreen
 
 
-class PaneChoiceScreen(ModalScreen[str | None]):
+class PaneChoiceScreen(LargeModalScreen[str | None]):
     CSS = """
-    Screen {
-        align: center middle;
-    }
-    #pane_choice_box {
-        width: 140;
-        height: 30;
-        border: round $accent;
-        background: $surface;
-        padding: 1 2;
-    }
-    #pane_filter { color: $text-muted; height: 1; }
-    #pane_choice_body { height: 1fr; }
-    #pane_choice_hint { color: $text-muted; height: 1; }
+    PaneChoiceScreen #pane_filter { color: $text-muted; height: 1; }
+    PaneChoiceScreen #pane_choice_body { height: 1fr; overflow-y: auto; }
     """
     BINDINGS = [
         ("up", "move_up", "Up"),
@@ -52,13 +41,19 @@ class PaneChoiceScreen(ModalScreen[str | None]):
         self.list_scroll_offset = 0
 
     def compose(self) -> ComposeResult:
-        with Vertical(id="pane_choice_box"):
+        with Vertical(id="modal_box"):
             yield Static(f"[bold]{self.title}[/]", id="choice_title")
             yield Static("", id="pane_filter", markup=False)
             yield Static("", id="pane_choice_body")
-            yield Static(
-                "[dim]type to filter, ctrl+c clear filter, up/down window, left/right or tab pane, enter select, esc cancel[/]",
-                id="pane_choice_hint",
+            yield self.hotkey_footer(
+                [
+                    ("type", "filter"),
+                    ("ctrl+c", "clear filter"),
+                    ("up/down", "window"),
+                    ("left/right", "pane"),
+                    ("enter", "select"),
+                    ("esc", "cancel"),
+                ]
             )
 
     def on_mount(self) -> None:

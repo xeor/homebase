@@ -4,18 +4,16 @@ from pathlib import Path
 
 from textual.app import ComposeResult
 from textual.containers import Vertical
-from textual.screen import ModalScreen
 from textual.widgets import Input, Static
 
 from ...commands.archive import normalize_restore_target
 from ...core.constants import ACTION_ACCEPT, ACTION_CANCEL
+from .base import BaseModalScreen
 
 
-class RestorePathScreen(ModalScreen[Path | None]):
+class RestorePathScreen(BaseModalScreen[Path | None]):
     CSS = """
-    Screen {
-        align: center middle;
-    }
+    RestorePathScreen #restore_status { height: 1fr; overflow-y: auto; }
     """
     BINDINGS = [
         ("enter", ACTION_ACCEPT, "Accept"),
@@ -28,11 +26,16 @@ class RestorePathScreen(ModalScreen[Path | None]):
         self.base_dir_ref = base_dir_ref
 
     def compose(self) -> ComposeResult:
-        with Vertical(id="confirm_box"):
+        with Vertical(id="modal_box"):
             yield Static("Restore to another location")
             yield Input(value=str(self.default_target), id="restore_input")
             yield Static("", id="restore_status")
-            yield Static("enter=restore, esc=cancel")
+            yield self.hotkey_footer(
+                [
+                    ("enter", "restore"),
+                    ("esc", "cancel"),
+                ]
+            )
 
     def on_mount(self) -> None:
         inp = self.query_one("#restore_input", Input)
@@ -92,4 +95,3 @@ class RestorePathScreen(ModalScreen[Path | None]):
 
     def action_cancel(self) -> None:
         self.dismiss(None)
-

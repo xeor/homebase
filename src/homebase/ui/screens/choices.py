@@ -6,17 +6,15 @@ import re
 from textual.app import ComposeResult
 from textual.containers import Vertical
 from textual.events import Key, Resize
-from textual.screen import ModalScreen
 from textual.widgets import Static
 
 from ...core.constants import ACTION_ACCEPT, ACTION_CANCEL
+from .base import LargeModalScreen
 
 
-class SingleChoiceScreen(ModalScreen[str | None]):
+class SingleChoiceScreen(LargeModalScreen[str | None]):
     CSS = """
-    Screen {
-        align: center middle;
-    }
+    SingleChoiceScreen #choice_body { height: 1fr; overflow-y: auto; }
     """
     BINDINGS = [
         ("up", "move_up", "Up"),
@@ -30,15 +28,11 @@ class SingleChoiceScreen(ModalScreen[str | None]):
         self,
         title: str,
         options: list[tuple[str, str]],
-        box_width: int = 70,
-        box_height: int = 16,
     ) -> None:
         super().__init__()
         self.title = title
         self.options = options
         self.index = 0
-        self.box_width = box_width
-        self.box_height = box_height
         self._ensure_valid_index()
 
     def _is_header(self, idx: int) -> bool:
@@ -63,17 +57,19 @@ class SingleChoiceScreen(ModalScreen[str | None]):
             self.index = 0
 
     def compose(self) -> ComposeResult:
-        with Vertical(id="confirm_box"):
+        with Vertical(id="modal_box"):
             yield Static(f"[bold]{self.title}[/]", id="choice_title")
             yield Static("", id="choice_body", markup=False)
-            yield Static(
-                "[dim]up/down to move, enter/space to select, esc to cancel[/]"
+            yield self.hotkey_footer(
+                [
+                    ("up/down", "move"),
+                    ("enter", "select"),
+                    ("space", "select"),
+                    ("esc", "cancel"),
+                ]
             )
 
     def on_mount(self) -> None:
-        box = self.query_one("#confirm_box", Vertical)
-        box.styles.width = self.box_width
-        box.styles.height = self.box_height
         self._refresh_body()
 
     def _refresh_body(self) -> None:
@@ -116,20 +112,9 @@ class SingleChoiceScreen(ModalScreen[str | None]):
         self.dismiss(None)
 
 
-class FuzzyChoiceScreen(ModalScreen[str | None]):
+class FuzzyChoiceScreen(LargeModalScreen[str | None]):
     CSS = """
-    Screen {
-        align: center middle;
-    }
-    #choice_picker_box {
-        width: 90%;
-        min-width: 80;
-        height: 95%;
-        border: round $accent;
-        background: $surface;
-        padding: 1 2;
-    }
-    #choice_picker_body { height: 1fr; }
+    FuzzyChoiceScreen #choice_picker_body { height: 1fr; }
     """
     BINDINGS = [
         ("up", "move_up", "Up"),
@@ -150,12 +135,18 @@ class FuzzyChoiceScreen(ModalScreen[str | None]):
         self.list_scroll_offset = 0
 
     def compose(self) -> ComposeResult:
-        with Vertical(id="choice_picker_box"):
+        with Vertical(id="modal_box"):
             yield Static(f"[bold]{self.title}[/]")
             yield Static("", id="choice_picker_filter", markup=False)
             yield Static("", id="choice_picker_body")
-            yield Static(
-                "type fuzzy filter, ctrl+c clear filter, up/down select, enter select, esc cancel"
+            yield self.hotkey_footer(
+                [
+                    ("type", "fuzzy filter"),
+                    ("ctrl+c", "clear filter"),
+                    ("up/down", "select"),
+                    ("enter", "accept"),
+                    ("esc", "cancel"),
+                ]
             )
 
     def on_mount(self) -> None:

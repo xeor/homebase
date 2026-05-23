@@ -5,7 +5,6 @@ from pathlib import Path
 
 from textual.app import ComposeResult
 from textual.containers import Vertical
-from textual.screen import ModalScreen
 from textual.widgets import Input, Static
 
 from ...core.constants import (
@@ -13,6 +12,7 @@ from ...core.constants import (
     ACTION_CANCEL,
     COLLISION_RED_RAMP,
 )
+from .base import LargeModalScreen
 
 
 def _similar_matches(
@@ -49,26 +49,17 @@ def _similar_matches(
     return [(name, int(round(score * 100))) for score, name in scored[:limit]]
 
 
-class RenameInputScreen(ModalScreen[str | None]):
+class RenameInputScreen(LargeModalScreen[str | None]):
     """Rename dialog with live preview of target path and collision
     matches. The result is the new bare name (same contract as
     :class:`InputScreen`); the caller handles the actual rename.
     """
 
     CSS = """
-    Screen {
-        align: center middle;
-    }
-    #rename_box {
-        width: 100;
-        height: 22;
-        border: round $primary;
-        background: $surface;
-        padding: 1 2;
-    }
-    #rename_preview {
+    RenameInputScreen #modal_box { border: round $primary; }
+    RenameInputScreen #rename_preview {
         margin: 1 0 0 0;
-        max-height: 14;
+        height: 1fr;
         overflow-y: auto;
     }
     """
@@ -92,7 +83,7 @@ class RenameInputScreen(ModalScreen[str | None]):
         self.current_name = current_name or current_path.name
 
     def compose(self) -> ComposeResult:
-        with Vertical(id="rename_box"):
+        with Vertical(id="modal_box"):
             yield Static(self.title_text)
             yield Input(
                 placeholder="new folder name",
@@ -100,7 +91,12 @@ class RenameInputScreen(ModalScreen[str | None]):
                 id="rename_input",
             )
             yield Static("", id="rename_preview")
-            yield Static("enter=save, esc=cancel")
+            yield self.hotkey_footer(
+                [
+                    ("enter", "save"),
+                    ("esc", "cancel"),
+                ]
+            )
 
     def on_mount(self) -> None:
         inp = self.query_one("#rename_input", Input)

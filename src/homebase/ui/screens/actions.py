@@ -6,26 +6,16 @@ import re
 from textual.app import ComposeResult
 from textual.containers import Vertical
 from textual.events import Key
-from textual.screen import ModalScreen
 from textual.widgets import Static, Tab, Tabs
 
 from ...core.constants import ACTION_ACCEPT, ACTION_CANCEL
+from .base import LargeModalScreen
 
 
-class ActionPickerScreen(ModalScreen[str | None]):
+class ActionPickerScreen(LargeModalScreen[str | None]):
     CSS = """
-    Screen {
-        align: center middle;
-    }
-    #action_picker_box {
-        width: 100;
-        height: 26;
-        border: round $accent;
-        background: $surface;
-        padding: 1 2;
-    }
-    #action_picker_tabs { height: 3; margin: 0 0 1 0; }
-    #action_picker_spacer { height: 1fr; }
+    ActionPickerScreen #action_picker_tabs { height: 3; margin: 0 0 1 0; }
+    ActionPickerScreen #action_picker_body { height: 1fr; overflow-y: auto; }
     """
     BINDINGS = [
         ("up", "move_up", "Up"),
@@ -68,7 +58,7 @@ class ActionPickerScreen(ModalScreen[str | None]):
         self.list_scroll_offset = 0
 
     def compose(self) -> ComposeResult:
-        with Vertical(id="action_picker_box"):
+        with Vertical(id="modal_box"):
             yield Static("[bold]Actions[/]")
             yield Tabs(
                 *[Tab(label, id=key) for key, label in self.tabs],
@@ -76,9 +66,15 @@ class ActionPickerScreen(ModalScreen[str | None]):
             )
             yield Static("", id="action_picker_filter", markup=False)
             yield Static("", id="action_picker_body")
-            yield Static("", id="action_picker_spacer")
-            yield Static(
-                "type fuzzy filter, ctrl+c clear filter, up/down select, left/right tab, enter select, esc cancel"
+            yield self.hotkey_footer(
+                [
+                    ("type", "fuzzy filter"),
+                    ("ctrl+c", "clear filter"),
+                    ("up/down", "select"),
+                    ("left/right", "tab"),
+                    ("enter", "select"),
+                    ("esc", "cancel"),
+                ]
             )
 
     def on_mount(self) -> None:

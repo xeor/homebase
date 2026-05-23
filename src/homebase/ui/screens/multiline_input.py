@@ -3,36 +3,26 @@ from __future__ import annotations
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
-from textual.screen import ModalScreen
 from textual.widgets import Static, TextArea
 
 from ...core.constants import ACTION_ACCEPT, ACTION_CANCEL
+from .base import LargeModalScreen
 
 
-class MultilineInputScreen(ModalScreen[str | None]):
+class MultilineInputScreen(LargeModalScreen[str | None]):
     CSS = """
-    Screen {
-        align: center middle;
-    }
-    #ml_input_box {
-        width: 90%;
-        height: 70%;
-        border: round $accent;
-        background: $surface;
-        padding: 1 2;
-    }
-    #ml_input_main { width: 80%; height: 1fr; }
-    #ml_input_side {
+    MultilineInputScreen #ml_input_body { height: 1fr; }
+    MultilineInputScreen #ml_input_main { width: 80%; height: 1fr; }
+    MultilineInputScreen #ml_input_side {
         width: 20%;
         height: 1fr;
         border: round $panel;
         padding: 0 1;
         margin: 0 0 0 1;
     }
-    #ml_input_title { height: 1; margin: 0 0 1 0; }
-    #ml_input_help { height: 1; color: $text-muted; margin: 1 0 0 0; }
-    #ml_input_area { height: 1fr; }
-    #ml_input_side_body { height: 1fr; }
+    MultilineInputScreen #ml_input_title { height: 1; margin: 0 0 1 0; }
+    MultilineInputScreen #ml_input_area { height: 1fr; }
+    MultilineInputScreen #ml_input_side_body { height: 1fr; }
     """
     BINDINGS = [
         Binding("ctrl+s", ACTION_ACCEPT, "Save", priority=True),
@@ -57,19 +47,22 @@ class MultilineInputScreen(ModalScreen[str | None]):
         self.heading_level = max(1, int(heading_level))
 
     def compose(self) -> ComposeResult:
-        with Vertical(id="ml_input_box"):
+        with Vertical(id="modal_box"):
             yield Static(f"[bold]{self.title_text}[/]", id="ml_input_title")
             if self.placeholder_text:
                 yield Static(f"[dim]{self.placeholder_text}[/]")
-            with Horizontal():
+            with Horizontal(id="ml_input_body"):
                 with Vertical(id="ml_input_main"):
                     yield TextArea(self.initial_value, id="ml_input_area")
                 with Vertical(id="ml_input_side"):
                     yield Static("[bold]Log info[/]", id="ml_input_side_title")
                     yield Static("", id="ml_input_side_body")
-            yield Static(
-                "ctrl+s = save, ctrl+o = open note, esc = cancel",
-                id="ml_input_help",
+            yield self.hotkey_footer(
+                [
+                    ("ctrl+s", "save"),
+                    ("ctrl+o", "open note"),
+                    ("esc", "cancel"),
+                ]
             )
 
     def on_mount(self) -> None:

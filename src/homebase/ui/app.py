@@ -329,18 +329,12 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
     #side_global_config_reload { width: 1fr; margin: 1 1 0 1; }
     #side_global_config_edit { width: 1fr; margin: 1 1 0 1; }
     #wip_bar { height: 1; background: $surface-darken-1; color: $text; content-align: left middle; }
-    #confirm_box { width: 70; height: 16; border: round $warning; background: $surface; padding: 1 2; }
     #new_project_box { width: 100%; height: 100%; border: round $accent; background: $surface; padding: 1 2; }
     #new_body { height: 1fr; }
     #new_left { width: 2fr; border: round $surface-lighten-1; padding: 0 1; }
     #new_right { width: 1fr; border: round $surface-lighten-1; padding: 0 1; }
     #new_plan { height: 3; border: round $accent-darken-1; padding: 0 1; }
     #new_hotkeys { height: 1; color: $text-muted; }
-    #tag_plan_box { width: 70%; height: 100%; border: round $accent; background: $surface; padding: 1 2; }
-    #tag_list { height: 1fr; }
-    #tag_help { height: 5; color: $text-muted; }
-    #tag_status { height: 1; }
-    #tag_hotkeys { height: 1; color: $text-muted; }
     #filter_mgmt_input { border: none; margin: 0 0 1 0; }
     #filter_query { border: none; margin: 0 0 1 0; }
     Input .input--cursor { background: __CURSOR_BG__; color: __CURSOR_FG__; text-style: bold; }
