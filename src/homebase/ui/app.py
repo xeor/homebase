@@ -2568,6 +2568,30 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
             resolve_notes_path_for_row=self._resolve_notes_path_for_row,
         )
 
+    def _global_config_button_actions(self) -> list[tuple[str, str]]:
+        return [
+            ("reload_global_config", "[white]Reload global config[/]"),
+            ("edit_global_config", "[white]Edit global config in $EDITOR[/]"),
+        ]
+
+    def _visible_button_actions(self) -> list[tuple[str, str]]:
+        """Buttons currently rendered in the side panel for the active tab.
+
+        Why: the Ctrl+A "Buttons" tab should mirror what's clickable in the
+        side panel right now, not a fixed superset.
+        """
+        if self.side_main_tab == "selected":
+            if self.side_selected_tab == "readme":
+                return self._readme_button_actions()
+            if self.side_selected_tab == "notes":
+                return self._notes_button_actions()
+            return []
+        if self.side_main_tab == "settings":
+            if self.side_settings_tab == "global":
+                return self._global_config_button_actions()
+            return []
+        return []
+
     def _run_notes_command(
         self,
         command_template: str,
@@ -2985,9 +3009,7 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
                     out.append((aid, label))
             return out
 
-        button_actions = with_hotkeys(
-            self._readme_button_actions() + self._notes_button_actions()
-        )
+        button_actions = with_hotkeys(self._visible_button_actions())
 
         target_actions: list[tuple[str, str]] = [
             ("tags_set", "[white]Tags...[/]"),
