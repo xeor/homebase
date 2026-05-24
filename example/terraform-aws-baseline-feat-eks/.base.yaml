@@ -1,0 +1,27 @@
+description: "Worktree of terraform-aws-baseline @ feat-eks \u2014 managed EKS module."
+wip: true
+tags:
+- work
+- cloud:aws
+- lang:terraform
+- feature
+- wip
+worktree:
+  of: terraform-aws-baseline
+  branch: feat-eks
+  parent_path: /Users/xeor/base/homebase/example/terraform-aws-baseline
+  gitdir_id: repo
+log:
+  events:
+  - _event: hook_refresh_started
+    _ts: '2026-05-24T23:02:00+02:00'
+    hook: tag_files_sync
+    event: tag_change
+    source: worker
+  - _event: hook_refresh_done
+    _ts: '2026-05-24T23:02:00+02:00'
+    hook: tag_files_sync
+    event: tag_change
+    duration_s: 0.003
+    error: ''
+    source: worker

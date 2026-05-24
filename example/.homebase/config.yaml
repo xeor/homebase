@@ -1,0 +1,603 @@
+archive:
+  timezone: Europe/Oslo
+filters:
+  saved:
+  - '#wip'
+  - tags=0
+  - :last=@-7d
+  - '!git'
+  named:
+    hot: '#cli OR #api'
+    stale: :last<=@-60d
+    homelab: '##homelab'
+    cloud: '##cloud'
+    embedded: '##embedded OR #esp32 OR #raspi'
+    smarthome: '#smarthome OR #hass'
+properties:
+  GIT:
+    label: Git repo
+    key: git
+    color: '#86b8ff'
+    dir-exists:
+    - .git
+  WT:
+    label: Git worktree
+    key: wt
+    color: '#8d84c6'
+    file-exists:
+    - .git
+  ANYGIT:
+    label: Git repo or worktree
+    key: anygit
+    color: '#7dd3a7'
+    path-exists:
+    - .git
+  PY:
+    label: Python project
+    key: py
+    color: '#f4c542'
+    file-exists:
+    - pyproject.toml
+  RS:
+    label: Rust project
+    key: rs
+    color: '#d97757'
+    file-exists:
+    - Cargo.toml
+  GO:
+    label: Go project
+    key: go
+    color: '#7fd1ae'
+    file-exists:
+    - go.mod
+  JS:
+    label: Node/JS project
+    key: js
+    color: '#a2c463'
+    file-exists:
+    - package.json
+  TF:
+    label: Terraform module
+    key: tf
+    color: '#7c4dff'
+    file-exists:
+    - main.tf
+    - terraform.tfvars
+  K8S:
+    label: Kubernetes manifests
+    key: k8s
+    color: '#3a8ad3'
+    file-exists:
+    - Chart.yaml
+    - kustomization.yaml
+  PIO:
+    label: PlatformIO firmware
+    key: pio
+    color: '#ff8aa2'
+    file-exists:
+    - platformio.ini
+  ANSIBLE:
+    label: Ansible playbook
+    key: ansible
+    color: '#cc4d3c'
+    file-exists:
+    - playbook.yml
+    - ansible.cfg
+  README:
+    label: Has README
+    key: readme
+    color: '#9aa0a6'
+    file-exists:
+    - README.md
+  NOTES:
+    label: Has NOTES.md
+    key: n
+    color: '#c7a8ff'
+    file-exists:
+    - NOTES.md
+  ACT:
+    label: active tmux pane
+    key: act
+    color: '#ffb86c'
+    cache_ttl_s: 3
+    queries:
+    - type: tmux_open_panes
+  EDT:
+    label: editor active
+    key: edt
+    color: '#7dd3a7'
+    cache_ttl_s: 8
+    queries:
+    - type: tmux_editor_commands
+      commands:
+      - code
+      - code-insiders
+      - codium
+      - cursor
+      - zed
+      - nvim
+      - vim
+      - hx
+tag_rules:
+- match: '^prio:'
+  parents:
+  - priority
+  color: '#ff5555'
+  bold: true
+  prefix: '! '
+- match: ^wip$
+  color: '#ffb86c'
+  bold: true
+  suffix: ' *'
+- match: '^lang:'
+  parents:
+  - programming
+- tags:
+  - python
+  - rust
+  - go
+  - typescript
+  - bash
+  - cpp
+  parents:
+  - programming
+- tags:
+  - rust
+  - go
+  - cpp
+  parents:
+  - programming
+  - compiled
+- match: '^cloud:'
+  parents:
+  - cloud
+  color: '#7c4dff'
+- match: '^infra:'
+  parents:
+  - infra
+  color: '#3a8ad3'
+- tags:
+  - raspi
+  - proxmox
+  - truenas
+  parents:
+  - homelab
+  - infra
+  color: '#7dd3a7'
+- tags:
+  - homelab
+  parents:
+  - infra
+  color: '#7dd3a7'
+- tags:
+  - k8s
+  - terraform
+  - ansible
+  - helm
+  parents:
+  - infra
+  - devops
+  color: '#3a8ad3'
+- tags:
+  - esp32
+  - raspi
+  - arduino
+  - platformio
+  parents:
+  - embedded
+  color: '#ff8aa2'
+- tags:
+  - hass
+  - zigbee
+  - zwave
+  - nspanel
+  parents:
+  - smarthome
+  color: '#c7a8ff'
+- tags:
+  - work
+  - meeting
+  - oncall
+  parents:
+  - business
+  color: '#86b8ff'
+- tags:
+  - cve
+  - pentest
+  parents:
+  - security
+  color: '#ff5555'
+  bold: true
+- tags:
+  - security
+  color: '#ff5555'
+  bold: true
+- tags:
+  - talk
+  - blog
+  - public
+  parents:
+  - content
+  color: '#facc15'
+- tags:
+  - scratch
+  - tmp
+  - fork
+  color: '#9aa0a6'
+  italic: true
+- tags:
+  - priority
+  - programming
+  - compiled
+  - cloud
+  - infra
+  - devops
+  - embedded
+  - smarthome
+  - business
+  - security
+  - content
+  - meta
+  group_only: true
+cache_profile:
+  all:
+    pri-2:
+      update_interval_s: 10
+      update_batch_size: 16
+      cache_mode: ttl
+      cache_ttl_s: 30
+  archive:
+    pri-2:
+      cache_ttl_s: 300
+new:
+  sources:
+    empty:
+      cd: true
+    local:
+      cd: true
+    git:
+      cd: true
+      config:
+        hosts:
+          git.alexstark.dev: gitea
+          forge.homelab.lan: gitea
+    download:
+      config:
+        url_rewrites:
+        - match: ^https://wiki\.homelab\.lan/page/(.+)$
+          rewrite: https://wiki.homelab.lan/raw/\1
+    downloaded:
+      config:
+        folder: ~/Downloads
+        list_count: 5
+    tmp:
+      parent: empty
+      timestamp: true
+      tmp: true
+      ts-name: true
+      tags:
+      - scratch
+    alpha:
+      parent: empty
+      alpha-name: true
+      tags:
+      - scratch
+    py:
+      parent: empty
+      template: python-uv
+      tags:
+      - lang:python
+      cd: true
+    py-uv:
+      parent: empty
+      template: python-uv
+      tags:
+      - lang:python
+      post:
+      - uv sync
+      - git init
+    feat:
+      parent: empty
+      timestamp: true
+      tags:
+      - feature
+      - wip
+    git-tmp:
+      parent: git
+      tmp: true
+      tags:
+      - scratch
+open_mode:
+  profile: shell_cd
+notes:
+  path_template: '{{ PROJECT_PATH }}/NOTES.md'
+  open_command: ${EDITOR:-vi} {{ NOTE_PATH_Q }}
+  create_command: mkdir -p "$(dirname {{ NOTE_PATH_Q }})" && touch {{ NOTE_PATH_Q
+    }} && ${EDITOR:-vi} {{ NOTE_PATH_Q }}
+  log:
+    section:
+      title: Log
+      level: 2
+    entry:
+      timestamp_format: iso-seconds
+  rename:
+    enabled: true
+    command: mv {{ OLD_NOTE_PATH_Q }} {{ NEW_NOTE_PATH_Q }}
+reconcile:
+  active:
+    update_batch_size: 12
+  archive:
+    update_batch_size: 8
+hooks_pre:
+  delete:
+  - name: confirm_delete
+    source: bundled
+    enabled: true
+    views:
+    - active
+    - archive
+    config:
+      require_confirm: true
+hooks_post:
+  rename:
+  - name: notes_rename
+    source: bundled
+    enabled: true
+    config: {}
+  - name: tag_symlink_sync
+    source: bundled
+    enabled: true
+    config: {}
+  tag_change:
+  - name: tag_symlink_sync
+    source: bundled
+    enabled: true
+    config: {}
+  - name: tag_files_sync
+    source: bundled
+    enabled: true
+    refresh_enabled: true
+    refresh_min_interval_s: 300
+    config:
+      dry_run: false
+  new_project:
+  - name: tag_symlink_sync
+    source: bundled
+    enabled: true
+    config: {}
+  delete:
+  - name: tag_symlink_sync
+    source: bundled
+    enabled: true
+    config: {}
+hooks_refresh:
+  enabled: true
+  worker:
+    batch_size: 4
+    jitter_pct: 15
+    skip_when_busy: true
+table:
+  behavior:
+    pin_wip_top: true
+    side_width_pct: 33
+    preview_entries_limit: 8
+  columns:
+    active:
+    - id: name
+      enabled: true
+      width: 32
+    - id: description
+      enabled: true
+      width: 38
+    - id: last_modified
+      enabled: true
+      width: 12
+    - id: mark
+      enabled: true
+      width: 4
+    - id: git
+      enabled: true
+      width: 20
+    - id: created
+      enabled: false
+      width: 12
+    - id: last_opened
+      enabled: false
+      width: 12
+    - id: properties
+      enabled: true
+      width: 16
+    - id: tags
+      enabled: true
+      width: 28
+    - id: size
+      enabled: false
+      width: 10
+    archive:
+    - id: name
+      enabled: true
+      width: 36
+    - id: archived_at
+      enabled: true
+      width: 12
+    - id: tags
+      enabled: true
+      width: 28
+    - id: mark
+      enabled: true
+      width: 4
+    - id: last_modified
+      enabled: true
+      width: 12
+    - id: created
+      enabled: false
+      width: 12
+    - id: last_opened
+      enabled: false
+      width: 12
+    - id: properties
+      enabled: true
+      width: 16
+    - id: description
+      enabled: false
+      width: 28
+    - id: size
+      enabled: false
+      width: 10
+    - id: original_name
+      enabled: true
+      width: 30
+  columns_style:
+    date:
+      all:
+        last_modified:
+          0: '#38bdf8'
+          10: '#22c55e'
+          100: '#facc15'
+          250: '#f97316'
+          365: '#ef4444'
+      active:
+        last_opened:
+          0: '#38bdf8'
+          3: '#22c55e'
+          14: '#facc15'
+          30: '#f97316'
+          90: '#ef4444'
+        created:
+          0: '#38bdf8'
+          30: '#22c55e'
+          120: '#facc15'
+          365: '#f97316'
+          730: '#ef4444'
+        last_modified:
+          0: '#38bdf8'
+          10: '#22c55e'
+          100: '#facc15'
+          250: '#f97316'
+          365: '#ef4444'
+      archive:
+        archived_at:
+          0: '#38bdf8'
+          30: '#22c55e'
+          180: '#facc15'
+          365: '#f97316'
+          730: '#ef4444'
+suffixes:
+- tmp
+- fork
+- old
+file_view_exclude_patterns:
+- '*.min.js'
+- node_modules/**
+- .git/**
+- target/**
+- .terraform/**
+actions:
+  archive:
+    label: Archive
+  delete:
+    label: Delete forever
+    confirm: Drop {{ count }} project(s) under {{ base_dir }}?
+  open_item_in_editor:
+    kind: shell
+    scope: target
+    multi: joined
+    command: $EDITOR {{ paths_q }}
+  open_in_codium:
+    kind: shell
+    scope: target
+    multi: joined
+    command: codium {{ paths_q }}
+  open_in_finder:
+    kind: shell
+    scope: target
+    multi: per_row
+    command: open {{ path_q }}
+  open_base_in_editor:
+    kind: shell
+    scope: workspace
+    command: $EDITOR {{ base_dir_q }}
+  pick_markdown:
+    kind: filepicker
+    scope: target
+    list: find {{ path_q }} -type f -name '*.md'
+    command: ${EDITOR:-vi} {{ selection_q }}
+  pick_yaml:
+    kind: filepicker
+    scope: target
+    list: find {{ path_q }} -type f \( -name '*.yml' -o -name '*.yaml' \)
+    command: ${EDITOR:-vi} {{ selection_q }}
+  ssh_homelab:
+    kind: shell
+    scope: target
+    multi: per_row
+    command: ssh alex@homelab.lan -t 'cd /srv/{{ name_q }} && exec $SHELL'
+  add_log_to_note:
+    kind: note
+    scope: target
+    op: add_log
+hotbar:
+- open_selected
+- action: open_selected
+  label: open (tmux)
+  style:
+  - bg_color: '#bff4d3'
+    fg_color: '#123b25'
+    bold: true
+    when: '!tmx'
+- action: notes_create
+  label: Notes
+  style:
+  - bg_color: '#d8e9ff'
+    fg_color: '#1b3558'
+    underline: true
+    when: '!n'
+- action: add_log_to_note
+  label: Log
+  style:
+  - bg_color: '#ffaaaa'
+    fg_color: '#3f1010'
+    bold: true
+    when: '!rm'
+  - bg_color: '#ffe9b8'
+    fg_color: '#5a4200'
+    italic: true
+    when: '#wip'
+  - bg_color: '#ece7ff'
+    fg_color: '#34296b'
+    when: .tmp
+- action: open_in_codium
+  label: codium
+keys:
+  f5: open_item_in_editor
+  ctrl+alt+r: refresh_cache
+  ctrl+l: tab.info.events
+  alt+m: pick_markdown
+  alt+y: pick_yaml
+  alt+s: ssh_homelab
+new_project:
+  name_options: []
+  template: null
+  post_commands: []
+  tags: []
+  after_create: open
+state:
+  view: active
+  sort: last
+  query: ''
+  side_main: info
+  side_selected: overview
+  side_info: stats
+  side_settings: global
+  selected_path: /Users/xeor/base/homebase/example/terraform-aws-baseline-feat-eks
+  cursor_row: 0
+  scroll_y: 0
+  selected_path_active: /Users/xeor/base/homebase/example/terraform-aws-baseline-feat-eks
+  selected_path_archive: ''
+  cursor_row_active: 0
+  cursor_row_archive: 0
+  scroll_y_active: 0
+  scroll_y_archive: 0
+  row_offset_active: 0
+  row_offset_archive: 0
+  hotbar_selected_index: 0

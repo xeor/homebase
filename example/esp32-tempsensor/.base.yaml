@@ -1,0 +1,21 @@
+description: "ESP32 + SHT41 temp/humidity sensor \u2192 MQTT \u2192 HASS."
+wip: true
+tags:
+- esp32
+- embedded
+- lang:cpp
+- smarthome
+log:
+  events:
+  - _event: hook_refresh_started
+    _ts: '2026-05-24T23:01:50+02:00'
+    hook: tag_files_sync
+    event: tag_change
+    source: worker
+  - _event: hook_refresh_done
+    _ts: '2026-05-24T23:01:50+02:00'
+    hook: tag_files_sync
+    event: tag_change
+    duration_s: 0.003
+    error: ''
+    source: worker

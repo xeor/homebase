@@ -1,0 +1,7 @@
+_subdirectory: template
+project_slug:
+  type: str
+  help: Project slug (kebab-case)
+python_version:
+  type: str
+  default: "3.13"

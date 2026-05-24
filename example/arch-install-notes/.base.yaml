@@ -1,0 +1,19 @@
+description: "Reinstall recipe \u2014 ZFS-on-root + secure boot + ssh keys."
+tags:
+- linux
+- notes
+- prio:low
+log:
+  events:
+  - _event: hook_refresh_started
+    _ts: '2026-05-24T23:01:48+02:00'
+    hook: tag_files_sync
+    event: tag_change
+    source: worker
+  - _event: hook_refresh_done
+    _ts: '2026-05-24T23:01:48+02:00'
+    hook: tag_files_sync
+    event: tag_change
+    duration_s: 0.002
+    error: ''
+    source: worker
