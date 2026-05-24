@@ -5,7 +5,6 @@ import sys
 from pathlib import Path
 
 from ..commands import interactive_flow
-from ..commands.actions import cmd_help_actions as cmd_help_actions_render
 from ..commands.archive import (
     cmd_archive_ls,
     cmd_archive_mv,
@@ -16,6 +15,15 @@ from ..commands.archive import (
 )
 from ..commands.deworktree import cmd_deworktree
 from ..commands.fix_worktrees import cmd_fix_worktrees
+from ..commands.help import (
+    cmd_help as cmd_help_dispatch,
+)
+from ..commands.help import (
+    cmd_help_actions as cmd_help_actions_render,
+)
+from ..commands.help import (
+    cmd_help_hotkeys as cmd_help_hotkeys_render,
+)
 from ..commands.hooks_cmd import cmd_hooks_refresh
 from ..commands.setup import (
     cmd_cache_warm,
@@ -171,9 +179,21 @@ def main(argv: list[str]) -> int:
             words,
             base_dir=base_dir,
         )
-    if ns.command == "help" and str(getattr(ns, "topic", "")).strip() != "actions":
-        parser.print_help()
-        return 0
+    if ns.command == "help":
+        from ..commands.help import TOPICS, list_topics
+
+        topic = str(getattr(ns, "topic", "")).strip().lower()
+        if not topic:
+            parser.print_help()
+            return 0
+        if topic == "topics":
+            return list_topics()
+        if topic not in TOPICS:
+            parser.print_help()
+            print()
+            print(f"unknown help topic: {topic!r}", file=sys.stderr)
+            list_topics()
+            return 2
 
     # ``b fix`` is the repair command — it must be able to run even
     # when the workspace is malformed. Surface validation findings as
@@ -225,9 +245,36 @@ def main(argv: list[str]) -> int:
         )
         verify_all_specs(runtime_cfg.hook_specs, base_dir)
     except HookConfigError as exc:
+        # `b help` is read-only diagnostic and must remain usable even
+        # when the config is broken — that's often exactly why the user
+        # is asking for help.
+        if ns.command == "help":
+            print(f"warning: hook config error: {exc}", file=sys.stderr)
+            return cmd_help_dispatch(
+                str(getattr(ns, "topic", "")).strip().lower(),
+                print_default_help=parser.print_help,
+                handlers={
+                    "actions": lambda: cmd_help_actions_render(
+                        actions={}, hotbar=[], keys={},
+                    ),
+                    "hotkeys": lambda: cmd_help_hotkeys_render(keys={}),
+                },
+            )
         print(f"hook config error: {exc}", file=sys.stderr)
         return 1
     except ValueError as exc:
+        if ns.command == "help":
+            print(f"warning: config error: {exc}", file=sys.stderr)
+            return cmd_help_dispatch(
+                str(getattr(ns, "topic", "")).strip().lower(),
+                print_default_help=parser.print_help,
+                handlers={
+                    "actions": lambda: cmd_help_actions_render(
+                        actions={}, hotbar=[], keys={},
+                    ),
+                    "hotkeys": lambda: cmd_help_hotkeys_render(keys={}),
+                },
+            )
         print(f"config error: {exc}", file=sys.stderr)
         return 1
     ui_ctx = UIContext(
@@ -366,7 +413,6 @@ def main(argv: list[str]) -> int:
     try:
         rc = dispatch_command(
             ns,
-            parser=parser,
             base_dir=base_dir,
             bin_dir=bin_dir,
             cwd=Path.cwd().resolve(),
@@ -398,14 +444,23 @@ def main(argv: list[str]) -> int:
                 base_dir=base_dir,
             ),
             cmd_recent=cmd_recent,
-            cmd_help_actions=lambda source, bound, view, show_defaults: cmd_help_actions_render(
-                actions=runtime_cfg.actions,
-                hotbar=list(runtime_cfg.hotbar),
-                keys=dict(runtime_cfg.keys),
-                source_filter=source,
-                bound_filter=bound,
-                view_filter=view,
-                show_defaults=show_defaults,
+            cmd_help=lambda namespace: cmd_help_dispatch(
+                str(getattr(namespace, "topic", "")).strip().lower(),
+                print_default_help=parser.print_help,
+                handlers={
+                    "actions": lambda: cmd_help_actions_render(
+                        actions=runtime_cfg.actions,
+                        hotbar=list(runtime_cfg.hotbar),
+                        keys=dict(runtime_cfg.keys),
+                        source_filter=str(getattr(namespace, "source", "")).strip(),
+                        bound_filter=str(getattr(namespace, "bound", "")).strip(),
+                        view_filter=str(getattr(namespace, "view", "")).strip(),
+                        show_defaults=bool(getattr(namespace, "show_defaults", False)),
+                    ),
+                    "hotkeys": lambda: cmd_help_hotkeys_render(
+                        keys=dict(runtime_cfg.keys),
+                    ),
+                },
             ),
             cmd_setup=lambda base_path, bin_path, dry_run, *, json_output=False: cmd_setup(
                 base_path,

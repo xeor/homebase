@@ -70,6 +70,7 @@ from ..core.constants import (
     ARCHIVE_TZ_PRESETS,
     BASE_MARKER_FILE,
     BUILTIN_ACTIONS,
+    BUILTIN_HOTKEYS,
     BUSY_LABEL_IDLE,
     CACHE_BG_REFRESH_S,
     CACHE_MAX_AGE_S,
@@ -340,45 +341,8 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
     Input .input--cursor { background: __CURSOR_BG__; color: __CURSOR_FG__; text-style: bold; }
     """.replace("__CURSOR_BG__", CURSOR_BG_HEX).replace("__CURSOR_FG__", CURSOR_FG_HEX)
     BINDINGS = [
-        ("ctrl+n", "new_project", "New"),
-        ("ctrl+p", "command_palette", "Command palette"),
-        ("ctrl+s", "pick_sort", "Sort picker"),
-        ("ctrl+f", "pick_filters", "Saved filters"),
-        ("ctrl+c", "reset_view", "Reset view"),
-        ("ctrl+l", "cycle_tabs", "tabs >"),
-        ("ctrl+k", "cycle_tabs_prev", "tabs <"),
-        ("ctrl+d", "toggle_view", "Toggle view"),
-        ("ctrl+w", "toggle_wip", "Toggle WIP"),
-        Binding("left", "route_left", "Left", show=False, priority=True),
-        Binding("right", "route_right", "Right", show=False, priority=True),
-        Binding("home", "route_home", "Home", show=False, priority=True),
-        Binding("end", "route_end", "End", show=False, priority=True),
-        Binding(
-            "alt+left",
-            "table_scroll_left",
-            "Scroll left",
-            show=False,
-            priority=True,
-        ),
-        Binding(
-            "alt+right",
-            "table_scroll_right",
-            "Scroll right",
-            show=False,
-            priority=True,
-        ),
-        ("ctrl+a", "pick_actions", "Actions"),
-        ("ctrl+o", "toggle_select_mode", "Select mode"),
-        Binding("ctrl+x", "dismiss_worktree_health", "Dismiss banner", show=False),
-        Binding(
-            "ctrl+y",
-            "dismiss_cache_concurrency",
-            "Dismiss cache drift banner",
-            show=False,
-        ),
-        Binding("ctrl+@", "cycle_hotbar", "Next hotbar", show=False, priority=True),
-        ("enter", "open_selected", "Open"),
-        ("ctrl+q", "quit_app", "Quit"),
+        Binding(hk.key, hk.action, hk.label, show=hk.show, priority=hk.priority)
+        for hk in BUILTIN_HOTKEYS
     ]
 
     def __init__(

@@ -45,6 +45,15 @@ class KeyEntry:
     label: str = ""
 
 
+@dataclass(frozen=True)
+class BuiltinHotkey:
+    key: str
+    action: str
+    label: str
+    show: bool = True
+    priority: bool = False
+
+
 class RestoreTargetExistsError(ValueError):
     def __init__(self, source: Path, target: Path) -> None:
         self.source = source

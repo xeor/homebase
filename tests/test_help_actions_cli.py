@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from homebase.commands.actions import cmd_help_actions
+from homebase.commands.help import cmd_help_actions
 from homebase.core.models import Action, HotbarEntry, KeyEntry
 
 

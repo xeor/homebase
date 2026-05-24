@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 
+from ..core.constants import reserved_hotkeys
 from ..core.models import Action, BuiltinActionMeta, HotbarEntry, KeyEntry
 from . import cache_profile as cache_profile_config
 
@@ -304,6 +305,7 @@ def load_keys(data: object, *, actions: dict[str, Action]) -> dict[str, KeyEntry
     raw = data.get("keys", {})
     if not isinstance(raw, dict):
         raise ValueError("`keys` must be a map")
+    reserved = reserved_hotkeys()
     out: dict[str, KeyEntry] = {}
     for key_name, value in raw.items():
         hotkey = str(key_name).strip().lower()
@@ -311,6 +313,11 @@ def load_keys(data: object, *, actions: dict[str, Action]) -> dict[str, KeyEntry
             continue
         if hotkey in out:
             raise ValueError(f"duplicate key binding: {hotkey!r}")
+        if hotkey in reserved:
+            raise ValueError(
+                f"key binding collision: {hotkey!r} is reserved by {reserved[hotkey]}. "
+                f"Run `b help hotkeys` to see all bindings and free slots."
+            )
         if isinstance(value, str):
             action_id = value.strip()
             label = ""

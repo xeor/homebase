@@ -4,7 +4,7 @@ import re
 from datetime import timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from .models import BuiltinActionMeta, PropertyDef
+from .models import BuiltinActionMeta, BuiltinHotkey, PropertyDef
 
 TS_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:Z|[+-]\d{2}:?\d{2})$")
 DATE_PREFIX_RE = re.compile(r"^\d{4}-\d{2}-\d{2}_")
@@ -331,37 +331,60 @@ def discover_tab_actions() -> dict[str, BuiltinActionMeta]:
             )
     return out
 
-CUSTOM_ACTION_RESERVED_HOTKEYS: set[str] = {
-    "ctrl+n",
-    "ctrl+p",
-    "ctrl+s",
-    "ctrl+f",
-    "ctrl+c",
-    "ctrl+l",
-    "ctrl+k",
-    "ctrl+d",
-    "ctrl+w",
-    "ctrl+a",
-    "ctrl+o",
-    "ctrl+q",
-    "enter",
-    "left",
-    "right",
-    "home",
-    "end",
-    "alt+left",
-    "alt+right",
-    "tab",
-    "shift+tab",
-    "backtab",
-    "ctrl+e",
-    "backspace",
-    "delete",
-    "space",
-    "a",
-    "c",
-    "u",
-}
+BUILTIN_HOTKEYS: tuple[BuiltinHotkey, ...] = (
+    BuiltinHotkey("ctrl+n", "new_project", "New"),
+    BuiltinHotkey("ctrl+p", "command_palette", "Command palette"),
+    BuiltinHotkey("ctrl+s", "pick_sort", "Sort picker"),
+    BuiltinHotkey("ctrl+f", "pick_filters", "Saved filters"),
+    BuiltinHotkey("ctrl+c", "reset_view", "Reset view"),
+    BuiltinHotkey("ctrl+l", "cycle_tabs", "tabs >"),
+    BuiltinHotkey("ctrl+k", "cycle_tabs_prev", "tabs <"),
+    BuiltinHotkey("ctrl+d", "toggle_view", "Toggle view"),
+    BuiltinHotkey("ctrl+w", "toggle_wip", "Toggle WIP"),
+    BuiltinHotkey("left", "route_left", "Left", show=False, priority=True),
+    BuiltinHotkey("right", "route_right", "Right", show=False, priority=True),
+    BuiltinHotkey("home", "route_home", "Home", show=False, priority=True),
+    BuiltinHotkey("end", "route_end", "End", show=False, priority=True),
+    BuiltinHotkey("alt+left", "table_scroll_left", "Scroll left", show=False, priority=True),
+    BuiltinHotkey("alt+right", "table_scroll_right", "Scroll right", show=False, priority=True),
+    BuiltinHotkey("ctrl+a", "pick_actions", "Actions"),
+    BuiltinHotkey("ctrl+o", "toggle_select_mode", "Select mode"),
+    BuiltinHotkey("ctrl+x", "dismiss_worktree_health", "Dismiss banner", show=False),
+    BuiltinHotkey(
+        "ctrl+y", "dismiss_cache_concurrency", "Dismiss cache drift banner", show=False
+    ),
+    BuiltinHotkey("ctrl+@", "cycle_hotbar", "Next hotbar", show=False, priority=True),
+    BuiltinHotkey("enter", "open_selected", "Open"),
+    BuiltinHotkey("ctrl+q", "quit_app", "Quit"),
+)
+
+# Keys consumed by mode-specific input handlers in `ui/query/key_input.py`.
+# They aren't part of the global BINDINGS list, but binding a user key to one
+# of them would be confusing — the mode handler swallows the keypress first.
+CONTEXT_RESERVED_HOTKEYS: tuple[tuple[str, str, str], ...] = (
+    ("backspace",  "filter-edit", "Delete char left"),
+    ("delete",     "filter-edit", "Delete char right"),
+    ("ctrl+d",     "filter-edit", "Delete char right"),
+    ("ctrl+a",     "filter-edit", "Cursor to start"),
+    ("ctrl+e",     "filter-edit", "Cursor to end"),
+    ("tab",        "completion",  "Apply query completion"),
+    ("shift+tab",  "completion",  "Reverse query completion"),
+    ("backtab",    "completion",  "Reverse query completion"),
+    ("space",      "select-mode", "Toggle selection"),
+    ("a",          "select-mode", "Select all"),
+    ("c",          "select-mode", "Clear selection"),
+    ("u",          "select-mode", "Select untagged"),
+)
+
+
+def reserved_hotkeys() -> dict[str, str]:
+    """Map of hotkey -> reason it cannot be used for a user binding."""
+    out: dict[str, str] = {}
+    for hk in BUILTIN_HOTKEYS:
+        out[hk.key] = f"built-in: {hk.action} ({hk.label})"
+    for key, mode, label in CONTEXT_RESERVED_HOTKEYS:
+        out.setdefault(key, f"{mode}: {label}")
+    return out
 
 ENV_BASE_DIR = "BASE_DIR"
 WIDGET_PROJECTS = "#projects"

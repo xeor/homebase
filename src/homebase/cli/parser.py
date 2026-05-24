@@ -80,8 +80,12 @@ def build_cli_parser() -> argparse.ArgumentParser:
     )
 
     sub = parser.add_subparsers(dest="command")
-    p_help = sub.add_parser("help")
+    p_help = sub.add_parser(
+        "help",
+        help="show help for a topic (`b help topics` lists available topics)",
+    )
     p_help.add_argument("topic", nargs="?", default="")
+    # actions-only filters; ignored for other topics.
     p_help.add_argument("--source", choices=["builtin", "config", "overridden"], default="")
     p_help.add_argument("--bound", choices=["bound", "unbound"], default="")
     p_help.add_argument("--view", choices=["active", "archive"], default="")

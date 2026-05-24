@@ -23,7 +23,7 @@ def _stub_dispatch_kwargs(**overrides: object) -> dict[str, object]:
         cmd_completion=lambda _a: 0,
         cmd_internal_complete=lambda _a, _b, _c: 0,
         cmd_recent=lambda _a: 0,
-        cmd_help_actions=lambda _a, _b, _c, _d: 0,
+        cmd_help=lambda _ns: 0,
         cmd_setup=lambda _a, _b, _c: 0,
         cmd_cache_warm=lambda: 0,
         cmd_tags_sync=lambda _a, _b, _c: 0,
@@ -59,7 +59,6 @@ def test_dispatch_command_ls_path() -> None:
         return 7
     rc = cli_dispatch.dispatch_command(
         ns,
-        parser=parser,
         base_dir=Path("."),
         bin_dir=Path("."),
         cwd=Path("."),
@@ -89,7 +88,6 @@ def test_bare_b_archive_routes_to_mv_cwd() -> None:
     seen: list[dict] = []
     rc = cli_dispatch.dispatch_command(
         ns,
-        parser=parser,
         base_dir=Path("/base"),
         bin_dir=Path("."),
         cwd=Path("."),
@@ -113,7 +111,6 @@ def test_b_archive_mv_still_works_with_path() -> None:
     seen: list[dict] = []
     rc = cli_dispatch.dispatch_command(
         ns,
-        parser=parser,
         base_dir=Path("/base"),
         bin_dir=Path("."),
         cwd=Path("."),
@@ -135,7 +132,6 @@ def test_b_archive_mv_multi_path_and_yes() -> None:
     seen: list[dict] = []
     rc = cli_dispatch.dispatch_command(
         ns,
-        parser=parser,
         base_dir=Path("/base"),
         bin_dir=Path("."),
         cwd=Path("."),
@@ -159,7 +155,6 @@ def test_b_a_alias_multi_path() -> None:
     seen: list[dict] = []
     rc = cli_dispatch.dispatch_command(
         ns,
-        parser=parser,
         base_dir=Path("/base"),
         bin_dir=Path("."),
         cwd=Path("."),

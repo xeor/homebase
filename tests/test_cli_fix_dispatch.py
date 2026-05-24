@@ -16,7 +16,7 @@ def _stub_kwargs(**overrides):
         cmd_completion=lambda _a: 0,
         cmd_internal_complete=lambda _a, _b, _c: 0,
         cmd_recent=lambda _a: 0,
-        cmd_help_actions=lambda _a, _b, _c, _d: 0,
+        cmd_help=lambda _ns: 0,
         cmd_setup=lambda _a, _b, _c: 0,
         cmd_cache_warm=lambda: 0,
         cmd_tags_sync=lambda _a, _b, _c: 0,
@@ -47,7 +47,6 @@ def _run(args, capture):
     ns = parser.parse_args(args)
     return cli_dispatch.dispatch_command(
         ns,
-        parser=parser,
         base_dir=Path("."),
         bin_dir=Path("."),
         cwd=Path("."),
