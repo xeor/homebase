@@ -44,17 +44,91 @@ def find_executable(name: str, extra_candidates: tuple[str, ...] = ()) -> str | 
 def recommended_tmux_save_binding(script_path: Path, tmux_bin: str = "") -> str:
     """Suggested tmux binding to save the current window as ``.tmuxp.yaml``.
 
-    Uses ``display-popup`` with ``--pause`` so the popup shows
-    progress, the final filename + a "review manually" hint, and waits
-    for Enter before closing. Invokes the ``b`` entry-point directly:
-    ``uv run --script`` is unnecessary and the previous form
-    occasionally failed silently."""
-    _ = tmux_bin  # kept for back-compat with callers; no longer used
+    Wraps ``b tmux save`` in a ``sh -c`` failsafe. If the binary
+    itself can't start (PATH issue, broken shebang, missing
+    interpreter), the popup stays open with a bold red banner naming
+    the specific failure and a diagnostic dump that searches common
+    install locations — so tmux/tmuxp are not falsely reported as
+    MISSING when the tmux server's PATH is stripped.
+
+    The ``--pause`` flag is still passed so the python side prints
+    its own diagnostic header and friendly error classifications on
+    every run."""
+    _ = tmux_bin
     script_q = shlex.quote(str(script_path))
+    # Single-quoted body for tmux conf. No single quotes allowed inside.
+    inner = (
+        # locate a binary even when PATH is stripped (common for tmux
+        # servers started before shell rc loaded /opt/homebrew/bin etc.)
+        'find_bin() {'
+        ' n=$1;'
+        ' if command -v "$n" >/dev/null 2>&1; then command -v "$n"; return 0; fi;'
+        ' for p in /opt/homebrew/bin /usr/local/bin /opt/local/bin /usr/bin /bin "$HOME/.local/bin" "$HOME/bin"; do'
+        '   if [ -x "$p/$n" ]; then echo "$p/$n"; return 0; fi;'
+        ' done;'
+        ' echo MISSING; return 1;'
+        ' };'
+        # run b; capture exit code
+        '"$1" tmux save --pause --pane-id "$2" --session-id "$3";'
+        ' rc=$?;'
+        ' [ $rc -eq 0 ] && exit 0;'
+        # ── failure path ──
+        ' RED=$(printf "\\033[1;41;37m");'
+        ' YEL=$(printf "\\033[1;33m");'
+        ' DIM=$(printf "\\033[2m");'
+        ' RST=$(printf "\\033[0m");'
+        ' echo;'
+        # specific cause banner
+        ' if [ ! -e "$1" ]; then'
+        '   printf "%s  the b binary does not exist  %s\\n" "$RED" "$RST";'
+        '   printf "%s  path: %s%s\\n" "$YEL" "$1" "$RST";'
+        ' elif [ ! -x "$1" ]; then'
+        '   printf "%s  the b binary is not executable  %s\\n" "$RED" "$RST";'
+        '   printf "%s  path: %s%s\\n" "$YEL" "$1" "$RST";'
+        ' elif [ $rc -eq 127 ]; then'
+        '   printf "%s  shell could not start the command (rc=127)  %s\\n" "$RED" "$RST";'
+        '   printf "%s  usually a missing interpreter in the b shebang (python/uv?)%s\\n" "$YEL" "$RST";'
+        ' else'
+        '   printf "%s  b tmux save exited rc=%s — see error printed above  %s\\n" "$RED" "$rc" "$RST";'
+        ' fi;'
+        ' echo;'
+        ' printf "%s── diagnostics ──%s\\n" "$DIM" "$RST";'
+        ' TMUX_BIN=$(find_bin tmux);'
+        ' TMUXP_BIN=$(find_bin tmuxp);'
+        ' printf "b binary:    %s\\n" "$1";'
+        ' printf "tmux:        %s\\n" "$TMUX_BIN";'
+        ' if [ "$TMUX_BIN" != MISSING ]; then'
+        '   printf "tmux -V:     %s\\n" "$("$TMUX_BIN" -V 2>&1 || echo unknown)";'
+        ' fi;'
+        ' printf "tmuxp:       %s\\n" "$TMUXP_BIN";'
+        ' if [ "$TMUXP_BIN" != MISSING ]; then'
+        '   printf "tmuxp -V:    %s\\n" "$("$TMUXP_BIN" --version 2>&1 || echo unknown)";'
+        ' fi;'
+        ' printf "TMUX=%s\\n" "${TMUX:-unset}";'
+        ' printf "TMUX_PANE=%s\\n" "${TMUX_PANE:-unset}";'
+        ' printf "SHELL=%s\\n" "${SHELL:-unset}";'
+        ' printf "PWD=%s\\n" "$PWD";'
+        ' printf "PATH=%s\\n" "$PATH";'
+        ' echo;'
+        ' echo "Press ESC to close...";'
+        # Park the shell until tmux closes the popup via ESC. Other
+        # keys just echo into the popup buffer and do not release
+        # this read (display-popup's stdin handling).
+        ' head -c 1 >/dev/null 2>&1 || true'
+    )
+    # NOTE: format strings must be in DOUBLE quotes for tmux to expand
+    # them. Single quotes treat `#` as literal, which is why earlier
+    # versions of this binding passed the strings `#{pane_id}` /
+    # `#{q:session_id}` to the python side instead of real values.
+    # ``-E`` closes the popup when the shell exits. The shell only
+    # exits after ``read _`` consumes the user's Enter (either from
+    # python's pause loop or from the failure block), so a single
+    # Enter is enough — without ``-E`` tmux keeps the popup open
+    # waiting for another keypress.
     return (
-        "bind-key t display-popup -w 70% -h 30% "
-        f"{script_q} tmux save --pause --pane-id '#{{pane_id}}' "
-        "--session-id '#{q:session_id}'"
+        "bind-key t display-popup -E -w 80% -h 70% "
+        f"sh -c '{inner}' tmux-save-popup {script_q} "
+        '"#{pane_id}" "#{q:session_id}"'
     )
 
 

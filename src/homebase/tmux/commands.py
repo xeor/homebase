@@ -338,11 +338,171 @@ def tmux_save_debug_snapshot(
 
 def _wait_for_enter() -> None:
     print("")
-    print("Press Enter to close…", flush=True)
+    print("Press ESC to close…", flush=True)
+    # ESC is intercepted by tmux at the popup level and closes the
+    # popup (killing this process). No other key works — they echo
+    # into the popup buffer but never reach this process's stdin in
+    # a way that releases the read. The os.read call below just
+    # parks the process so the popup stays open until ESC.
     try:
-        input()
-    except (EOFError, KeyboardInterrupt):
+        os.read(sys.stdin.fileno(), 1)
+    except (OSError, KeyboardInterrupt):
         return
+
+
+# Common install locations to probe when $PATH is stripped — tmux
+# servers started before the shell rc loaded /opt/homebrew/bin etc.
+# would otherwise wrongly report tmux/tmuxp as MISSING.
+_BIN_SEARCH_PREFIXES: tuple[str, ...] = (
+    "/opt/homebrew/bin",
+    "/usr/local/bin",
+    "/opt/local/bin",
+    "/usr/bin",
+    "/bin",
+)
+
+
+def _find_bin(name: str) -> str | None:
+    found = shutil.which(name)
+    if found:
+        return found
+    for prefix in _BIN_SEARCH_PREFIXES:
+        candidate = Path(prefix) / name
+        try:
+            if candidate.is_file() and os.access(candidate, os.X_OK):
+                return str(candidate)
+        except OSError:
+            continue
+    extra_home = Path(os.environ.get("HOME", "")) / ".local" / "bin" / name
+    try:
+        if extra_home.is_file() and os.access(extra_home, os.X_OK):
+            return str(extra_home)
+    except OSError:
+        pass
+    return None
+
+
+def _tool_version(binary: str) -> str:
+    found = _find_bin(binary)
+    if not found:
+        return "MISSING"
+    # Augment PATH so child processes (e.g. tmuxp's internal `tmux`
+    # lookup during `tmuxp --version`) can find their own deps even
+    # when the tmux server was started with a stripped PATH.
+    env = os.environ.copy()
+    extra_prefixes = ":".join(_BIN_SEARCH_PREFIXES)
+    env["PATH"] = (
+        f"{env.get('PATH', '')}:{extra_prefixes}"
+        if env.get("PATH")
+        else extra_prefixes
+    )
+    try:
+        proc = subprocess.run(
+            [found, "-V"] if binary == "tmux" else [found, "--version"],
+            env=env,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            capture_output=True,
+            timeout=3,
+            check=False,
+        )
+    except (subprocess.SubprocessError, OSError):
+        return found
+    line = (proc.stdout or proc.stderr or "").strip().splitlines()
+    version = line[0] if line else ""
+    return f"{found}  ({version})" if version else found
+
+
+# ANSI color codes — tmux display-popup renders these.
+_C_BANNER = "\033[1;41;37m"  # bold white on red bg
+_C_HINT = "\033[1;33m"  # bold yellow
+_C_DIM = "\033[2m"
+_C_RESET = "\033[0m"
+
+
+def print_error_banner(headline: str, hint: str = "") -> None:
+    """Print a prominent colored banner naming the actual failure."""
+    print("", flush=True)
+    print(f"{_C_BANNER}  ✗ {headline}  {_C_RESET}", flush=True)
+    if hint:
+        for line in hint.splitlines():
+            print(f"{_C_HINT}  → {line}{_C_RESET}", flush=True)
+    print("", flush=True)
+
+
+def classify_save_error(detail: str, base_root: Path | None = None) -> tuple[str, str]:
+    """Map an exception detail string to (headline, hint).
+
+    The headline is the user-facing problem name; the hint is a
+    concrete next step. Anything not matched falls back to the raw
+    detail so we never hide information.
+    """
+    low = detail.lower()
+    base_text = str(base_root) if base_root else "your base folder"
+    if "not inside a tmux session" in low:
+        return (
+            "not running inside a tmux session",
+            "$TMUX is unset. The keybinding should set this automatically when "
+            "run from a tmux pane — did you launch b tmux save manually?",
+        )
+    if "no pane start directories under base root" in low:
+        return (
+            "this pane is outside your base folder",
+            f"in the pane that triggered this popup (not this popup itself), "
+            f"cd into a project under {base_text}, then press the keybinding "
+            f"again.",
+        )
+    if "no project root found" in low or "no_project_root" in low:
+        return (
+            "this pane is under base but not in a project (no .base.yaml found)",
+            f"in the originating pane, cd into a folder under {base_text} "
+            f"that contains a .base.yaml marker, then press the keybinding "
+            f"again.",
+        )
+    if "multiple project roots" in low:
+        return (
+            "this window's panes span multiple projects",
+            "all panes in the window must share one project — close the "
+            "extra panes or move them to another window, then retry.",
+        )
+    if "resolved active window has no panes" in low:
+        return (
+            "the active tmux window reports no panes",
+            "this is unusual — try detaching/reattaching tmux, then retry.",
+        )
+    if "no pane start directories found" in low:
+        return (
+            "tmux returned no pane working directories",
+            "tmux may be wedged — check `tmux list-panes -a` manually.",
+        )
+    if "command not found" in low or "no such file or directory" in low:
+        return (
+            "a required binary is missing",
+            "check the diagnostics block below for tmux/tmuxp paths.",
+        )
+    return ("b tmux save failed", detail)
+
+
+def print_save_diagnostics_header(
+    pane_id_hint: str,
+    session_id_hint: str,
+) -> None:
+    """Print environment info at the start of every popup run.
+
+    Cheap (~3s budget for version subprocess calls). Looks in common
+    install prefixes so a stripped $PATH does not falsely report
+    tmux/tmuxp as MISSING.
+    """
+    print(f"{_C_DIM}── b tmux save diagnostics ──{_C_RESET}", flush=True)
+    print(f"tmux:        {_tool_version('tmux')}", flush=True)
+    print(f"tmuxp:       {_tool_version('tmuxp')}", flush=True)
+    print(f"TMUX={os.environ.get('TMUX', 'unset')}", flush=True)
+    print(f"TMUX_PANE={os.environ.get('TMUX_PANE', 'unset')}", flush=True)
+    print(f"pane-id hint:    {pane_id_hint or '(none)'}", flush=True)
+    print(f"session-id hint: {session_id_hint or '(none)'}", flush=True)
+    print(f"PWD={os.getcwd()}", flush=True)
+    print(f"{_C_DIM}─────────────────────────────{_C_RESET}", flush=True)
 
 
 def cmd_tmux_save(
@@ -373,7 +533,13 @@ def cmd_tmux_save(
     if not os.getenv("TMUX"):
         print("not inside a tmux session", file=sys.stderr)
         if pause:
+            headline, hint = classify_save_error("not inside a tmux session")
+            print_error_banner(headline, hint)
+            print_save_diagnostics_header(str(pane_id_hint), str(session_id_hint))
             _wait_for_enter()
+            # Exit 0 so the outer shell wrapper does NOT show its own
+            # diagnostic block — we already presented everything.
+            return 0
         return 1
 
     try:
@@ -480,28 +646,37 @@ def cmd_tmux_save(
         yaml.YAMLError,
     ) as exc:
         detail = format_error(exc)
+        if pause:
+            # Skip tmux_notify in popup mode — the popup is showing the
+            # error in detail and the status-bar notify call can block
+            # for 1-2s before the banner becomes visible.
+            headline, hint = classify_save_error(detail, base_root=base_dir.resolve())
+            print_error_banner(headline, hint)
+            print_save_diagnostics_header(str(pane_id_hint), str(session_id_hint))
+            _wait_for_enter()
+            # Exit 0 so the shell wrapper does NOT show its own banner.
+            return 0
         print(f"b tmux save failed: {detail}", file=sys.stderr)
         tmux_notify(f"b tmux save failed: {detail}", str(pane_id_hint), 6000)
-        if pause:
-            print("")
-            print(f"✗ failed: {detail}")
-            _wait_for_enter()
         return 1
     except Exception as exc:  # noqa: BLE001 - top-level error boundary for the tmux key binding
         # The binding runs detached from any visible terminal; a bare
-        # traceback to stderr is invisible. Force the actual error to
-        # surface via tmux display-message so the user sees it.
+        # traceback to stderr is invisible.
         import traceback
 
         traceback.print_exc(file=sys.stderr)
+        if pause:
+            # Skip the status-bar notify — popup is showing it all.
+            print_error_banner(
+                f"unhandled crash: {type(exc).__name__}",
+                f"{exc}\nfull traceback printed above; please report this.",
+            )
+            print_save_diagnostics_header(str(pane_id_hint), str(session_id_hint))
+            _wait_for_enter()
+            return 0
         tmux_notify(
             f"b tmux save crashed: {type(exc).__name__}: {exc}",
             str(pane_id_hint),
             8000,
         )
-        if pause:
-            print("")
-            print(f"✗ crashed: {type(exc).__name__}: {exc}")
-            print("(full traceback above)")
-            _wait_for_enter()
         return 1
