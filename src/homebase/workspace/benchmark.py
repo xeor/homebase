@@ -6,9 +6,8 @@ import shutil
 import sqlite3
 import subprocess
 import sys
-import tempfile
 import time
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 from typing import Callable
 
@@ -37,7 +36,7 @@ from ..core.constants import (
     PACKED_ARCHIVE_SUFFIX,
     TEST_REPORT_FILE_NAME,
 )
-from ..metadata.api import save_base_data, save_base_tags, sync_tag_symlinks
+from ..metadata.api import save_base_tags, sync_tag_symlinks
 from . import benchmark_report
 from .projects import git_info, project_row
 from .rows import (
@@ -46,6 +45,14 @@ from .rows import (
     collect_workspace_rows,
     compile_filter_expr,
     match_query,
+)
+from .seed import (
+    commit_files,
+    git_init,
+    make_active_project,
+    make_archive_entry,
+    make_temp_basefolder,
+    pack_archive_entry,
 )
 
 
@@ -65,31 +72,34 @@ def _benchmark_make_git_repo(
     file_count: int,
     commits: int,
 ) -> Path:
+    """Bench-only git repo: flat layout (no ``.base.yaml``, no
+    ``repo/`` wrapper). Used as a raw input to ``git_info`` /
+    ``project_row`` timings, not as a homebase project."""
     path = base_dir / name
-    path.mkdir(parents=True, exist_ok=True)
-    subprocess.run(["git", "init", "-q"], cwd=path, check=True)
-    subprocess.run(
-        ["git", "config", "user.email", "bench@example.local"], cwd=path, check=True
-    )
-    subprocess.run(["git", "config", "user.name", "bench"], cwd=path, check=True)
+    git_init(path, user_email="bench@example.local", user_name="bench")
 
     for i in range(file_count):
         sub = path / "src" / f"m{i % 16:02d}"
         sub.mkdir(parents=True, exist_ok=True)
         (sub / f"f{i:05d}.txt").write_text(f"{name}:{i}\n")
-    subprocess.run(["git", "add", "."], cwd=path, check=True)
-    subprocess.run(["git", "commit", "-q", "-m", "seed 0"], cwd=path, check=True)
+    commit_files(path, "seed 0")
 
     step = max(1, file_count // max(1, commits - 1))
     for c in range(1, max(1, commits)):
         idx = (c * step) % file_count
         target = path / "src" / f"m{idx % 16:02d}" / f"f{idx:05d}.txt"
         target.write_text(f"{name}:{idx}:commit:{c}\n")
-        subprocess.run(
-            ["git", "add", str(target.relative_to(path))], cwd=path, check=True
+        commit_files(
+            path,
+            f"seed {c}",
+            paths=[str(target.relative_to(path))],
         )
-        subprocess.run(["git", "commit", "-q", "-m", f"seed {c}"], cwd=path, check=True)
     return path
+
+
+_BENCHMARK_TAGS_POOL: tuple[str, ...] = (
+    "cli", "api", "data", "infra", "ops", "web", "ml", "db", "sync", "perf",
+)
 
 
 def _benchmark_make_project(base_dir: Path, idx: int) -> None:
@@ -98,41 +108,29 @@ def _benchmark_make_project(base_dir: Path, idx: int) -> None:
         name += ".tmp"
     elif idx % 17 == 0:
         name += ".fork"
-    path = base_dir / name
-    path.mkdir(parents=True, exist_ok=True)
 
-    tags_pool = [
-        "cli",
-        "api",
-        "data",
-        "infra",
-        "ops",
-        "web",
-        "ml",
-        "db",
-        "sync",
-        "perf",
-    ]
     tag_count = idx % 5
-    tags = [tags_pool[(idx + k) % len(tags_pool)] for k in range(tag_count)]
-
-    opened_ts = 1700000000 - (idx * 137)
-    data: dict[str, object] = {
-        "description": f"benchmark project {idx}",
-        "tags": sorted(set(tags)),
-        "opened_ts": opened_ts,
-        "wip": (idx % 7 == 0),
-        "log": {
-            "events": [
-                {
-                    "_event": "seeded",
-                    "_ts": archive_iso_from_ts(1700000000 + idx),
-                    "index": idx,
-                }
-            ]
-        },
+    tags = [
+        _BENCHMARK_TAGS_POOL[(idx + k) % len(_BENCHMARK_TAGS_POOL)]
+        for k in range(tag_count)
+    ]
+    log = {
+        "events": [
+            {
+                "_event": "seeded",
+                "_ts": archive_iso_from_ts(1700000000 + idx),
+                "index": idx,
+            }
+        ]
     }
-    save_base_data(path, data)
+    path = make_active_project(
+        base_dir,
+        name,
+        description=f"benchmark project {idx}",
+        tags=tags,
+        wip=(idx % 7 == 0),
+        log=log,
+    )
 
     if idx % 3 == 0:
         (path / "pyproject.toml").write_text("[project]\nname='bench'\n")
@@ -144,7 +142,25 @@ def _benchmark_make_project(base_dir: Path, idx: int) -> None:
 
 def _benchmark_seed_dataset(base_dir: Path) -> dict[str, int]:
     active_count, archived_dir_count, archived_pack_count = _benchmark_dataset_counts()
+    return _seed_benchmark_dataset(
+        base_dir,
+        active_count=active_count,
+        archived_dir_count=archived_dir_count,
+        archived_pack_count=archived_pack_count,
+    )
 
+
+def _seed_benchmark_dataset(
+    base_dir: Path,
+    *,
+    active_count: int,
+    archived_dir_count: int,
+    archived_pack_count: int,
+) -> dict[str, int]:
+    """Parameterized variant used by the production seeder above and by
+    the small-dataset regression test. The shape of the returned dict
+    is part of the bench report contract — don't reshape without
+    updating ``benchmark_report``."""
     for i in range(active_count):
         _benchmark_make_project(base_dir, i)
 
@@ -158,26 +174,23 @@ def _benchmark_seed_dataset(base_dir: Path) -> dict[str, int]:
         base_dir, "bench-git-large", file_count=1400, commits=12
     )
 
-    archive_root = base_dir / ARCHIVE_DIR_NAME
-    archive_root.mkdir(parents=True, exist_ok=True)
     for i in range(archived_dir_count):
         archived_ts = 1700100000 + i
-        date_prefix = archive_iso_from_ts(archived_ts)[:10]
-        year = date_prefix[:4]
-        p = archive_root / year / f"{date_prefix}_arch-{i:04d}"
-        p.mkdir(parents=True, exist_ok=True)
-        save_base_data(
-            p,
-            {
-                "description": f"archived benchmark {i}",
-                "tags": ["arch", f"g{i % 9}"],
-                "opened_ts": 1700200000 - (i * 211),
-                "wip": False,
-            },
+        iso = archive_iso_from_ts(archived_ts)[:10]
+        y, m, d = iso.split("-")
+        entry_date = date(int(y), int(m), int(d))
+        slug = f"arch-{i:04d}"
+        entry = make_archive_entry(
+            base_dir,
+            date=entry_date,
+            slug=slug,
+            description=f"archived benchmark {i}",
+            tags=["arch", f"g{i % 9}"],
         )
         if i % 5 == 0:
-            (p / "README.txt").write_text("benchmark archive payload\n")
+            (entry / "README.txt").write_text("benchmark archive payload\n")
 
+    archive_root = base_dir / ARCHIVE_DIR_NAME
     packed = 0
     for i in range(min(archived_pack_count, archived_dir_count)):
         matches = sorted(
@@ -186,11 +199,8 @@ def _benchmark_seed_dataset(base_dir: Path) -> dict[str, int]:
         )
         if not matches:
             continue
-        try:
-            _ = archive_pack_internal(base_dir, matches[-1])
+        if pack_archive_entry(base_dir, matches[-1]) is not None:
             packed += 1
-        except (OSError, ValueError):
-            continue
 
     return {
         "active_projects": active_count + 3,
@@ -293,12 +303,6 @@ def _benchmark_write_report(report_path: Path, run_data: dict[str, object]) -> N
     report_path.write_text(
         yaml.safe_dump(out, sort_keys=False, default_flow_style=False)
     )
-
-
-def _benchmark_make_temp_basefolder(base_dir: Path, label: str) -> Path:
-    tmp_root = Path(tempfile.gettempdir()).resolve()
-    prefix = f"{base_dir.name}-{label}-"
-    return Path(tempfile.mkdtemp(prefix=prefix, dir=str(tmp_root))).resolve()
 
 
 def _benchmark_metric_error(name: str, err: str) -> dict[str, object]:
@@ -735,7 +739,7 @@ def cmd_benchmark_run(
     keep_basefolder: bool = False,
 ) -> int:
 
-    bench_root = _benchmark_make_temp_basefolder(base_dir, "bench")
+    bench_root = make_temp_basefolder(base_dir, "bench")
 
     ts = datetime.now().astimezone().isoformat(timespec="seconds")
     print(f"benchmark timestamp: {ts}")
@@ -1124,7 +1128,7 @@ def cmd_test(
     keep_basefolder: bool = False,
 ) -> int:
 
-    test_root = _benchmark_make_temp_basefolder(base_dir, "test")
+    test_root = make_temp_basefolder(base_dir, "test")
     ts = datetime.now().astimezone().isoformat(timespec="seconds")
     print(f"test timestamp: {ts}")
     print(f"test base (temp): {test_root}")

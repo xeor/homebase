@@ -5,16 +5,21 @@ import random
 import subprocess
 import sys
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
-import yaml
-
 from ..core.constants import (
-    ARCHIVE_DIR_NAME,
-    BASE_MARKER_FILE,
     GLOBAL_CONFIG_FILE_NAME,
     HOMEBASE_DIR_NAME,
+)
+from ..workspace.seed import (
+    commit_files,
+    git_init,
+    make_active_project,
+    make_archive_entry,
+    pack_archive_entry,
+    read_gitdir_id,
+    write_project_marker,
 )
 
 LOREM_SENTENCES: tuple[str, ...] = (
@@ -169,8 +174,6 @@ def _generate_active_projects(
 
     projects: list[_Project] = []
     for idx, name in enumerate(names):
-        path = target / name
-        path.mkdir()
         tags = _pick_tags(rng)
         desc = _pick_description(rng) if idx in description_indices else ""
         wip = idx in wip_indices
@@ -178,23 +181,18 @@ def _generate_active_projects(
         age_days = _pick_age_days(rng)
         timestamp = _ts_from_age_days(age_days)
 
+        path = make_active_project(
+            target,
+            name,
+            tags=tags,
+            description=desc,
+            wip=wip,
+            repo_dir="repo" if is_git else "",
+        )
         if is_git:
-            repo_path = path / "repo"
-            _git_init(repo_path, timestamp)
-            _seed_repo_content(repo_path, name, rng, timestamp)
+            _seed_repo_content(path / "repo", name, rng, timestamp)
         else:
             _seed_flat_content(path, name, rng)
-
-        meta: dict[str, object] = {}
-        if desc:
-            meta["description"] = desc
-        if tags:
-            meta["tags"] = sorted(set(tags))
-        if wip:
-            meta["wip"] = True
-        if is_git:
-            meta["repo_dir"] = "repo"
-        _write_meta(path, meta)
         _set_mtime_recursive(path, timestamp)
 
         projects.append(_Project(
@@ -247,25 +245,26 @@ def _make_worktree(
     parent_repo = parent.path / "repo"
     wt_repo = wt_path / "repo"
     wt_path.mkdir()
-    _run([
-        "git", "-C", str(parent_repo), "worktree", "add",
-        "-b", branch, str(wt_repo),
-    ])
-    gitdir_id = _read_gitdir_id(parent_repo, wt_repo)
+    subprocess.run(
+        ["git", "-C", str(parent_repo), "worktree", "add",
+         "-b", branch, str(wt_repo)],
+        check=True, capture_output=True,
+    )
+    gitdir_id = read_gitdir_id(parent_repo, wt_repo)
     age_days = max(0, parent.age_days - rng.randint(0, 30))
     timestamp = _ts_from_age_days(age_days)
 
-    meta: dict[str, object] = {
-        "tags": sorted(set([*parent.tags, "wip-branch"])),
-        "repo_dir": "repo",
-        "worktree": {
+    write_project_marker(
+        wt_path,
+        tags=[*parent.tags, "wip-branch"],
+        repo_dir="repo",
+        worktree={
             "of": parent.name,
             "branch": branch,
             "parent_path": str(parent_repo.resolve()),
             "gitdir_id": gitdir_id,
         },
-    }
-    _write_meta(wt_path, meta)
+    )
     _set_mtime_recursive(wt_path, timestamp)
 
 
@@ -273,30 +272,26 @@ def _generate_archive_entries(
     target: Path,
     rng: random.Random,
 ) -> tuple[int, int]:
-    archive_root = target / ARCHIVE_DIR_NAME
-    archive_root.mkdir()
     entries: list[Path] = []
     for i in range(ARCHIVE_COUNT):
         year = rng.randint(*ARCHIVE_YEAR_SPAN)
         month = rng.randint(1, 12)
         day = rng.randint(1, 28)
-        date_prefix = f"{year:04d}-{month:02d}-{day:02d}"
         topic = rng.choice(NAME_NOUNS)
         suffix = rng.choice(NAME_TOPICS)
         slug = f"{topic}-{suffix}-{i:02d}"
-        entry_path = archive_root / f"{year}" / f"{date_prefix}_{slug}"
-        entry_path.mkdir(parents=True)
         tags = _pick_tags(rng, weighted_toward_status=True)
-        meta: dict[str, object] = {
-            "tags": sorted(set([*tags, "archived"])),
-        }
-        if rng.random() < 0.30:
-            meta["description"] = _pick_description(rng)
-        _write_meta(entry_path, meta)
+        desc = _pick_description(rng) if rng.random() < 0.30 else ""
+        entry_path = make_archive_entry(
+            target,
+            date=date(year, month, day),
+            slug=slug,
+            tags=[*tags, "archived"],
+            description=desc,
+        )
         if rng.random() < 0.5:
             (entry_path / "README.md").write_text(_pick_description(rng) + "\n")
-        ts = _ts_from_date(year, month, day)
-        _set_mtime_recursive(entry_path, ts)
+        _set_mtime_recursive(entry_path, _ts_from_date(year, month, day))
         entries.append(entry_path)
 
     packed = 0
@@ -304,25 +299,10 @@ def _generate_archive_entries(
         entries,
         k=min(ARCHIVE_PACKED_COUNT, len(entries)),
     )
-    from ..commands.archive import archive_pack_internal
-
     for entry in pack_targets:
-        try:
-            archive_pack_internal(target, entry)
+        if pack_archive_entry(target, entry) is not None:
             packed += 1
-        except (OSError, ValueError, subprocess.SubprocessError):
-            continue
     return len(entries), packed
-
-
-def _write_meta(path: Path, data: dict[str, object]) -> None:
-    marker = path / BASE_MARKER_FILE
-    if data:
-        marker.write_text(
-            yaml.safe_dump(data, sort_keys=False, default_flow_style=False),
-        )
-    else:
-        marker.write_text("\n")
 
 
 def _unique_names(count: int, rng: random.Random) -> list[str]:
@@ -402,20 +382,13 @@ def _set_mtime_recursive(path: Path, ts: int) -> None:
         pass
 
 
-def _git_init(repo_path: Path, timestamp: int) -> None:
-    repo_path.mkdir(parents=True, exist_ok=True)
-    _run(["git", "-C", str(repo_path), "init", "-q", "-b", "main"])
-    _run(["git", "-C", str(repo_path), "config", "user.email", "demo@example.local"])
-    _run(["git", "-C", str(repo_path), "config", "user.name", "homebase demo"])
-    _run(["git", "-C", str(repo_path), "config", "commit.gpgsign", "false"])
-
-
 def _seed_repo_content(
     repo_path: Path,
     name: str,
     rng: random.Random,
     base_ts: int,
 ) -> None:
+    git_init(repo_path, user_email="demo@example.local", user_name="homebase demo")
     (repo_path / "README.md").write_text(f"# {name}\n\n{_pick_description(rng)}\n")
     if rng.random() < 0.35:
         (repo_path / "pyproject.toml").write_text(
@@ -432,18 +405,11 @@ def _seed_repo_content(
     n_commits = rng.randint(1, 4)
     for c in range(n_commits):
         commit_ts = base_ts + c * rng.randint(3600, 86400)
-        fpath = repo_path / f"notes-{c:02d}.md"
-        fpath.write_text(f"{_pick_description(rng)}\n")
-        env = os.environ.copy()
-        iso = datetime.fromtimestamp(commit_ts, tz=timezone.utc).strftime(
-            "%Y-%m-%dT%H:%M:%S+00:00",
-        )
-        env["GIT_AUTHOR_DATE"] = iso
-        env["GIT_COMMITTER_DATE"] = iso
-        _run(["git", "-C", str(repo_path), "add", "."], env=env)
-        _run(
-            ["git", "-C", str(repo_path), "commit", "-q", "-m", f"seed {c}"],
-            env=env,
+        (repo_path / f"notes-{c:02d}.md").write_text(f"{_pick_description(rng)}\n")
+        commit_files(
+            repo_path,
+            f"seed {c}",
+            author_date=datetime.fromtimestamp(commit_ts, tz=timezone.utc),
         )
 
 
@@ -458,35 +424,6 @@ def _seed_flat_content(path: Path, name: str, rng: random.Random) -> None:
         (path / "pyproject.toml").write_text(
             f"[project]\nname = '{name}'\nversion = '0.1.0'\n",
         )
-
-
-def _read_gitdir_id(parent_repo: Path, worktree_repo: Path) -> str:
-    admin = parent_repo / ".git" / "worktrees"
-    target_str = str(worktree_repo.resolve())
-    for entry in admin.iterdir():
-        gitdir_file = entry / "gitdir"
-        if not gitdir_file.is_file():
-            continue
-        try:
-            text = gitdir_file.read_text(encoding="utf-8").strip()
-        except OSError:
-            continue
-        if not text:
-            continue
-        pointed = Path(text)
-        if pointed.name == ".git":
-            pointed = pointed.parent
-        if str(pointed.resolve()) == target_str:
-            return entry.name
-    raise ValueError(f"could not locate gitdir_id for {worktree_repo}")
-
-
-def _run(
-    cmd: list[str],
-    *,
-    env: dict[str, str] | None = None,
-) -> None:
-    subprocess.run(cmd, check=True, env=env, capture_output=True)
 
 
 def _print_summary(target: Path, summary: dict[str, int]) -> None:
