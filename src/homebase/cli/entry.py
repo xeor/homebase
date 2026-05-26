@@ -14,6 +14,7 @@ from ..commands.archive import (
     cmd_rm,
 )
 from ..commands.deworktree import cmd_deworktree
+from ..commands.example import cmd_example_generate
 from ..commands.fix_worktrees import cmd_fix_worktrees
 from ..commands.help import (
     cmd_help as cmd_help_dispatch,
@@ -528,6 +529,7 @@ def main(argv: list[str]) -> int:
                 comment=comment,
                 keep_basefolder=keep_basefolder,
             ),
+            cmd_example_generate=cmd_example_generate,
             initial_filter_expr=initial_filter_expr,
         )
     except KeyboardInterrupt:
@@ -544,6 +546,7 @@ def main(argv: list[str]) -> int:
         "tmux",
         "benchmark",
         "test",
+        "example",
         "help",
         "status",
         "new",

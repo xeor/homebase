@@ -62,6 +62,10 @@ def print_help() -> None:
             "relocate to <year>/ subdirs",
         ),
         ("b a [path]", "alias for b archive mv [path]"),
+        (
+            "b example generate --path <dir> [--count N] [--seed N]",
+            "generate a demo base folder with random data (screenshots/testing)",
+        ),
     ]
     for cmd, desc in items:
         print(f"  {cmd:34} {desc}")

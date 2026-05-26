@@ -381,6 +381,35 @@ def build_cli_parser() -> argparse.ArgumentParser:
     p_bench_results = bench_sub.add_parser("results", help="show benchmark history")
     p_bench_results.add_argument("--ignore-featureset", action="append", default=[], help="ignore feature set id(s); repeat or comma-separate")
 
+    p_example = sub.add_parser(
+        "example",
+        help="example dataset generation",
+    )
+    example_sub = p_example.add_subparsers(
+        dest="example_subcommand", required=True,
+    )
+    p_example_gen = example_sub.add_parser(
+        "generate",
+        help="generate a demo base folder with random data for screenshots/testing",
+    )
+    p_example_gen.add_argument(
+        "--path",
+        required=True,
+        help="target directory (must not exist)",
+    )
+    p_example_gen.add_argument(
+        "--count",
+        type=int,
+        default=30,
+        help="number of active projects (default: 30)",
+    )
+    p_example_gen.add_argument(
+        "--seed",
+        type=int,
+        default=None,
+        help="seed RNG for reproducible output",
+    )
+
     p_test = sub.add_parser("test", help="run test/regression harness")
     p_test.add_argument("--comment", default="", help="optional run annotation")
     p_test.add_argument("--keep-basefolder", action="store_true", help="reuse existing base fixture")

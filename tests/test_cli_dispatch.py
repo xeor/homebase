@@ -44,6 +44,7 @@ def _stub_dispatch_kwargs(**overrides: object) -> dict[str, object]:
         cmd_benchmark=lambda _a, _b, _c, _d, _e, _f: 0,
         cmd_test_regression=lambda _a, _b, _c, _d: 0,
         cmd_test=lambda _a, _b, _c, _d: 0,
+        cmd_example_generate=lambda _a, _b, _c: 0,
     )
     base.update(overrides)
     return base

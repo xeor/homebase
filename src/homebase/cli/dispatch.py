@@ -40,6 +40,7 @@ def dispatch_command(
     cmd_benchmark: Callable[[Path, Path, str, str, bool, set[str] | None], int],
     cmd_test_regression: Callable[[Path, Path, bool, list[str]], int],
     cmd_test: Callable[[Path, Path, str, bool], int],
+    cmd_example_generate: Callable[[str, int, int | None], int],
     initial_filter_expr: str,
 ) -> int:
     logger.debug("dispatch command={} cwd={} base={}", ns.command, cwd, base_dir)
@@ -213,4 +214,13 @@ def dispatch_command(
                 [str(x) for x in ns.case],
             )
         return cmd_test(base_dir, cwd, str(ns.comment), bool(ns.keep_basefolder))
+    if ns.command == "example":
+        if ns.example_subcommand == "generate":
+            seed = getattr(ns, "seed", None)
+            return cmd_example_generate(
+                str(ns.path),
+                int(getattr(ns, "count", 30) or 30),
+                int(seed) if seed is not None else None,
+            )
+        return 1
     return 1
