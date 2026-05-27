@@ -5,17 +5,18 @@ import re
 
 from textual.app import ComposeResult
 from textual.containers import Vertical
-from textual.events import Key
+from textual.events import Key, Resize
 from textual.widgets import Static, Tab, Tabs
 
 from ...core.constants import ACTION_ACCEPT, ACTION_CANCEL
 from .base import LargeModalScreen
+from .listwin import compute_window, overflow_hint
 
 
 class ActionPickerScreen(LargeModalScreen[str | None]):
     CSS = """
     ActionPickerScreen #action_picker_tabs { height: 3; margin: 0 0 1 0; }
-    ActionPickerScreen #action_picker_body { height: 1fr; overflow-y: auto; }
+    ActionPickerScreen #action_picker_body { height: 1fr; }
     """
     BINDINGS = [
         ("up", "move_up", "Up"),
@@ -80,6 +81,9 @@ class ActionPickerScreen(LargeModalScreen[str | None]):
     def on_mount(self) -> None:
         self._refresh_body()
 
+    def on_resize(self, _event: Resize) -> None:
+        self._refresh_body()
+
     def on_tabs_tab_activated(self, event: Tabs.TabActivated) -> None:
         tabs_id = str(getattr(event.tabs, "id", "") or "")
         if tabs_id != "action_picker_tabs":
@@ -140,40 +144,32 @@ class ActionPickerScreen(LargeModalScreen[str | None]):
             f"tab: {self.active_tab}  filter: {self.filter_text or '(all)'}"
         )
         visible = self._visible_actions()
+        body = self.query_one("#action_picker_body", Static)
         lines: list[str] = []
         if not visible:
             self.index = 0
             self.list_scroll_offset = 0
             lines.append("(no actions match current filter)")
-            self.query_one("#action_picker_body", Static).update("\n".join(lines))
+            body.update("\n".join(lines))
             return
-
-        if self.index >= len(visible):
-            self.index = len(visible) - 1
-        if self.index < 0:
-            self.index = 0
-
-        max_rows = 14
-        max_offset = max(0, len(visible) - max_rows)
-        if self.list_scroll_offset > max_offset:
-            self.list_scroll_offset = max_offset
-        if self.index < self.list_scroll_offset:
-            self.list_scroll_offset = self.index
-        elif self.index >= self.list_scroll_offset + max_rows:
-            self.list_scroll_offset = self.index - max_rows + 1
-
-        window = visible[
-            self.list_scroll_offset : self.list_scroll_offset + max_rows
-        ]
+        offset, max_rows = compute_window(
+            total=len(visible),
+            cursor=self.index,
+            current_offset=self.list_scroll_offset,
+            body_widget=body,
+            reserve_bottom_rows=1,
+        )
+        self.list_scroll_offset = offset
+        self.index = min(max(self.index, 0), len(visible) - 1)
+        window = visible[offset : offset + max_rows]
         for i, (_key, label) in enumerate(window):
-            absolute_i = self.list_scroll_offset + i
+            absolute_i = offset + i
             cursor = ">" if absolute_i == self.index else " "
             lines.append(f"{cursor} {label}")
-        if len(visible) > max_rows:
-            start = self.list_scroll_offset + 1
-            end = self.list_scroll_offset + len(window)
-            lines.append(f"[dim]showing {start}-{end} of {len(visible)}[/]")
-        self.query_one("#action_picker_body", Static).update("\n".join(lines))
+        hint = overflow_hint(len(visible), offset, len(window))
+        if hint is not None:
+            lines.append(hint)
+        body.update("\n".join(lines))
         tabs = self.query_one("#action_picker_tabs", Tabs)
         try:
             tabs.active = self.active_tab

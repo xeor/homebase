@@ -6,7 +6,7 @@ from pathlib import Path
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
-from textual.events import Click, Key
+from textual.events import Click, Key, Resize
 from textual.screen import ModalScreen
 from textual.widgets import Input, Static
 
@@ -26,6 +26,7 @@ from ...workspace.rows import (
     pretty_filter_expression,
 )
 from ..screens.basic import ConfirmScreen, InputScreen
+from ..screens.listwin import compute_window, overflow_hint
 from ..widgets import TokenFilterSuggester
 
 _BASE_DIR: Path | None = None
@@ -49,6 +50,7 @@ class FilterManageScreen(ModalScreen[str | None]):
     #filter_mgmt_body_wrap { height: 1fr; }
     #filter_mgmt_left { width: 2fr; border: round $surface-lighten-1; padding: 0 1; }
     #filter_mgmt_right { width: 1fr; border: round $surface-lighten-1; padding: 0 1; }
+    #filter_mgmt_body { height: 1fr; }
     """
     BINDINGS = [
         ("up", "move_up", "Up"),
@@ -94,12 +96,13 @@ class FilterManageScreen(ModalScreen[str | None]):
         self.complete_head = ""
         self.complete_tail = ""
         self._skip_changed_resets = 0
+        self.list_scroll_offset = 0
 
     def compose(self) -> ComposeResult:
         with Vertical(id="filter_mgmt_box"):
             yield Static("[bold]Saved filters[/]")
             with Horizontal(id="filter_mgmt_body_wrap"):
-                with VerticalScroll(id="filter_mgmt_left"):
+                with Vertical(id="filter_mgmt_left"):
                     yield Input(
                         value=normalize_filter_expression(self.current_query),
                         placeholder="extra filter expression (!prop #tag tags=0 created<=2025 ...)",
@@ -117,6 +120,9 @@ class FilterManageScreen(ModalScreen[str | None]):
     def on_mount(self) -> None:
         self.query_one("#filter_mgmt_input", Input).focus()
         self._set_focus_section()
+        self._refresh()
+
+    def on_resize(self, _event: Resize) -> None:
         self._refresh()
 
     def _set_focus_section(self) -> None:
@@ -358,17 +364,36 @@ class FilterManageScreen(ModalScreen[str | None]):
             if t.startswith("@") and t[1:] in self.named
         }
         self.selected = set(selected_from_expr)
+        body = self.query_one("#filter_mgmt_body", Static)
         lines: list[str] = []
         if not self.names:
             lines.append("(no named filters)")
+            self.list_scroll_offset = 0
         else:
-            for i, name in enumerate(self.names):
-                cur = ">" if i == self.index else " "
+            if self.index < 0:
+                self.index = 0
+            elif self.index >= len(self.names):
+                self.index = len(self.names) - 1
+            offset, max_rows = compute_window(
+                total=len(self.names),
+                cursor=self.index,
+                current_offset=self.list_scroll_offset,
+                body_widget=body,
+                reserve_bottom_rows=1,
+            )
+            self.list_scroll_offset = offset
+            window = self.names[offset : offset + max_rows]
+            for i, name in enumerate(window):
+                absolute = offset + i
+                cur = ">" if absolute == self.index else " "
                 mark = "[x]" if name in self.selected else "[ ]"
                 expr = self.named.get(name, "")
                 preview = expr if len(expr) <= 64 else expr[:61] + "..."
                 lines.append(f"{cur} {mark} @{name}  ::  {preview}")
-        self.query_one("#filter_mgmt_body", Static).update("\n".join(lines))
+            hint = overflow_hint(len(self.names), offset, len(window))
+            if hint is not None:
+                lines.append(hint)
+        body.update("\n".join(lines))
         active_expr = self._composed_expr()
         resolved = resolve_named_filters_for_display(active_expr)
         pred, err = compile_filter_expr(active_expr)

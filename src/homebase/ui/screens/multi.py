@@ -2,15 +2,17 @@ from __future__ import annotations
 
 from textual.app import ComposeResult
 from textual.containers import Vertical
+from textual.events import Resize
 from textual.widgets import Static
 
 from ...core.constants import ACTION_ACCEPT, ACTION_CANCEL
 from .base import LargeModalScreen
+from .listwin import compute_window, overflow_hint
 
 
 class MultiChoiceScreen(LargeModalScreen[set[str] | None]):
     CSS = """
-    MultiChoiceScreen #choice_body { height: 1fr; overflow-y: auto; }
+    MultiChoiceScreen #choice_body { height: 1fr; }
     """
     BINDINGS = [
         ("up", "move_up", "Up"),
@@ -30,6 +32,7 @@ class MultiChoiceScreen(LargeModalScreen[set[str] | None]):
         self.title = title
         self.options = options
         self.index = 0
+        self.list_scroll_offset = 0
         self.selected: set[str] = set(selected or set())
 
     def compose(self) -> ComposeResult:
@@ -48,13 +51,30 @@ class MultiChoiceScreen(LargeModalScreen[set[str] | None]):
     def on_mount(self) -> None:
         self._refresh_body()
 
+    def on_resize(self, _event: Resize) -> None:
+        self._refresh_body()
+
     def _refresh_body(self) -> None:
-        lines = []
-        for i, (key, label) in enumerate(self.options):
-            prefix = ">" if i == self.index else " "
+        body = self.query_one("#choice_body", Static)
+        offset, max_rows = compute_window(
+            total=len(self.options),
+            cursor=self.index,
+            current_offset=self.list_scroll_offset,
+            body_widget=body,
+            reserve_bottom_rows=1,
+        )
+        self.list_scroll_offset = offset
+        window = self.options[offset : offset + max_rows]
+        lines: list[str] = []
+        for i, (key, label) in enumerate(window):
+            absolute = offset + i
+            prefix = ">" if absolute == self.index else " "
             mark = "[x]" if key in self.selected else "[ ]"
             lines.append(f"{prefix} {mark} {label}")
-        self.query_one("#choice_body", Static).update("\n".join(lines))
+        hint = overflow_hint(len(self.options), offset, len(window))
+        if hint is not None:
+            lines.append(hint)
+        body.update("\n".join(lines))
 
     def action_move_up(self) -> None:
         if not self.options:

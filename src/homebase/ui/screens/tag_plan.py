@@ -6,7 +6,7 @@ from typing import Callable
 from rich.markup import escape as rich_escape
 from textual.app import ComposeResult
 from textual.containers import Vertical
-from textual.events import Key
+from textual.events import Key, Resize
 from textual.widgets import Static
 
 from ...config.tag_rules import resolve_for_display
@@ -19,11 +19,12 @@ from ...core.constants import (
 from . import tag_tree as tag_tree_view
 from .base import LargeModalScreen
 from .basic import ConfirmScreen, InputScreen
+from .listwin import compute_window, overflow_hint
 
 
 class TagPlanScreen(LargeModalScreen[dict[str, str] | None]):
     CSS = """
-    TagPlanScreen #tag_list { height: 1fr; overflow-y: auto; }
+    TagPlanScreen #tag_list { height: 1fr; }
     TagPlanScreen #tag_help { height: 5; color: $text-muted; }
     TagPlanScreen #tag_status { height: 1; }
     """
@@ -67,6 +68,7 @@ class TagPlanScreen(LargeModalScreen[dict[str, str] | None]):
         self.filter_text = ""
         self.status_text = ""
         self.index = 0
+        self.list_scroll_offset = 0
         self._tree: tag_tree_view.TagTreeView | None = None
         self._rebuild_tree()
         self._cached_rows: list[tag_tree_view.TreeRow] = []
@@ -179,6 +181,9 @@ class TagPlanScreen(LargeModalScreen[dict[str, str] | None]):
     def on_mount(self) -> None:
         self._refresh_body()
 
+    def on_resize(self, _event: Resize) -> None:
+        self._refresh_body()
+
     def _legend_text(self) -> str:
         return (
             f"legend mark: [white]\\[=][/] keep "
@@ -268,18 +273,24 @@ class TagPlanScreen(LargeModalScreen[dict[str, str] | None]):
 
         self._snap_cursor_to_selectable()
 
-        # Render every row at once. The previous implementation
-        # windowed by the measured widget height and fell back to a
-        # fixed 18-row cap when the widget hadn't been sized yet —
-        # that's the "only 20 visible on first paint" bug. Letting
-        # the Static hold the full list defers any clipping decision
-        # to Textual's layout, which already knows how much room the
-        # modal actually has.
+        body = self.query_one("#tag_list", Static)
+        offset, max_rows = compute_window(
+            total=len(rows),
+            cursor=self.index,
+            current_offset=self.list_scroll_offset,
+            body_widget=body,
+            reserve_bottom_rows=1,
+        )
+        self.list_scroll_offset = offset
+        window = rows[offset : offset + max_rows]
         lines = [
-            self._format_row(row, is_cursor=idx == self.index)
-            for idx, row in enumerate(rows)
+            self._format_row(row, is_cursor=offset + i == self.index)
+            for i, row in enumerate(window)
         ]
-        self.query_one("#tag_list", Static).update("\n".join(lines))
+        hint = overflow_hint(len(rows), offset, len(window))
+        if hint is not None:
+            lines.append(hint)
+        body.update("\n".join(lines))
         self.query_one("#tag_help", Static).update(self._legend_text())
         self.query_one("#tag_status", Static).update(self.status_text)
 

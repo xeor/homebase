@@ -10,11 +10,12 @@ from textual.widgets import Static
 
 from ...core.constants import ACTION_ACCEPT, ACTION_CANCEL
 from .base import LargeModalScreen
+from .listwin import compute_window, overflow_hint
 
 
 class SingleChoiceScreen(LargeModalScreen[str | None]):
     CSS = """
-    SingleChoiceScreen #choice_body { height: 1fr; overflow-y: auto; }
+    SingleChoiceScreen #choice_body { height: 1fr; }
     """
     BINDINGS = [
         ("up", "move_up", "Up"),
@@ -33,6 +34,7 @@ class SingleChoiceScreen(LargeModalScreen[str | None]):
         self.title = title
         self.options = options
         self.index = 0
+        self.list_scroll_offset = 0
         self._ensure_valid_index()
 
     def _is_header(self, idx: int) -> bool:
@@ -72,15 +74,32 @@ class SingleChoiceScreen(LargeModalScreen[str | None]):
     def on_mount(self) -> None:
         self._refresh_body()
 
+    def on_resize(self, _event: Resize) -> None:
+        self._refresh_body()
+
     def _refresh_body(self) -> None:
-        lines = []
-        for i, (_k, label) in enumerate(self.options):
-            if self._is_header(i):
+        body = self.query_one("#choice_body", Static)
+        offset, max_rows = compute_window(
+            total=len(self.options),
+            cursor=self.index,
+            current_offset=self.list_scroll_offset,
+            body_widget=body,
+            reserve_bottom_rows=1,
+        )
+        self.list_scroll_offset = offset
+        window = self.options[offset : offset + max_rows]
+        lines: list[str] = []
+        for i, (_k, label) in enumerate(window):
+            absolute = offset + i
+            if self._is_header(absolute):
                 lines.append(f"  {label}")
                 continue
-            prefix = ">" if i == self.index else " "
+            prefix = ">" if absolute == self.index else " "
             lines.append(f"{prefix} {label}")
-        self.query_one("#choice_body", Static).update("\n".join(lines))
+        hint = overflow_hint(len(self.options), offset, len(window))
+        if hint is not None:
+            lines.append(hint)
+        body.update("\n".join(lines))
 
     def action_move_up(self) -> None:
         if not self.options:
@@ -199,48 +218,32 @@ class FuzzyChoiceScreen(LargeModalScreen[str | None]):
             f"filter: {self.filter_text or '(all)'}"
         )
         visible = self._visible_options()
+        body = self.query_one("#choice_picker_body", Static)
         lines: list[str] = []
         if not visible:
             self.index = 0
             self.list_scroll_offset = 0
             lines.append("(no files match current filter)")
-            self.query_one("#choice_picker_body", Static).update("\n".join(lines))
+            body.update("\n".join(lines))
             return
-
-        if self.index >= len(visible):
-            self.index = len(visible) - 1
-        if self.index < 0:
-            self.index = 0
-
-        max_rows = self._max_rows()
-        max_offset = max(0, len(visible) - max_rows)
-        if self.list_scroll_offset > max_offset:
-            self.list_scroll_offset = max_offset
-        if self.index < self.list_scroll_offset:
-            self.list_scroll_offset = self.index
-        elif self.index >= self.list_scroll_offset + max_rows:
-            self.list_scroll_offset = self.index - max_rows + 1
-
-        window = visible[self.list_scroll_offset : self.list_scroll_offset + max_rows]
+        offset, max_rows = compute_window(
+            total=len(visible),
+            cursor=self.index,
+            current_offset=self.list_scroll_offset,
+            body_widget=body,
+            reserve_bottom_rows=1,
+        )
+        self.list_scroll_offset = offset
+        self.index = min(max(self.index, 0), len(visible) - 1)
+        window = visible[offset : offset + max_rows]
         for i, (_key, label) in enumerate(window):
-            absolute_i = self.list_scroll_offset + i
+            absolute_i = offset + i
             cursor = ">" if absolute_i == self.index else " "
             lines.append(f"{cursor} {label}")
-        if len(visible) > max_rows:
-            start = self.list_scroll_offset + 1
-            end = self.list_scroll_offset + len(window)
-            lines.append(f"[dim]showing {start}-{end} of {len(visible)}[/]")
-        self.query_one("#choice_picker_body", Static).update("\n".join(lines))
-
-    def _max_rows(self) -> int:
-        body = self.query_one("#choice_picker_body", Static)
-        try:
-            h = int(body.size.height)
-        except (TypeError, ValueError):
-            h = 0
-        if h <= 2:
-            return 14
-        return max(6, h - 1)
+        hint = overflow_hint(len(visible), offset, len(window))
+        if hint is not None:
+            lines.append(hint)
+        body.update("\n".join(lines))
 
     def action_move_up(self) -> None:
         visible = self._visible_options()
