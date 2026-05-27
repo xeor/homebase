@@ -49,6 +49,7 @@ uv run b help              # full subcommand list
 uv run b new               # new-project wizard
 uv run b archive mv .      # archive current dir
 uv run b benchmark run # synthetic perf bench
+uv run b example generate --path /tmp/demo  # throwaway demo base
 uv run b c tmp         # quick-create from template key
 uv run b c tmp --debug # preview actions, no changes
 uv run b completion bash > ~/.local/share/bash-completion/completions/b
@@ -62,6 +63,17 @@ Shell completion:
 - Dynamic completion offers source keys (`b new --as <tab>`),
   templates (`b new --template <tab>`), and project names
   (`b cd <tab>`, `b rm <tab>`).
+
+## Demo / example workspace
+
+```sh
+b example generate --path /tmp/demo
+BASE_FOLDER=/tmp/demo b
+```
+
+Generates a throwaway base folder full of random projects, git
+repos, worktrees, and an archive — plus a showcase `.homebase/config.yaml`.
+For screenshots, trying things out, demos. See [`docs/example.md`](docs/example.md).
 
 ## Worktrees
 
@@ -218,6 +230,7 @@ References:
 - `docs/actions.md`
 - `docs/hooks.md`
 - `docs/kitchen-sink-config.md`
+- `docs/example.md`
 
 Most used top-level sections:
 

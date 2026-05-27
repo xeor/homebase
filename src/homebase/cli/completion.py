@@ -20,6 +20,7 @@ _TOP_LEVEL_COMMANDS = [
     "tmux",
     "benchmark",
     "test",
+    "example",
     "completion",
     "shell-init",
 ]
@@ -248,6 +249,14 @@ def _subcommand_candidates(
                 return _regression_case_names()
             return ["--list", "--case"]
         return ["--comment", "--keep-basefolder"]
+    if cmd == "example":
+        if prev == "--path":
+            return _dir_candidates(token, cwd)
+        if cword == 2:
+            return ["generate"]
+        if len(words) >= 2 and words[1] == "generate":
+            return ["--path", "--count", "--seed"]
+        return []
     if cmd == "completion":
         return ["bash", "zsh", "fish"]
     return []

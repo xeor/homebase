@@ -174,6 +174,38 @@ def test_completion_candidates_support_named_filters(monkeypatch) -> None:
     assert out == ["hot"]
 
 
+def test_completion_includes_example_top_level() -> None:
+    out = cli_completion.completion_candidates([""], 1, base_dir=Path("."))
+    assert "example" in out
+
+
+def test_completion_example_lists_generate_subcommand() -> None:
+    out = cli_completion.completion_candidates(["example", ""], 2, base_dir=Path("."))
+    assert out == ["generate"]
+
+
+def test_completion_example_generate_lists_flags() -> None:
+    out = cli_completion.completion_candidates(
+        ["example", "generate", ""], 3, base_dir=Path("."),
+    )
+    assert out == ["--count", "--path", "--seed"]
+
+
+def test_completion_example_path_completes_dirs(tmp_path: Path) -> None:
+    (tmp_path / "alpha").mkdir()
+    (tmp_path / "beta").mkdir()
+    (tmp_path / "stray.txt").write_text("x")
+    out = cli_completion.completion_candidates(
+        ["example", "generate", "--path", ""],
+        4,
+        base_dir=Path("."),
+        cwd=tmp_path,
+    )
+    assert "alpha/" in out
+    assert "beta/" in out
+    assert not any(c.endswith("stray.txt") for c in out)
+
+
 def test_completion_candidates_support_regression_case_values(monkeypatch) -> None:
     monkeypatch.setattr(
         cli_completion,
