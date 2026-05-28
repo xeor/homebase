@@ -47,6 +47,69 @@ class ConfirmScreen(LargeModalScreen[bool]):
         self.dismiss(False)
 
 
+class ResultScreen(LargeModalScreen[None]):
+    """Modal that summarises the outcome of an operation. Use this
+    after a synchronous action so the user actually sees what
+    happened (logs alone aren't visible unless the Events tab is
+    open).
+    """
+
+    CSS = """
+    ResultScreen #modal_box { border: round $success; }
+    ResultScreen #result_context {
+        color: $warning;
+        margin: 1 0;
+    }
+    ResultScreen #result_details {
+        height: 1fr;
+        overflow-y: auto;
+    }
+    """
+    BINDINGS = [
+        ("enter", "close", "Close"),
+        ("space", "close", "Close"),
+        ("escape", "close", "Close"),
+        ("q", "close", "Close"),
+    ]
+
+    def __init__(
+        self,
+        title: str,
+        summary: str,
+        details: str,
+        *,
+        level: str = "info",
+    ) -> None:
+        super().__init__()
+        self.title = title
+        self.summary = summary
+        self.details = details
+        self.level = level if level in {"info", "warn", "error"} else "info"
+
+    def compose(self) -> ComposeResult:
+        title_color = {
+            "info": "green",
+            "warn": "yellow",
+            "error": "red",
+        }[self.level]
+        with Vertical(id="modal_box"):
+            yield Static(f"[bold {title_color}]{self.title}[/]")
+            if self.summary:
+                yield Static(self.summary, id="result_context")
+            yield Static(self.details or "", id="result_details")
+            yield self.hotkey_footer(
+                [
+                    ("enter", "close"),
+                    ("space", "close"),
+                    ("esc", "close"),
+                    ("q", "close"),
+                ]
+            )
+
+    def action_close(self) -> None:
+        self.dismiss(None)
+
+
 class RuntimeErrorScreen(BaseModalScreen[None]):
     CSS = """
     RuntimeErrorScreen #modal_box { border: round $error; }

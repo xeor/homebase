@@ -153,3 +153,55 @@ def test_audit_flags_worktree_dir_missing_base_yaml(tmp_path: Path) -> None:
     issues = audit_workspace(tmp_path)
     kinds = {i.kind for i in issues}
     assert ISSUE_ORPHAN_ADMIN in kinds
+
+
+def test_repair_orphan_admin_target_missing(tmp_path: Path) -> None:
+    """`git worktree prune` clears entries whose target is gone (case B)."""
+    _init_project_repo(tmp_path, "foo")
+    assert _run_new(tmp_path, tmp_path, ["featx", "--as", "worktree", "--from", "foo"]) == 0
+    shutil.rmtree(tmp_path / "foo-featx")
+
+    orphans = [i for i in audit_workspace(tmp_path) if i.kind == ISSUE_ORPHAN_ADMIN]
+    assert orphans
+    ok, _detail = repair_issue(orphans[0])
+    assert ok
+    follow_up = [i for i in audit_workspace(tmp_path) if i.kind == ISSUE_ORPHAN_ADMIN]
+    assert follow_up == []
+
+
+def test_repair_orphan_admin_target_alive_drops_admin_entry(tmp_path: Path) -> None:
+    """Case A: target still exists but isn't a homebase worktree, so
+    `git worktree prune` is a no-op. Repair must fall back to direct
+    removal of the admin entry — otherwise it lies "ok" while the
+    issue keeps reappearing on the next audit.
+    """
+    _init_project_repo(tmp_path, "foo")
+    assert _run_new(tmp_path, tmp_path, ["featx", "--as", "worktree", "--from", "foo"]) == 0
+    (tmp_path / "foo-featx" / ".base.yaml").unlink()
+
+    orphans = [i for i in audit_workspace(tmp_path) if i.kind == ISSUE_ORPHAN_ADMIN]
+    assert orphans
+    issue = orphans[0]
+    assert issue.admin_entry is not None
+    assert issue.admin_entry.exists()
+
+    ok, detail = repair_issue(issue)
+    assert ok, f"repair should succeed, got: {detail}"
+    assert not issue.admin_entry.exists(), "admin entry must be removed"
+    follow_up = [i for i in audit_workspace(tmp_path) if i.kind == ISSUE_ORPHAN_ADMIN]
+    assert follow_up == [], "issue must not reappear on next audit"
+
+
+def test_repair_orphan_admin_does_not_touch_worktree_directory(tmp_path: Path) -> None:
+    """When dropping a case-A admin entry, the worktree dir on disk
+    must be left alone — the user may want to keep it as a plain
+    folder."""
+    _init_project_repo(tmp_path, "foo")
+    assert _run_new(tmp_path, tmp_path, ["featx", "--as", "worktree", "--from", "foo"]) == 0
+    wt_dir = tmp_path / "foo-featx"
+    (wt_dir / ".base.yaml").unlink()
+    (wt_dir / "keep.txt").write_text("important\n", encoding="utf-8")
+
+    orphans = [i for i in audit_workspace(tmp_path) if i.kind == ISSUE_ORPHAN_ADMIN]
+    repair_issue(orphans[0])
+    assert (wt_dir / "keep.txt").read_text() == "important\n"

@@ -94,9 +94,13 @@ def refresh_side(app: Any, *, base_dir: Path, color_accent_hex: str, level_warn:
                         prefix = "[bold yellow]WRN[/]"
                     else:
                         prefix = f"[bold {color_accent_hex}]INF[/]"
+                    msg_lines = str(msg).split("\n")
+                    head = msg_lines[0]
                     lines.append(
-                        f"[dim]{ts} ({fmt_age_short_from_iso(ts)})[/] {prefix} {app._esc(msg)}"
+                        f"[dim]{ts} ({fmt_age_short_from_iso(ts)})[/] {prefix} {app._esc(head)}"
                     )
+                    for cont in msg_lines[1:]:
+                        lines.append(f"[dim]    {app._esc(cont)}[/]")
             else:
                 lines.append("[dim]no recent events[/]")
     elif app.side_main_tab == "settings":

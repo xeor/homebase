@@ -172,10 +172,13 @@ def valid_action_items(
         scope = meta.scope if meta is not None else "target"
         if scope == "target" and not targets:
             continue
+        ready_suffix = ""
         if scope == "target" and key in {"archive", "restore", "pack", "unpack", "toggle_pack", "delete"}:
-            runnable, _skipped = app._preflight_bulk_action(key, [r.path for r in targets])
+            runnable, skipped = app._preflight_bulk_action(key, [r.path for r in targets])
             if not runnable:
                 continue
+            if skipped:
+                ready_suffix = f" [dim]({len(runnable)}/{len(targets)} ready)[/]"
         if key == "deworktree":
             # Only valid when at least one target row is a worktree.
             if not any(getattr(r, "worktree_of", "") for r in targets):
@@ -193,7 +196,7 @@ def valid_action_items(
             repo_subdir = (row.path / row.repo_dir) if row.repo_dir else None
             if repo_subdir is None or not (repo_subdir / ".git").exists():
                 continue
-        out.append((key, f"[white]{label}[/]"))
+        out.append((key, f"[white]{label}[/]{ready_suffix}"))
 
     if targets:
         out.append(("rename_item", f"[white]{builtin_label('rename_item', 'Rename item...')}[/]"))

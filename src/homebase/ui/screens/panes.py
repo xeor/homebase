@@ -177,7 +177,7 @@ class PaneChoiceScreen(LargeModalScreen[str | None]):
         lines: list[str] = []
 
         def esc(value: str) -> str:
-            return value.replace("[", "\\[").replace("]", "\\]")
+            return value.replace("[", "\\[")
 
         def trunc(value: str, width: int) -> str:
             text = value.strip()

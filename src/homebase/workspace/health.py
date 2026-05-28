@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -30,6 +31,7 @@ class WorktreeIssue:
     detail: str
     fix_summary: str
     parent_path: Path | None = None
+    admin_entry: Path | None = None
 
 
 def audit_workspace(base_dir: Path) -> list[WorktreeIssue]:
@@ -263,8 +265,9 @@ def _audit_parent_admin(
                         f"admin entry {entry} points at {target_path} but no "
                         ".base.yaml — not a managed homebase worktree"
                     ),
-                    fix_summary="prune via git worktree prune or drop the admin entry",
+                    fix_summary="drop the admin entry (git prune leaves it because target still exists)",
                     parent_path=_project_repo(parent),
+                    admin_entry=entry,
                 )
             )
             continue
@@ -288,6 +291,7 @@ def _audit_parent_admin(
                     detail=f"admin entry at {entry} has no matching row and no live path",
                     fix_summary="prune via git worktree prune",
                     parent_path=_project_repo(parent),
+                    admin_entry=entry,
                 )
             )
     return issues
@@ -341,6 +345,7 @@ def _repair_via_prune(issue: WorktreeIssue) -> tuple[bool, str]:
     parent_repo = issue.parent_path
     if parent_repo is None or not parent_repo.is_dir():
         return False, "parent_path missing"
+    admin_entry = issue.admin_entry
     try:
         proc = subprocess.run(
             ["git", "-C", str(parent_repo), "worktree", "prune"],
@@ -352,7 +357,32 @@ def _repair_via_prune(issue: WorktreeIssue) -> tuple[bool, str]:
         return False, f"git worktree prune failed: {exc}"
     if proc.returncode != 0:
         return False, (proc.stderr or proc.stdout or "").strip()
-    return True, "git worktree prune applied"
+
+    # `git worktree prune` only deletes admin entries whose target path
+    # no longer exists. If the orphan admin still points at a live
+    # directory (case A: target exists but isn't a homebase worktree),
+    # prune silently leaves it in place. Verify and fall back to a
+    # direct removal of the admin entry so we don't lie about success.
+    if admin_entry is None:
+        return True, "git worktree prune applied"
+    if not admin_entry.exists():
+        return True, "git worktree prune applied"
+    try:
+        shutil.rmtree(admin_entry)
+    except OSError as exc:
+        return (
+            False,
+            (
+                f"git worktree prune left admin entry {admin_entry} in place "
+                f"(target path likely still exists); direct removal failed: {exc}"
+            ),
+        )
+    if admin_entry.exists():
+        return (
+            False,
+            f"admin entry {admin_entry} still present after prune and direct removal",
+        )
+    return True, f"removed orphan admin entry {admin_entry}"
 
 
 def list_workspace_parents(base_dir: Path) -> list[Path]:

@@ -34,26 +34,21 @@ class ActionPickerScreen(LargeModalScreen[str | None]):
 
     def __init__(
         self,
-        button_actions: list[tuple[str, str]],
-        target_actions: list[tuple[str, str]],
-        global_actions: list[tuple[str, str]],
+        tabs: list[tuple[str, str, list[tuple[str, str]]]],
+        *,
+        default_tab: str | None = None,
     ) -> None:
         super().__init__()
-        self.tabs: list[tuple[str, str]] = []
-        if button_actions:
-            self.tabs.append(("buttons", "Buttons"))
-        self.tabs.extend(
-            [
-                ("target", "Target"),
-                ("global", "Global"),
-            ]
-        )
+        self.tabs: list[tuple[str, str]] = [(key, label) for key, label, _ in tabs]
         self.actions_by_tab: dict[str, list[tuple[str, str]]] = {
-            "buttons": button_actions,
-            "target": target_actions,
-            "global": global_actions,
+            key: list(items) for key, _label, items in tabs
         }
-        self.active_tab = "buttons" if button_actions else "target"
+        if default_tab and default_tab in self.actions_by_tab:
+            self.active_tab = default_tab
+        elif self.tabs:
+            self.active_tab = self.tabs[0][0]
+        else:
+            self.active_tab = ""
         self.filter_text = ""
         self.index = 0
         self.list_scroll_offset = 0

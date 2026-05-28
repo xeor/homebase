@@ -119,7 +119,7 @@ class RenameInputScreen(LargeModalScreen[str | None]):
         self.dismiss(None)
 
     def _esc(self, text: object) -> str:
-        return str(text).replace("[", "\\[").replace("]", "\\]")
+        return str(text).replace("[", "\\[")
 
     def _refresh(self, raw: str) -> None:
         name = raw.strip()

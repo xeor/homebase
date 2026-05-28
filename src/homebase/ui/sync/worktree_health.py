@@ -177,17 +177,35 @@ def dismiss_worktree_health(app: Any) -> None:
 
 
 def action_fix_worktrees(app: Any) -> None:
+    """Entry from the action picker. Shows a confirm modal with the
+    list of issues, then runs the fix and shows a result modal."""
     issues = audit_workspace(app.base_dir)
     if not issues:
         app._log("worktree health: clean", "info")
         app.worktree_health_issues = []
         _paint_banner(app)
+        _show_clean_result(app)
+        return
+
+    title = f"Confirm worktree fix: {len(issues)} issue(s)"
+    details = _format_issue_list(issues)
+    app.push_screen(
+        app._confirm_screen_cls(title, details),
+        lambda ok: _on_confirm_fix(app, ok, issues),
+    )
+
+
+def _on_confirm_fix(app: Any, ok: bool | None, issues: list) -> None:
+    if not ok:
+        app._log("worktree fix cancelled", "warn")
         return
     applied = 0
     failed = 0
+    per_issue: list[tuple[str, bool, str]] = []
     for issue in issues:
-        ok, detail = repair_issue(issue)
-        if ok:
+        ok_fix, detail = repair_issue(issue)
+        per_issue.append((f"{issue.kind} {issue.path}", ok_fix, detail))
+        if ok_fix:
             applied += 1
         else:
             failed += 1
@@ -199,12 +217,96 @@ def action_fix_worktrees(app: Any) -> None:
         )
     else:
         app._log(f"worktree fix applied {applied}", "info")
+
     refreshed = [_issue_to_dict(issue) for issue in audit_workspace(app.base_dir)]
     cache_save_worktree_health(app.base_dir, int(time.time()), refreshed)
     app.worktree_health_issues = refreshed
     app.worktree_health_last_scan_ts = int(time.time())
     app.worktree_health_dismissed = False
     _paint_banner(app)
+    _show_fix_result(
+        app,
+        applied=applied,
+        failed=failed,
+        per_issue=per_issue,
+        remaining=len(refreshed),
+    )
+
+
+def _format_issue_list(issues: list) -> str:
+    lines: list[str] = [
+        f"[bold]About to repair {len(issues)} worktree health issue(s).[/]",
+        "",
+    ]
+    for issue in issues:
+        kind = getattr(issue, "kind", "unknown")
+        path = str(getattr(issue, "path", ""))
+        detail = str(getattr(issue, "detail", "") or "").strip()
+        fix_summary = str(getattr(issue, "fix_summary", "") or "").strip()
+        lines.append(f"[yellow]\\[{kind}][/] {path}")
+        if detail:
+            lines.append(f"    [dim]issue:[/] {detail}")
+        if fix_summary:
+            lines.append(f"    [dim]fix:[/]   {fix_summary}")
+    lines.append("")
+    lines.append("[dim]Some repairs may take a moment.[/]")
+    return "\n".join(lines)
+
+
+def _show_fix_result(
+    app: Any,
+    *,
+    applied: int,
+    failed: int,
+    per_issue: list[tuple[str, bool, str]],
+    remaining: int,
+) -> None:
+    level = "info"
+    if failed and not applied:
+        level = "error"
+    elif failed:
+        level = "warn"
+    title = f"Worktree fix: {applied} applied, {failed} failed"
+    parts: list[str] = [
+        f"applied: {applied}",
+        f"failed:  {failed}",
+        f"remaining issues after fix: {remaining}",
+    ]
+    summary = " · ".join(parts)
+    detail_lines: list[str] = []
+    for label, ok, detail in per_issue:
+        marker = "[green]ok[/]" if ok else "[red]fail[/]"
+        line = f"{marker} {label}"
+        if detail:
+            line += f" — {detail}"
+        detail_lines.append(line)
+    details = "\n".join(detail_lines)
+    _push_result_screen(app, title, summary, details, level)
+    notifier = getattr(app, "notify", None)
+    if callable(notifier):
+        severity = "information" if level == "info" else "warning" if level == "warn" else "error"
+        notifier(title, severity=severity)
+
+
+def _show_clean_result(app: Any) -> None:
+    title = "Worktree fix: nothing to do"
+    summary = "audit found no issues to repair"
+    _push_result_screen(app, title, summary, "", "info")
+    notifier = getattr(app, "notify", None)
+    if callable(notifier):
+        notifier("worktree health: clean", severity="information")
+
+
+def _push_result_screen(
+    app: Any, title: str, summary: str, details: str, level: str
+) -> None:
+    screen_cls = getattr(app, "_result_screen_cls", None)
+    if screen_cls is None:
+        return
+    try:
+        app.push_screen(screen_cls(title, summary, details, level=level))
+    except WIDGET_API_ERRORS:
+        return
 
 
 def _paint_banner(app: Any) -> None:
@@ -225,7 +327,7 @@ def _paint_banner(app: Any) -> None:
     breakdown = ", ".join(f"{k}:{n}" for k, n in sorted(kinds.items()))
     banner.update(
         f"⚠ worktree health: {len(issues)} issue(s) [{breakdown}] — "
-        f"run 'b fix-worktrees --apply'  ·  ctrl+x to dismiss"
+        f"open Actions (ctrl+a) → Notifications  ·  ctrl+x to dismiss"
     )
     banner.add_class("visible")
 
@@ -236,11 +338,17 @@ def _announce(app: Any, issues: list[dict[str, object]]) -> None:
         key = str(issue.get("kind", "unknown"))
         kinds[key] = kinds.get(key, 0) + 1
     breakdown = ", ".join(f"{kind}:{count}" for kind, count in sorted(kinds.items()))
-    msg = (
+    lines = [
         f"worktree health: {len(issues)} issue(s) [{breakdown}] — "
-        f"run 'b fix-worktrees --apply'"
-    )
-    app._log(msg, "warn")
+        f"open Actions (ctrl+a) → Notifications → 'Fix worktree health'"
+    ]
+    for issue in issues:
+        kind = str(issue.get("kind", "unknown"))
+        path = str(issue.get("path", "")) or "(no path)"
+        detail = str(issue.get("detail", "")).strip()
+        suffix = f": {detail}" if detail else ""
+        lines.append(f"  - [{kind}] {path}{suffix}")
+    app._log("\n".join(lines), "warn")
 
 
 __all__ = [

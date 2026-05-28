@@ -19,7 +19,7 @@ _KNOWN_STRUCTURED_KEYS: frozenset[str] = frozenset(
 
 
 def _esc_default(text: str) -> str:
-    return text.replace("[", "\\[").replace("]", "\\]")
+    return text.replace("[", "\\[")
 
 
 def _render_query_with_cursor(
@@ -215,7 +215,7 @@ def refresh_search_display(
     disp_right = app.query_one("#global_meta_right", Static)
 
     def esc(text: str) -> str:
-        return text.replace("[", "\\[").replace("]", "\\]")
+        return text.replace("[", "\\[")
 
     app._normalize_query_cursor()
     if app.query:

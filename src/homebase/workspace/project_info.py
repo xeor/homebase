@@ -35,7 +35,7 @@ def build_project_info_text(
     cached_meta_health: tuple[str, str] | None = None,
 ) -> str:
     def esc(value: object) -> str:
-        return str(value).replace("[", "\\[").replace("]", "\\]")
+        return str(value).replace("[", "\\[")
 
     def clean(value: object) -> str:
         text = str(value).strip()
