@@ -71,8 +71,8 @@ def notes_template_context(
         "PACKED": "1" if row.packed else "0",
         "RESTORE_TARGET": restore_to,
         "CREATED": row.created,
-        "LAST_MODIFIED": row.last,
-        "LAST_OPENED": fmt_ymd(row.opened_ts) if row.opened_ts > 0 else "",
+        "MODIFIED": row.last,
+        "ACTIVE": fmt_ymd(row.opened_ts) if row.opened_ts > 0 else "",
     }
     for key, value in list(out.items()):
         out[key.lower()] = value

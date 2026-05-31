@@ -35,7 +35,7 @@ def _target(path: Path) -> HookTarget:
         suffix=None,
         packed=False,
         base_meta={},
-        last_modified_ts=0,
+        modified_ts=0,
         created_ts=0,
         archived_ts=0,
         git_branch="",

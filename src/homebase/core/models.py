@@ -244,7 +244,7 @@ class HookTarget:
     suffix: str | None
     packed: bool
     base_meta: dict[str, object]
-    last_modified_ts: int
+    modified_ts: int
     created_ts: int
     archived_ts: int
     git_branch: str

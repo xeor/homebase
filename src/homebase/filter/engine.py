@@ -115,7 +115,7 @@ def compile_filter_expr(
     def row_ts(row: Any, field: str) -> int:
         if field == "created":
             return int(getattr(row, "created_ts", 0))
-        if field == "opened":
+        if field == "active":
             return int(getattr(row, "opened_ts", 0))
         return int(getattr(row, "last_ts", 0))
 
@@ -212,29 +212,31 @@ def compile_filter_expr(
 
         return build
 
+    def _make_count_builder(field: str) -> StructuredTermBuilder:
+        def build(op: str, value: str) -> tuple[str | None, Callable[[Any], bool] | None]:
+            if not re.fullmatch(r"\d+", value):
+                return f"invalid value for :{field}: {value!r}", None
+            rhs = int(value)
+
+            def lhs(row: Any) -> int:
+                return len(getattr(row, field, []))
+
+            return None, (lambda row: compare_int(lhs(row), op, rhs))
+
+        return build
+
     structured_builders: dict[str, StructuredTermBuilder] = {
         "created": _make_time_builder("created"),
-        "opened": _make_time_builder("opened"),
-        "last": _make_time_builder("last"),
+        "modified": _make_time_builder("modified"),
+        "active": _make_time_builder("active"),
+        "tags": _make_count_builder("tags"),
+        "properties": _make_count_builder("properties"),
     }
     if extra_term_builders:
         structured_builders.update(extra_term_builders)
 
     def term_pred(token: str) -> Callable[[Any], bool]:
         low = token.lower()
-
-        m_count = re.match(r"^(tags|props|properties)(<=|>=|!=|=|<|>)(\d+)$", low)
-        if m_count:
-            field = m_count.group(1)
-            op = m_count.group(2)
-            rhs = int(m_count.group(3))
-
-            def lhs(row: Any) -> int:
-                if field == "tags":
-                    return len(getattr(row, "tags", []))
-                return len(getattr(row, "properties", []))
-
-            return lambda row: compare_int(lhs(row), op, rhs)
 
         m_struct = STRUCTURED_TERM_RE.match(low)
         if m_struct:
@@ -343,8 +345,6 @@ def query_uses_filter_syntax(text: str) -> bool:
         return True
     ql = q.lower()
     if re.search(r"(^|\s):[a-z][a-z0-9-]*(=|!=|<=|>=|<|>|~)", ql):
-        return True
-    if re.search(r"\b(tags|props|properties)(<=|>=|!=|=|<|>)\d+\b", ql):
         return True
     if re.search(r"\bOR\b", q, flags=re.IGNORECASE):
         return True

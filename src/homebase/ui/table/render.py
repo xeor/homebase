@@ -65,10 +65,12 @@ def refresh_table(
             col_width = int(col.get("width", 12) or 12)
         except (TypeError, ValueError):
             col_width = 12
+        cid = str(col.get("id", "")).strip()
+        label = str(col.get("label", "")) if "label" in col else cid.upper()
         col_sig_parts.append(
             (
-                str(col.get("id", "")).strip(),
-                str(col.get("label", "")),
+                cid,
+                label,
                 bool(col.get("enabled", True)),
                 col_width,
             )
@@ -361,9 +363,9 @@ def refresh_table(
             "mark": mark,
             "name": name_cell,
             "git": git_cell,
-            "last_modified": row.last,
+            "modified": row.last,
             "created": row.created,
-            "last_opened": fmt_ymd(row.opened_ts) if row.opened_ts > 0 else "-",
+            "active": fmt_ymd(row.opened_ts) if row.opened_ts > 0 else "-",
             "properties": prop_cell,
             "tags": _tag_cell(row.tags, width_by_id.get("tags", 24)),
             "description": Text(
@@ -376,8 +378,8 @@ def refresh_table(
 
         date_styles = {
             "created": _date_color_for("created", int(row.created_ts)),
-            "last_modified": _date_color_for("last_modified", int(row.last_ts)),
-            "last_opened": _date_color_for("last_opened", int(row.opened_ts)),
+            "modified": _date_color_for("modified", int(row.last_ts)),
+            "active": _date_color_for("active", int(row.opened_ts)),
             "archived_at": _date_color_for("archived_at", int(row.archived_ts)),
         }
         for cid, style in date_styles.items():

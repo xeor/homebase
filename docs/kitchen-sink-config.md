@@ -22,11 +22,11 @@ archive:
 filters:
   saved:
     - "#wip"
-    - "tags=0"
-    - ":last=@-7d"
+    - ":tags=0"
+    - ":modified=@-7d"
   named:
     hot: "#cli OR #api"
-    stale: ":last<=@-60d"
+    stale: ":modified<=@-60d"
 
 # Dynamic property badges on project rows.
 properties:
@@ -530,7 +530,7 @@ table:
         # Shared baseline for both views.
         # Same meaning everywhere:
         # blue = new, green = fresh, yellow = aging, orange = old, red = very old
-        last_modified:
+        modified:
           0: "#38bdf8"
           10: "#22c55e"
           100: "#facc15"
@@ -538,8 +538,8 @@ table:
           365: "#ef4444"
 
       active:
-        # Short recency emphasis.
-        last_opened:
+        # Short recency emphasis (column id "active" = last opened date).
+        active:
           0: "#38bdf8"
           3: "#22c55e"
           14: "#facc15"
@@ -555,7 +555,7 @@ table:
           730: "#ef4444"
 
         # Main age heatmap.
-        last_modified:
+        modified:
           0: "#38bdf8"
           10: "#22c55e"
           100: "#facc15"

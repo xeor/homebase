@@ -403,8 +403,8 @@ def _benchmark_run_suite(
 
     q_plain = "bench-01"
     q_plain2 = "#cli"
-    q_expr = "(#cli OR #api) tags>1 props>=0 created>=2000"
-    q_expr2 = "(created>=2023 AND tags>0) OR !pkg"
+    q_expr = "(#cli OR #api) :tags>1 :properties>=0 :created>=2000"
+    q_expr2 = "(:created>=2023 AND :tags>0) OR !pkg"
     metrics.append(
         _benchmark_timeit(
             "query_plain_name_scan",
@@ -452,7 +452,7 @@ def _benchmark_run_suite(
                 "filters": {
                     "named": {
                         "hot": "#cli OR #api",
-                        "ops": "#ops tags>0",
+                        "ops": "#ops :tags>0",
                     }
                 }
             },
@@ -463,7 +463,7 @@ def _benchmark_run_suite(
     metrics.append(
         _benchmark_timeit(
             "resolve_filter_expression_named",
-            lambda: resolve_filter_expression(bench_root, "@hot AND tags>1"),
+            lambda: resolve_filter_expression(bench_root, "@hot AND :tags>1"),
             repeat=25,
             warmup=2,
         )

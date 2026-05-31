@@ -11,14 +11,14 @@ def test_load_table_date_color_ranges_per_view_and_column(tmp_path) -> None:
             "table": {
                 "date_columns": {
                     "all": {
-                        "last_modified": {
+                        "modified": {
                             "from_color": "#FFFFFF",
                             "to_color": "#555555",
                             "range_days": 365,
                         }
                     },
                     "active": {
-                        "last_opened": {
+                        "active": {
                             "from_color": "#E8F7FF",
                             "to_color": "#5A6A72",
                             "range_days": 30,
@@ -37,13 +37,13 @@ def test_load_table_date_color_ranges_per_view_and_column(tmp_path) -> None:
     )
 
     cfg = load_table_date_column_styles(tmp_path)
-    assert cfg["all"]["last_modified"] == {
+    assert cfg["all"]["modified"] == {
         "stops": [
             {"days": 0.0, "color": "#FFFFFF"},
             {"days": 365.0, "color": "#555555"},
         ]
     }
-    assert cfg["active"]["last_opened"] == {
+    assert cfg["active"]["active"] == {
         "stops": [
             {"days": 0.0, "color": "#E8F7FF"},
             {"days": 30.0, "color": "#5A6A72"},
@@ -64,7 +64,7 @@ def test_load_table_date_color_ranges_skips_invalid_rules(tmp_path) -> None:
             "table": {
                 "date_columns": {
                     "all": {
-                        "last_modified": {
+                        "modified": {
                             "from_color": "white",
                             "to_color": "#555555",
                             "range_days": 365,
@@ -91,7 +91,7 @@ def test_load_table_date_color_ranges_scale_map(tmp_path) -> None:
             "table": {
                 "date_columns": {
                     "active": {
-                        "last_opened": {
+                        "active": {
                             "scale": {
                                 0: "#0000FF",
                                 100: "#00FF00",
@@ -105,7 +105,7 @@ def test_load_table_date_color_ranges_scale_map(tmp_path) -> None:
     )
 
     cfg = load_table_date_column_styles(tmp_path)
-    assert cfg["active"]["last_opened"] == {
+    assert cfg["active"]["active"] == {
         "stops": [
             {"days": 0.0, "color": "#0000FF"},
             {"days": 100.0, "color": "#00FF00"},
@@ -121,7 +121,7 @@ def test_load_table_date_color_ranges_numeric_map_direct(tmp_path) -> None:
             "table": {
                 "date_columns": {
                     "active": {
-                        "last_modified": {
+                        "modified": {
                             0: "#1F77FF",
                             100: "#38C172",
                             300: "#FFD43B",
@@ -133,7 +133,7 @@ def test_load_table_date_color_ranges_numeric_map_direct(tmp_path) -> None:
     )
 
     cfg = load_table_date_column_styles(tmp_path)
-    assert cfg["active"]["last_modified"] == {
+    assert cfg["active"]["modified"] == {
         "stops": [
             {"days": 0.0, "color": "#1F77FF"},
             {"days": 100.0, "color": "#38C172"},

@@ -108,22 +108,27 @@ def cheat_columns(
     left.append("- dynamic properties are defined in .homebase/config.yaml")
     left.append("- metadata issues are explained in Selected -> Overview")
     left.append("")
-    left.append("- filter syntax examples (combine with AND/OR and parentheses):")
-    left.append("  #tag              exact tag")
-    left.append("  !prop             property key/label/token")
-    left.append("  .tmp              suffix")
-    left.append("  tags=0            rows with no tags")
-    left.append("  tags>4            rows with more than 4 tags")
-    left.append("  props=0           rows with no properties")
-    left.append("  props>0           rows with at least one property")
-    left.append("  :created=@-3y      created within last 3 years")
-    left.append("  :created=@-2y100d  relative spans can be combined")
-    left.append("  :created=@-2y20m   m=months, d=days (always summed)")
-    left.append("  :last=@-7d         changed within last 7 days")
-    left.append("  :created=2025      created in year 2025")
-    left.append("  :created=2025-01   created in Jan 2025")
-    left.append("  :created=2025-01-05 created on exact date")
-    left.append("  created<=2025     created in/before year 2025")
+    left.append("- filter syntax (combine with AND/OR and parentheses):")
+    left.append("  #tag                 exact tag")
+    left.append("  ##group              tag tree (parent + descendants)")
+    left.append("  !prop                property key/label/token")
+    left.append("  .tmp                 suffix")
+    left.append("  @name                saved filter by name")
+    left.append("- column-specific syntax (:key matches a table column id):")
+    left.append("  :tags=0              rows with no tags")
+    left.append("  :tags>4              rows with more than 4 tags")
+    left.append("  :properties=0        rows with no properties")
+    left.append("  :properties>0        rows with at least one property")
+    left.append("  :created=@-3y        created within last 3 years")
+    left.append("  :created=@-2y100d    relative spans can be combined")
+    left.append("  :created=@-2y20m     m=months, d=days (always summed)")
+    left.append("  :modified=@-7d       modified within last 7 days")
+    left.append("  :active=@-30d        last opened within last 30 days")
+    left.append("  :created=2025        created in year 2025")
+    left.append("  :created=2025-01     created in Jan 2025")
+    left.append("  :created=2025-01-05  created on exact date")
+    left.append("  :created<=2025       created in/before year 2025")
+    left.append("- operators for :key: = != < <= > >=")
     left.append("")
     left.append("- color legend (meaning-bearing colors):")
     left.append(
@@ -160,7 +165,7 @@ def cheat_columns(
         view_rules = date_styles.get(view, {}) if isinstance(date_styles, dict) else {}
         if not isinstance(view_rules, dict) or not view_rules:
             continue
-        for col in ("created", "last_modified", "last_opened", "archived_at"):
+        for col in ("created", "modified", "active", "archived_at"):
             rule = view_rules.get(col, {})
             if not isinstance(rule, dict):
                 continue

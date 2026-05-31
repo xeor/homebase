@@ -105,7 +105,7 @@ class FilterManageScreen(ModalScreen[str | None]):
                 with Vertical(id="filter_mgmt_left"):
                     yield Input(
                         value=normalize_filter_expression(self.current_query),
-                        placeholder="extra filter expression (!prop #tag tags=0 created<=2025 ...)",
+                        placeholder="extra filter expression (!prop #tag :tags=0 :created<=2025 ...)",
                         id="filter_mgmt_input",
                         suggester=TokenFilterSuggester(
                             self._completion_candidates_for_input
@@ -251,7 +251,7 @@ class FilterManageScreen(ModalScreen[str | None]):
                 elif tok.startswith("@"):
                     parts.append(f"[green]{tok}[/]")
                 elif re.match(
-                    r"^(?:(?:created|opened|last)=@-(?:\d+[ymwdhs])+|(?:tags|props|properties)(?:<=|>=|!=|=|<|>)\d+|(?:created|opened|last)(?:<=|>=|!=|=|<|>)\d{4}(?:-\d{2}(?:-\d{2})?)?)$",
+                    r"^:(?:(?:created|modified|active)=@-(?:\d+[ymwdhs])+|(?:tags|properties)(?:<=|>=|!=|=|<|>)\d+|(?:created|modified|active)(?:<=|>=|!=|=|<|>)\d{4}(?:-\d{2}(?:-\d{2})?)?)$",
                     tok.lower(),
                 ):
                     parts.append(f"[yellow]{tok}[/]")
@@ -299,14 +299,15 @@ class FilterManageScreen(ModalScreen[str | None]):
         names = [f"@{n}" for n in sorted(self.named.keys())]
         suffixes = [f".{s}" for s in SUFFIXES]
         misc = [
-            "tags=0",
-            "tags>4",
-            "props=0",
-            "props>0",
+            ":tags=0",
+            ":tags>4",
+            ":properties=0",
+            ":properties>0",
             ":created=@-3y",
             ":created=@-2y100d",
             ":created=@-2y20m",
-            ":last=@-7d",
+            ":modified=@-7d",
+            ":active=@-30d",
             ":created=2025",
             ":created=2025-01",
             ":created=2025-01-05",

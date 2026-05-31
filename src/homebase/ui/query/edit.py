@@ -88,14 +88,15 @@ def query_completion_candidates(app: Any, token: str) -> list[str]:
     names = [f"@{n}" for n in sorted(NAMED_FILTERS.keys())]
     suffixes = [f".{s}" for s in SUFFIXES]
     misc = [
-        "tags=0",
-        "tags>4",
-        "props=0",
-        "props>0",
+        ":tags=0",
+        ":tags>4",
+        ":properties=0",
+        ":properties>0",
         ":created=@-3y",
         ":created=@-2y100d",
         ":created=@-2y20m",
-        ":last=@-7d",
+        ":modified=@-7d",
+        ":active=@-30d",
         ":created=2025",
         ":created=2025-01",
         ":created=2025-01-05",

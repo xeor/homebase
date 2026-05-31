@@ -74,7 +74,7 @@ class FilterQueryScreen(LargeModalScreen[str | None]):
             yield Static("[bold]Filter query[/]")
             yield Input(
                 value=self.initial,
-                placeholder="#tag !property tags=0 created<=2025 (A OR B)",
+                placeholder="#tag !property :tags=0 :created<=2025 (A OR B)",
                 id="filter_query",
                 suggester=TokenFilterSuggester(self._completion_candidates),
                 compact=True,
@@ -138,7 +138,7 @@ class FilterQueryScreen(LargeModalScreen[str | None]):
                     f"top properties: {top_props}",
                     f"saved names: {saved_named}",
                     "tab: cycle completions for current token, shift+tab reverse, right-arrow accepts gray suggestion",
-                    "examples: #backend !git tags>2 created<=2025 (#api OR #web), @recent-web",
+                    "examples: #backend !git :tags>2 :created<=2025 (#api OR #web), @recent-web",
                 ]
             )
         )
@@ -170,14 +170,15 @@ class FilterQueryScreen(LargeModalScreen[str | None]):
         names = [f"@{name}" for name in sorted(self.named.keys())]
         suffixes = [f".{s}" for s in SUFFIXES]
         misc = [
-            "tags=0",
-            "tags>4",
-            "props=0",
-            "props>0",
+            ":tags=0",
+            ":tags>4",
+            ":properties=0",
+            ":properties>0",
             ":created=@-3y",
             ":created=@-2y100d",
             ":created=@-2y20m",
-            ":last=@-7d",
+            ":modified=@-7d",
+            ":active=@-30d",
             ":created=2025",
             ":created=2025-01",
             ":created=2025-01-05",

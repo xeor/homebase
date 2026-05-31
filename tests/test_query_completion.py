@@ -172,4 +172,4 @@ def test_existing_completion_pool_still_returned(tmp_path: Path) -> None:
     cands = query_edit.query_completion_candidates(app, "")
     assert "#wip" in cands
     assert "##priority" in cands
-    assert "tags=0" in cands  # misc
+    assert ":tags=0" in cands  # misc

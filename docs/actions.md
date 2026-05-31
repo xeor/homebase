@@ -107,12 +107,12 @@ Per-row family (`multi: per_row`, filepicker `list`):
 | `created` | Local created datetime string. | `2026-05-01 10:11:12` |
 | `created_iso` | ISO created datetime string. | `2026-05-01T10:11:12+02:00` |
 | `created_ts` | Unix timestamp for created datetime. | `1777623072` |
-| `last_modified` | Local last-modified datetime string. | `2026-05-10 13:00:00` |
-| `last_modified_iso` | ISO last-modified datetime string. | `2026-05-10T13:00:00+02:00` |
-| `last_modified_ts` | Unix timestamp for last-modified datetime. | `1778410800` |
-| `last_opened` | Local last-opened datetime string. | `2026-05-10 09:12:01` |
-| `last_opened_iso` | ISO last-opened datetime string. | `2026-05-10T09:12:01+02:00` |
-| `last_opened_ts` | Unix timestamp for last-opened datetime. | `1778397121` |
+| `modified` | Local last-modified datetime string. | `2026-05-10 13:00:00` |
+| `modified_iso` | ISO last-modified datetime string. | `2026-05-10T13:00:00+02:00` |
+| `modified_ts` | Unix timestamp for last-modified datetime. | `1778410800` |
+| `active` | Local last-opened datetime string. | `2026-05-10 09:12:01` |
+| `active_iso` | ISO last-opened datetime string. | `2026-05-10T09:12:01+02:00` |
+| `active_ts` | Unix timestamp for last-opened datetime. | `1778397121` |
 | `archived_at` | Local archived-at datetime string (or empty). | `` |
 | `archived_at_iso` | ISO archived-at datetime string (or empty). | `` |
 | `archived_at_ts` | Unix timestamp for archived-at datetime (or empty). | `` |

@@ -14,7 +14,7 @@ _CURSOR_STYLE = f"{CURSOR_FG_HEX} on {CURSOR_BG_HEX}"
 
 
 _KNOWN_STRUCTURED_KEYS: frozenset[str] = frozenset(
-    {"created", "opened", "last", "repo", "worktree-of"}
+    {"created", "modified", "active", "tags", "properties", "repo", "worktree-of"}
 )
 
 

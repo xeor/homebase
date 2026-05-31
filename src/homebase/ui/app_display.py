@@ -92,10 +92,16 @@ class AppDisplayMixin:
         else:
             widths = list(base_widths)
 
+        def _col_header(col: dict[str, object]) -> str:
+            cid = str(col.get("id", "")).strip()
+            if "label" in col:
+                return str(col.get("label", ""))
+            return cid.upper()
+
         column_signature = (
             self.view_mode,
             tuple(str(col.get("id", "")).strip() for col in visible),
-            tuple(str(col.get("label", "")) for col in visible),
+            tuple(_col_header(col) for col in visible),
             tuple(int(width) for width in widths),
         )
         if self._table_column_signature == column_signature:
@@ -105,7 +111,7 @@ class AppDisplayMixin:
         table.clear(columns=True)
         self._table_render_signature = None
         for col, width in zip(visible, widths):
-            label = str(col.get("label", ""))
+            label = _col_header(col)
             try:
                 table.add_column(label, width=width)
             except (RuntimeError, ValueError, TypeError):

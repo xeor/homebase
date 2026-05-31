@@ -454,12 +454,12 @@ archive:
 filters:
   saved:
     - "#wip"
-    - "tags=0"
-    - ":last>=@-30d"
+    - ":tags=0"
+    - ":modified>=@-30d"
     - "!git"
   named:
     hot: "#cli OR #api"
-    stale: ":last<=@-365d"
+    stale: ":modified<=@-365d"
     code: "##programming"
     urgent: "##priority"
 
@@ -539,14 +539,14 @@ table:
   columns_style:
     date:
       all:
-        last_modified:
+        modified:
           0: "#38bdf8"
           10: "#22c55e"
           100: "#facc15"
           365: "#f97316"
           1825: "#ef4444"
       active:
-        last_opened:
+        active:
           0: "#38bdf8"
           3: "#22c55e"
           14: "#facc15"

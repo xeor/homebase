@@ -221,8 +221,8 @@ def test_structured_absolute_date_supports_full_operators() -> None:
 
     ts_2025_06 = int(datetime(2025, 6, 1).timestamp())
     pred_eq, err_eq = _compile(":created=2025")
-    pred_le, err_le = _compile(":opened<=2025-06")
-    pred_gt, err_gt = _compile(":last>2024")
+    pred_le, err_le = _compile(":active<=2025-06")
+    pred_gt, err_gt = _compile(":modified>2024")
     assert err_eq is None and err_le is None and err_gt is None
     assert pred_eq(Row(created_ts=ts_2025_06)) is True
     assert pred_eq(Row(created_ts=int(datetime(2024, 1, 1).timestamp()))) is False
@@ -259,13 +259,13 @@ def test_structured_extra_term_builder_is_consulted() -> None:
 
 def test_query_uses_filter_syntax_detects_colon_keys() -> None:
     assert filter_engine.query_uses_filter_syntax(":created=2025") is True
-    assert filter_engine.query_uses_filter_syntax("foo :last=@-1d bar") is True
+    assert filter_engine.query_uses_filter_syntax("foo :modified=@-1d bar") is True
     assert filter_engine.query_uses_filter_syntax("just text") is False
 
 
 def test_normalize_filter_preserves_colon_tokens() -> None:
     normalized = filter_engine.normalize_filter_expression(
-        ":last=@-7d :created>=2025", token_re=TOKEN_RE
+        ":modified=@-7d :created>=2025", token_re=TOKEN_RE
     )
-    assert ":last=@-7d" in normalized
+    assert ":modified=@-7d" in normalized
     assert ":created>=2025" in normalized

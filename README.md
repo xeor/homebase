@@ -314,10 +314,10 @@ archive:
 filters:
   saved:
     - "#wip"
-    - "tags=0"
+    - ":tags=0"
   named:
     hot: "#cli OR #api"
-    fresh: ":last=@-7d"
+    fresh: ":modified=@-7d"
 
 # Dynamic property detectors
 properties:

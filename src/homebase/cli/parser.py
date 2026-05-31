@@ -99,7 +99,7 @@ def build_cli_parser() -> argparse.ArgumentParser:
         "filter",
         nargs="*",
         default=[],
-        help="filter expression (e.g. `tag:work foo`)",
+        help="filter expression (e.g. `#work foo :modified=@-7d`)",
     )
     p_ls.add_argument(
         "-l", "--long",
