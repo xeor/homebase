@@ -151,6 +151,29 @@ def perf_score(
     return (day_s / elapsed_s) ** exponent
 
 
+def composite_score(
+    warm: float | None,
+    cold: float | None,
+    *,
+    warm_weight: float,
+    cold_weight: float,
+) -> float | None:
+    """Weighted average of warm and cold perf scores (higher = better).
+
+    Falls back to whichever component is available if the other is
+    missing. Returns None when neither is available.
+    """
+    has_warm = isinstance(warm, (int, float))
+    has_cold = isinstance(cold, (int, float))
+    if has_warm and has_cold:
+        return warm_weight * float(warm) + cold_weight * float(cold)
+    if has_warm:
+        return float(warm)
+    if has_cold:
+        return float(cold)
+    return None
+
+
 def load_runs(report_path: Path) -> list[dict[str, object]]:
     if not report_path.is_file():
         return []
@@ -214,6 +237,8 @@ def score_runs(
     ignore_featuresets: set[str] | None,
     score_ref_seconds: float,
     score_ref_day_value: float,
+    warm_weight: float,
+    cold_weight: float,
 ) -> list[dict[str, object]]:
     ignored = ignore_featuresets or set()
     totals = [total_avg(run) for run in runs]
@@ -229,10 +254,30 @@ def score_runs(
                 elapsed_vals.append(float(raw))
             else:
                 elapsed_vals.append(totals[i])
-    scores = [
+    warm_scores = [
         perf_score(value, score_ref_seconds=score_ref_seconds, score_ref_day_value=score_ref_day_value)
         for value in elapsed_vals
     ]
+    cold_scores: list[float | None] = []
+    for run in runs:
+        cold_elapsed = run.get("cold_elapsed_s")
+        if isinstance(cold_elapsed, (int, float)) and float(cold_elapsed) > 0:
+            cold_scores.append(
+                perf_score(
+                    float(cold_elapsed),
+                    score_ref_seconds=score_ref_seconds,
+                    score_ref_day_value=score_ref_day_value,
+                )
+            )
+        else:
+            cold_scores.append(None)
+    if ignored:
+        scores = warm_scores
+    else:
+        scores = [
+            composite_score(w, c, warm_weight=warm_weight, cold_weight=cold_weight)
+            for w, c in zip(warm_scores, cold_scores, strict=True)
+        ]
     valid_scores = [s for s in scores if s is not None and s >= 0]
     best_score = max(valid_scores) if valid_scores else 0.0
 

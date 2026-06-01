@@ -26,9 +26,11 @@ from ..core.constants import (
     ARCHIVE_DIR_NAME,
     ARCHIVE_TZ,
     BENCHMARK_REPORT_FILE_NAME,
+    BENCHMARK_SCORE_COLD_WEIGHT,
     BENCHMARK_SCORE_MODEL,
     BENCHMARK_SCORE_REF_DAY_VALUE,
     BENCHMARK_SCORE_REF_SECONDS,
+    BENCHMARK_SCORE_WARM_WEIGHT,
     BENCHMARK_SUITE_VERSION,
     CACHE_MAX_AGE_S,
     GLOBAL_CONFIG_FILE_NAME,
@@ -691,6 +693,8 @@ def _benchmark_score_runs(
         ignore_featuresets=ignore_featuresets,
         score_ref_seconds=BENCHMARK_SCORE_REF_SECONDS,
         score_ref_day_value=BENCHMARK_SCORE_REF_DAY_VALUE,
+        warm_weight=BENCHMARK_SCORE_WARM_WEIGHT,
+        cold_weight=BENCHMARK_SCORE_COLD_WEIGHT,
     )
 
 
@@ -796,6 +800,12 @@ def cmd_benchmark_run(
     engine_score = _benchmark_perf_score(warm_suite_elapsed_s)
     cold_score = _benchmark_perf_score(suite_elapsed_s)
     cold_engine_score = _benchmark_perf_score(suite_elapsed_s)
+    composite = benchmark_report.composite_score(
+        perf_score,
+        cold_score,
+        warm_weight=BENCHMARK_SCORE_WARM_WEIGHT,
+        cold_weight=BENCHMARK_SCORE_COLD_WEIGHT,
+    )
     print("")
     print(
         "benchmark score: "
@@ -860,9 +870,11 @@ def cmd_benchmark_run(
         "metric_featuresets": _benchmark_metric_featuresets(),
         "score_metric_profile": _default_score_metric_profile(metrics),
         "notes": (cold_notes + notes),
-        "score": perf_score,
+        "score": composite,
         "score_warm": perf_score,
         "score_cold": cold_score,
+        "score_warm_weight": BENCHMARK_SCORE_WARM_WEIGHT,
+        "score_cold_weight": BENCHMARK_SCORE_COLD_WEIGHT,
         "engine_score": engine_score,
         "engine_score_warm": engine_score,
         "engine_score_cold": cold_engine_score,

@@ -149,12 +149,29 @@ not the import.
   / regression suites already exercise the real I/O paths.
 - Add a layering check (see TODO) when touching the import graph.
 
-## 10. Lint / build
+## 10. Lint / build / QA
 
 - `uv run ruff check src/homebase/ tests/` must be clean.
 - `pyproject.toml` `[tool.ruff.lint.per-file-ignores]` must remain
   empty. If ruff complains, fix the code, not the config.
 - `uv build` must produce a wheel + sdist.
+- **QA policy: `docs/QA/README.md` is authoritative.** Before committing
+  any non-trivial change, run the affected tools (at minimum `pytest`
+  and `ruff`). Before finishing a work session, run the full set
+  listed in `docs/QA/README.md` and update the **Status snapshot**
+  numbers.
+- For tracked-over-time tools (mypy, coverage, import-linter, bandit,
+  radon-cc) run `uv run python docs/QA/scripts/qa_track.py` after the
+  fix-up so `docs/QA/history/*.csv` and `docs/QA/graphs/*.svg` are
+  refreshed in the same commit as the code change.
+- Baseline numbers in `docs/QA/README.md` and the history CSVs must
+  never regress. Fix the code or revert — do not bump the number to
+  match.
+- Suppressions (`# type: ignore`, `# nosec`, `# noqa`) require a short
+  reason on the same line.
+- New QA tools: add to `[dependency-groups] dev` in `pyproject.toml`,
+  document in `docs/QA/README.md`; if tracked over time, also add a
+  parser entry in `docs/QA/scripts/qa_track.py`.
 
 ## 11. Shell / environment
 

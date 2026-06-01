@@ -19,12 +19,6 @@ dependencies = [
 homebase = "homebase.cli:entrypoint"
 b = "homebase.cli:entrypoint"
 
-[project.optional-dependencies]
-dev = [
-  "pytest>=8.3.3",
-  "ruff>=0.11.0",
-]
-
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
@@ -41,6 +35,49 @@ select = [
   "E9",
   "F",
   "I",
+]
+
+[tool.coverage.run]
+branch = true
+source = ["src/homebase"]
+omit = ["tests/*"]
+
+[tool.coverage.report]
+skip_covered = false
+show_missing = false
+precision = 1
+
+[tool.mypy]
+python_version = "3.11"
+files = ["src/homebase"]
+ignore_missing_imports = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+warn_unreachable = true
+check_untyped_defs = true
+
+[tool.vulture]
+paths = ["src/homebase"]
+min_confidence = 80
+exclude = []
+
+[tool.bandit]
+exclude_dirs = ["tests"]
+
+[tool.importlinter]
+root_packages = ["homebase"]
+
+[[tool.importlinter.contracts]]
+name = "layering (AGENTS.md §5)"
+type = "layers"
+layers = [
+  "homebase.cli",
+  "homebase.ui",
+  "homebase.commands",
+  "homebase.workspace",
+  "homebase.tmux | homebase.notes | homebase.filter | homebase.archive | homebase.metadata | homebase.cache",
+  "homebase.config",
+  "homebase.core",
 ]
 
 [tool.hatch.build.targets.wheel]
@@ -60,4 +97,12 @@ include = [
 [dependency-groups]
 dev = [
     "pyinstrument>=5.1.2",
+    "pytest>=8.3.3",
+    "pytest-cov>=6.0.0",
+    "ruff>=0.11.0",
+    "mypy>=1.13.0",
+    "import-linter>=2.1",
+    "vulture>=2.13",
+    "bandit>=1.8.0",
+    "radon>=6.0.1",
 ]

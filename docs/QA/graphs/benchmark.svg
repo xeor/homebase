@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 320" font-family="monospace" font-size="11">
+<rect width="100%" height="100%" fill="white"/>
+<text x="360" y="20" text-anchor="middle" font-weight="bold" font-size="13">benchmark score</text>
+<line x1="60" y1="270.0" x2="580" y2="270.0" stroke="#eee"/>
+<text x="54" y="274.0" text-anchor="end" fill="#555">151.4</text>
+<line x1="60" y1="210.5" x2="580" y2="210.5" stroke="#eee"/>
+<text x="54" y="214.5" text-anchor="end" fill="#555">164.7</text>
+<line x1="60" y1="151.0" x2="580" y2="151.0" stroke="#eee"/>
+<text x="54" y="155.0" text-anchor="end" fill="#555">178.0</text>
+<line x1="60" y1="91.5" x2="580" y2="91.5" stroke="#eee"/>
+<text x="54" y="95.5" text-anchor="end" fill="#555">191.3</text>
+<line x1="60" y1="32.0" x2="580" y2="32.0" stroke="#eee"/>
+<text x="54" y="36.0" text-anchor="end" fill="#555">204.5</text>
+<line x1="60" y1="32" x2="60" y2="270" stroke="#888"/>
+<line x1="60" y1="270" x2="580" y2="270" stroke="#888"/>
+<line x1="60.0" y1="270" x2="60.0" y2="274" stroke="#888"/>
+<text x="60.0" y="288" text-anchor="middle" fill="#555">2026-05-19</text>
+<line x1="320.0" y1="270" x2="320.0" y2="274" stroke="#888"/>
+<text x="320.0" y="288" text-anchor="middle" fill="#555">2026-05-23_1</text>
+<line x1="580.0" y1="270" x2="580.0" y2="274" stroke="#888"/>
+<text x="580.0" y="288" text-anchor="middle" fill="#555">2026-05-26</text>
+<text x="14" y="151" text-anchor="middle" transform="rotate(-90 14 151)" fill="#555">score</text>
+<path d="M60.0,232.1 L190.0,68.0 L320.0,187.7 L450.0,118.4 L580.0,192.4" fill="none" stroke="#1f77b4" stroke-width="2"/>
+<circle cx="60.0" cy="232.1" r="3" fill="#1f77b4"/>
+<circle cx="190.0" cy="68.0" r="3" fill="#1f77b4"/>
+<circle cx="320.0" cy="187.7" r="3" fill="#1f77b4"/>
+<circle cx="450.0" cy="118.4" r="3" fill="#1f77b4"/>
+<circle cx="580.0" cy="192.4" r="3" fill="#1f77b4"/>
+<rect x="588" y="42" width="12" height="12" fill="#1f77b4"/>
+<text x="604" y="52" fill="#222">score: 168.7</text>
+<path d="M60.0,220.4 L190.0,42.8 L320.0,176.1 L450.0,105.8 L580.0,182.9" fill="none" stroke="#d62728" stroke-width="2"/>
+<circle cx="60.0" cy="220.4" r="3" fill="#d62728"/>
+<circle cx="190.0" cy="42.8" r="3" fill="#d62728"/>
+<circle cx="320.0" cy="176.1" r="3" fill="#d62728"/>
+<circle cx="450.0" cy="105.8" r="3" fill="#d62728"/>
+<circle cx="580.0" cy="182.9" r="3" fill="#d62728"/>
+<rect x="588" y="60" width="12" height="12" fill="#d62728"/>
+<text x="604" y="70" fill="#222">warm_sc: 170.83</text>
+<path d="M60.0,259.2 L190.0,126.7 L320.0,214.8 L450.0,147.9 L580.0,214.6" fill="none" stroke="#2ca02c" stroke-width="2"/>
+<circle cx="60.0" cy="259.2" r="3" fill="#2ca02c"/>
+<circle cx="190.0" cy="126.7" r="3" fill="#2ca02c"/>
+<circle cx="320.0" cy="214.8" r="3" fill="#2ca02c"/>
+<circle cx="450.0" cy="147.9" r="3" fill="#2ca02c"/>
+<circle cx="580.0" cy="214.6" r="3" fill="#2ca02c"/>
+<rect x="588" y="78" width="12" height="12" fill="#2ca02c"/>
+<text x="604" y="88" fill="#222">cold_sc: 163.74</text>
+</svg>
