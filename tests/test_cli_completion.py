@@ -121,6 +121,131 @@ def test_completion_cd_prefix_filters(tmp_path: Path) -> None:
     assert out == ["alpha", "alpine"]
 
 
+def _seed_cache_projects(
+    base: Path, entries: list[tuple[str, list[str]]],
+) -> None:
+    from homebase.cache.api import cache_store_rows
+    from homebase.workspace.projects import project_row
+
+    rows = []
+    for name, tags in entries:
+        project = base / name
+        project.mkdir()
+        (project / ".base.yaml").write_text(
+            "tags: [" + ", ".join(tags) + "]\n", encoding="utf-8",
+        )
+        rows.append(project_row(project, archived=False))
+    cache_store_rows(base, rows, [])
+
+
+def test_completion_cd_filter_token_narrows_by_tag(tmp_path: Path) -> None:
+    """``b cd '#infra' <tab>`` must read the cache, apply the filter
+    expression to the cached rows, and return only matching project
+    names. Without this, the user can't combine filter syntax with
+    tab completion."""
+    _seed_cache_projects(tmp_path, [
+        ("alpha-infra", ["infra"]),
+        ("beta-app", ["app"]),
+        ("gamma-infra", ["infra", "wip"]),
+    ])
+    out = cli_completion.completion_candidates(
+        ["cd", "#infra", ""], 3, base_dir=tmp_path,
+    )
+    assert out == ["alpha-infra", "gamma-infra"]
+
+
+def test_completion_cd_filter_then_name_prefix(tmp_path: Path) -> None:
+    """Filter tokens *plus* a name-prefix on the current token must
+    intersect: only names that both match the filter and start with
+    the prefix come back."""
+    _seed_cache_projects(tmp_path, [
+        ("alpha-infra", ["infra"]),
+        ("gamma-infra", ["infra"]),
+        ("alpha-app", ["app"]),
+    ])
+    out = cli_completion.completion_candidates(
+        ["cd", "#infra", "alp"], 3, base_dir=tmp_path,
+    )
+    assert out == ["alpha-infra"]
+
+
+def test_completion_cd_resolves_named_filter_from_prefs(
+    tmp_path: Path,
+) -> None:
+    """``@code`` and other named filters live in user prefs, not in
+    the built-in NAMED_FILTERS dict. Completion runs in a fresh
+    process whose NAMED_FILTERS starts empty, so the cd helper must
+    load prefs before compiling — otherwise @-tokens silently match
+    nothing."""
+    from homebase.config.prefs import save_filter_query
+
+    _seed_cache_projects(tmp_path, [
+        ("alpha-code", ["code"]),
+        ("beta-code", ["code"]),
+        ("gamma-app", ["app"]),
+    ])
+    save_filter_query(tmp_path, "#code", name="code")
+    out = cli_completion.completion_candidates(
+        ["cd", "@code", ""], 3, base_dir=tmp_path,
+    )
+    assert out == ["alpha-code", "beta-code"]
+
+
+def test_completion_ls_offers_all_column_flags(tmp_path: Path) -> None:
+    """``b ls --<tab>`` must surface every column flag plus the
+    long/git/archived knobs. The dash-prefix filter inside
+    ``completion_candidates`` narrows to options that actually start
+    with ``--``."""
+    out = cli_completion.completion_candidates(
+        ["ls", "--"], 2, base_dir=tmp_path,
+    )
+    for flag in (
+        "--long", "--git", "--archived",
+        "--created", "--active", "--wip", "--worktree-of",
+        "--src", "--path", "--description", "--props",
+    ):
+        assert flag in out, f"missing {flag!r}: {out!r}"
+
+
+def test_completion_top_level_includes_json(tmp_path: Path) -> None:
+    """``b <tab>`` must surface the new ``json`` subcommand
+    alongside ``ls`` — otherwise scripted consumers can't discover it
+    via tab completion."""
+    out = cli_completion.completion_candidates([""], 1, base_dir=tmp_path)
+    assert "json" in out and "ls" in out
+
+
+def test_completion_json_offers_archived_flags(tmp_path: Path) -> None:
+    """``b json --<tab>`` lists both archived-set switches."""
+    out = cli_completion.completion_candidates(
+        ["json", "--"], 2, base_dir=tmp_path,
+    )
+    assert out == ["--archived", "--archived-only"]
+
+
+def test_completion_ls_prefix_filters_partial_flag(tmp_path: Path) -> None:
+    """``b ls --wo<tab>`` narrows to ``--worktree-of`` (and nothing
+    else)."""
+    out = cli_completion.completion_candidates(
+        ["ls", "--wo"], 2, base_dir=tmp_path,
+    )
+    assert out == ["--worktree-of"]
+
+
+def test_completion_cd_filter_falls_back_to_fs_when_cache_cold(
+    tmp_path: Path,
+) -> None:
+    """Cold cache (never warmed) must not break completion — fall
+    back to the unfiltered filesystem listing so the user still gets
+    suggestions, even though the filter can't be applied."""
+    (tmp_path / "myproj").mkdir()
+    (tmp_path / "other").mkdir()
+    out = cli_completion.completion_candidates(
+        ["cd", "#infra", ""], 3, base_dir=tmp_path,
+    )
+    assert out == ["myproj", "other"]
+
+
 def test_completion_fix_lists_dirs_and_flags(tmp_path: Path) -> None:
     (tmp_path / "proj").mkdir()
     (tmp_path / "other").mkdir()

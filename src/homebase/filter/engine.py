@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import fnmatch
 import re
 import time
 from datetime import datetime
@@ -11,6 +12,10 @@ STRUCTURED_TERM_RE = re.compile(
     r"^:([a-z][a-z0-9-]*)(!=|<=|>=|=|<|>|~)(.+)$"
 )
 STRUCTURED_OPS = frozenset({"=", "!=", "<", "<=", ">", ">=", "~"})
+
+
+def _has_glob(pattern: str) -> bool:
+    return any(ch in pattern for ch in "*?[")
 
 
 def compile_filter_expr(
@@ -236,6 +241,10 @@ def compile_filter_expr(
         structured_builders.update(extra_term_builders)
 
     def term_pred(token: str) -> Callable[[Any], bool]:
+        if token.startswith("-") and len(token) > 1:
+            inner = term_pred(token[1:])
+            return lambda row: not inner(row)
+
         low = token.lower()
 
         m_struct = STRUCTURED_TERM_RE.match(low)
@@ -257,48 +266,80 @@ def compile_filter_expr(
         if token.startswith("@") and len(token) > 1:
             return named_pred(token[1:].strip())
         if token.startswith(".") and len(token) > 1:
-            suffix = token[1:].strip().lower()
-            return lambda row: (getattr(row, "suffix", "") or "") == suffix
+            pattern = token[1:].strip().lower()
+            if _has_glob(pattern):
+                return lambda row: fnmatch.fnmatchcase(
+                    (getattr(row, "suffix", "") or "").lower(), pattern
+                )
+            return lambda row: (getattr(row, "suffix", "") or "").lower() == pattern
         if token.startswith("##") and len(token) > 2:
-            target = token[2:].lower()
+            pattern = token[2:].lower()
+            is_glob = _has_glob(pattern)
 
             def _tree_tag_match(row: Any) -> bool:
                 tags = getattr(row, "tags", []) or []
-                # Direct hit on the parent tag itself.
                 cached = getattr(row, "tags_lower", None)
-                if cached is not None and target in cached:
-                    return True
-                if cached is None:
-                    for tag in tags:
-                        if str(tag).lower() == target:
+                if is_glob:
+                    iterable = cached if cached is not None else (str(t).lower() for t in tags)
+                    for tag_low in iterable:
+                        if fnmatch.fnmatchcase(tag_low, pattern):
                             return True
+                else:
+                    if cached is not None and pattern in cached:
+                        return True
+                    if cached is None:
+                        for tag in tags:
+                            if str(tag).lower() == pattern:
+                                return True
                 if tag_ancestors_fn is None:
                     return False
-                # Any tag whose (transitive) ancestor chain includes
-                # the target.
                 for tag in tags:
                     for anc in tag_ancestors_fn(str(tag)):
-                        if anc.lower() == target:
+                        anc_low = anc.lower()
+                        if is_glob:
+                            if fnmatch.fnmatchcase(anc_low, pattern):
+                                return True
+                        elif anc_low == pattern:
                             return True
                 return False
 
             return _tree_tag_match
         if token.startswith("#") and len(token) > 1:
-            needle = token[1:].lower()
+            pattern = token[1:].lower()
+            if _has_glob(pattern):
+                def _tag_glob(row: Any) -> bool:
+                    cached = getattr(row, "tags_lower", None)
+                    iterable = cached if cached is not None else (
+                        str(t).lower() for t in getattr(row, "tags", [])
+                    )
+                    for tag_low in iterable:
+                        if fnmatch.fnmatchcase(tag_low, pattern):
+                            return True
+                    return False
+
+                return _tag_glob
 
             def _tag_match(row: Any) -> bool:
                 cached = getattr(row, "tags_lower", None)
                 if cached is not None:
-                    return needle in cached
+                    return pattern in cached
                 for tag in getattr(row, "tags", []):
-                    if str(tag).lower() == needle:
+                    if str(tag).lower() == pattern:
                         return True
                 return False
 
             return _tag_match
         if token.startswith("!") and len(token) > 1:
-            needle = token[1:].lower()
-            return lambda row: any(needle in property_alias_set_fn(str(prop)) for prop in getattr(row, "properties", []))
+            pattern = token[1:].lower()
+            if _has_glob(pattern):
+                return lambda row: any(
+                    any(fnmatch.fnmatchcase(alias, pattern) for alias in property_alias_set_fn(str(prop)))
+                    for prop in getattr(row, "properties", [])
+                )
+            return lambda row: any(
+                pattern in property_alias_set_fn(str(prop))
+                for prop in getattr(row, "properties", [])
+            )
         return lambda row: match_query_fn(row, low)
 
     def _and_pred(a: Callable[[Any], bool], b: Callable[[Any], bool]) -> Callable[[Any], bool]:
@@ -348,7 +389,9 @@ def query_uses_filter_syntax(text: str) -> bool:
         return True
     if re.search(r"\bOR\b", q, flags=re.IGNORECASE):
         return True
-    if re.search(r"(^|\s)\.[A-Za-z0-9_]+", q):
+    if re.search(r"(^|\s)-?\.[A-Za-z0-9_*?\[]", q):
+        return True
+    if re.search(r"(^|\s)-[@:]", q):
         return True
     return False
 

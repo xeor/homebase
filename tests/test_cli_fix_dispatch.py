@@ -12,6 +12,7 @@ cli_dispatch.parse_ignore_featureset_values = cli_parser.parse_ignore_featureset
 def _stub_kwargs(**overrides):
     base = dict(
         cmd_ls=lambda _a, **_kw: 0,
+        cmd_json=lambda _a, **_kw: 0,
         cmd_new=lambda _ns, _bd, _cwd: 0,
         cmd_completion=lambda _a: 0,
         cmd_internal_complete=lambda _a, _b, _c: 0,

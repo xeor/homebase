@@ -173,3 +173,21 @@ def test_existing_completion_pool_still_returned(tmp_path: Path) -> None:
     assert "#wip" in cands
     assert "##priority" in cands
     assert ":tags=0" in cands  # misc
+
+
+def test_completion_preserves_negation_prefix(tmp_path: Path) -> None:
+    """``-#<tab>`` cycles tag candidates with the ``-`` kept in front."""
+    base = _setup_base(tmp_path, [
+        {"match": "^prio:", "parents": ["priority"]},
+    ])
+    app = _FakeApp(base_dir=base, active_rows=[_row("p", ["wip"])])
+
+    cands_tag = query_edit.query_completion_candidates(app, "-#")
+    assert "-#wip" in cands_tag
+    assert all(c.startswith("-") for c in cands_tag)
+
+    cands_prop = query_edit.query_completion_candidates(app, "-!")
+    assert all(c.startswith("-!") for c in cands_prop) or cands_prop == []
+
+    cands_misc = query_edit.query_completion_candidates(app, "-:")
+    assert "-:tags=0" in cands_misc

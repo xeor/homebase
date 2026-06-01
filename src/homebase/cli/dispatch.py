@@ -15,6 +15,7 @@ def dispatch_command(
     cwd: Path,
     no_arg_flow: Callable[[Path, Path, str], int],
     cmd_ls: Callable[..., int],
+    cmd_json: Callable[..., int],
     cmd_new: Callable[[Any, Path, Path], int],
     cmd_completion: Callable[[str], int],
     cmd_internal_complete: Callable[[str, int, list[str]], int],
@@ -56,6 +57,22 @@ def dispatch_command(
             long_format=bool(getattr(ns, "long", False)),
             with_git=bool(getattr(ns, "git", False)),
             show_archived=bool(getattr(ns, "archived", False)),
+            with_created=bool(getattr(ns, "created", False)),
+            with_active=bool(getattr(ns, "active", False)),
+            with_wip=bool(getattr(ns, "wip", False)),
+            with_worktree_of=bool(getattr(ns, "worktree_of", False)),
+            with_src=bool(getattr(ns, "src", False)),
+            with_path=bool(getattr(ns, "path", False)),
+            with_description=bool(getattr(ns, "description", False)),
+            with_props=bool(getattr(ns, "props", False)),
+        )
+    if ns.command == "json":
+        filter_parts = list(getattr(ns, "filter", []) or [])
+        return cmd_json(
+            base_dir,
+            filter_expr=" ".join(filter_parts),
+            include_archived=bool(getattr(ns, "archived", False)),
+            archived_only=bool(getattr(ns, "archived_only", False)),
         )
     if ns.command in {"new", "n"}:
         return cmd_new(ns, base_dir, cwd)
@@ -110,7 +127,10 @@ def dispatch_command(
             yes=bool(getattr(ns, "yes", False)),
         )
     if ns.command == "cd":
-        return cmd_cd(base_dir, str(getattr(ns, "name", "") or ""))
+        raw = getattr(ns, "name", []) or []
+        args = [raw] if isinstance(raw, str) else list(raw)
+        name = str(args[-1]) if args else ""
+        return cmd_cd(base_dir, name)
     if ns.command == "rm":
         return cmd_rm(
             str(ns.path),

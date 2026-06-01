@@ -61,6 +61,21 @@ def _render_token(
     color_unknown: str,
     esc,
 ) -> str:
+    # Leading '-' negates the rest. Paint the minus in the operator
+    # colour and recurse on the inner token.
+    if token.startswith("-") and len(token) > 1:
+        minus = _styled_chunk(token[0], color_op, cursor, offset, esc)
+        inner = _render_token(
+            token[1:],
+            cursor,
+            offset + 1,
+            color_key,
+            color_op,
+            color_value,
+            color_unknown,
+            esc,
+        )
+        return minus + inner
     # Structured ':key<op>value' tokens get the three-colour treatment.
     match = STRUCTURED_TERM_RE.match(token.lower())
     if match:

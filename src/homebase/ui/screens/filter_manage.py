@@ -242,19 +242,21 @@ class FilterManageScreen(ModalScreen[str | None]):
             body = line[leading:]
             parts: list[str] = []
             for tok in _FILTER_TOKEN_RE.findall(body):
-                if tok.startswith("#"):
-                    parts.append(f"[cyan]{tok}[/]")
-                elif tok.startswith("!"):
-                    parts.append(f"[magenta]{tok}[/]")
-                elif tok.startswith("."):
-                    parts.append(f"[blue]{tok}[/]")
-                elif tok.startswith("@"):
-                    parts.append(f"[green]{tok}[/]")
+                head = tok[1:] if tok.startswith("-") and len(tok) > 1 else tok
+                prefix = "-" if tok != head else ""
+                if head.startswith("#"):
+                    parts.append(f"{prefix}[cyan]{head}[/]")
+                elif head.startswith("!"):
+                    parts.append(f"{prefix}[magenta]{head}[/]")
+                elif head.startswith("."):
+                    parts.append(f"{prefix}[blue]{head}[/]")
+                elif head.startswith("@"):
+                    parts.append(f"{prefix}[green]{head}[/]")
                 elif re.match(
                     r"^:(?:(?:created|modified|active)=@-(?:\d+[ymwdhs])+|(?:tags|properties)(?:<=|>=|!=|=|<|>)\d+|(?:created|modified|active)(?:<=|>=|!=|=|<|>)\d{4}(?:-\d{2}(?:-\d{2})?)?)$",
-                    tok.lower(),
+                    head.lower(),
                 ):
-                    parts.append(f"[yellow]{tok}[/]")
+                    parts.append(f"{prefix}[yellow]{head}[/]")
                 elif tok in {"OR", "|"}:
                     parts.append(f"[bold yellow]{tok}[/]")
                 else:
@@ -281,6 +283,10 @@ class FilterManageScreen(ModalScreen[str | None]):
 
     def _completion_candidates_for_input(self, token: str) -> list[str]:
         t = token.strip()
+        neg = ""
+        if t.startswith("-"):
+            neg = "-"
+            t = t[1:]
         tag_counts: dict[str, int] = {}
         prop_counts: dict[str, int] = {}
         for row in self.rows:
@@ -319,8 +325,8 @@ class FilterManageScreen(ModalScreen[str | None]):
         ]
         pool = names + tags + props + suffixes + misc
         if not t:
-            return pool[:120]
-        return [x for x in pool if x.lower().startswith(t.lower())][:120]
+            return [f"{neg}{x}" for x in pool[:120]]
+        return [f"{neg}{x}" for x in pool if x.lower().startswith(t.lower())][:120]
 
     def _apply_completion(self, forward: bool) -> None:
         inp = self.query_one("#filter_mgmt_input", Input)

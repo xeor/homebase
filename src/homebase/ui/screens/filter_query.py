@@ -165,6 +165,10 @@ class FilterQueryScreen(LargeModalScreen[str | None]):
 
     def _completion_candidates(self, token: str) -> list[str]:
         t = token.strip()
+        neg = ""
+        if t.startswith("-"):
+            neg = "-"
+            t = t[1:]
         tags = [f"#{name}" for name, _ in self.tags]
         props = [f"!{key}" for key, _ in self.props]
         names = [f"@{name}" for name in sorted(self.named.keys())]
@@ -190,15 +194,15 @@ class FilterQueryScreen(LargeModalScreen[str | None]):
         ]
 
         if not t:
-            return names + tags[:40] + props[:40] + misc
+            return [f"{neg}{x}" for x in (names + tags[:40] + props[:40] + misc)]
         if t.startswith("#"):
-            return [x for x in tags if x.lower().startswith(t.lower())][:100]
+            return [f"{neg}{x}" for x in tags if x.lower().startswith(t.lower())][:100]
         if t.startswith("!"):
-            return [x for x in props if x.lower().startswith(t.lower())][:100]
+            return [f"{neg}{x}" for x in props if x.lower().startswith(t.lower())][:100]
         if t.startswith("@"):
-            return [x for x in names if x.lower().startswith(t.lower())][:100]
+            return [f"{neg}{x}" for x in names if x.lower().startswith(t.lower())][:100]
         return [
-            x
+            f"{neg}{x}"
             for x in (names + tags + props + suffixes + misc)
             if x.lower().startswith(t.lower())
         ][:100]

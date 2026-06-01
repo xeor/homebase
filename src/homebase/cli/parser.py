@@ -116,6 +116,75 @@ def build_cli_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="list archived projects instead of active",
     )
+    p_ls.add_argument(
+        "--created",
+        action="store_true",
+        help="include the CREATED column (created_ts)",
+    )
+    p_ls.add_argument(
+        "--active",
+        action="store_true",
+        help="include the ACTIVE column (last opened in TUI)",
+    )
+    p_ls.add_argument(
+        "--wip",
+        action="store_true",
+        help="include the WIP column",
+    )
+    p_ls.add_argument(
+        "--worktree-of",
+        dest="worktree_of",
+        action="store_true",
+        help="include the WORKTREE-OF column (source project for worktrees)",
+    )
+    p_ls.add_argument(
+        "--src",
+        action="store_true",
+        help="include the SRC column (origin URL / local source)",
+    )
+    p_ls.add_argument(
+        "--path",
+        action="store_true",
+        help="include the PATH column (absolute project path)",
+    )
+    p_ls.add_argument(
+        "--description",
+        action="store_true",
+        help="include the DESCRIPTION column",
+    )
+    p_ls.add_argument(
+        "--props",
+        action="store_true",
+        help="include the PROPS column (properties list)",
+    )
+
+    # `b json` — machine-readable counterpart to `b ls`. Same filter
+    # syntax, no column flags (every field is always present).
+    p_json = sub.add_parser(
+        "json",
+        help="emit the cache-backed project list as JSON (same filter syntax as `b ls`)",
+    )
+    p_json.add_argument(
+        "filter",
+        nargs="*",
+        default=[],
+        help="filter expression (e.g. `#work foo :modified=@-7d`)",
+    )
+    archived_group = p_json.add_mutually_exclusive_group()
+    archived_group.add_argument(
+        "--archived",
+        action="store_true",
+        help=(
+            "include archived rows alongside active rows. Archived "
+            "entries get ``is_archived: true`` in the payload so "
+            "consumers can distinguish them."
+        ),
+    )
+    archived_group.add_argument(
+        "--archived-only",
+        action="store_true",
+        help="emit *only* archived rows (no active rows).",
+    )
     _build_new_parser(sub)
     p_completion = sub.add_parser(
         "completion",
@@ -194,7 +263,16 @@ def build_cli_parser() -> argparse.ArgumentParser:
         "cd",
         help="open a shell in a project under base (tab-completes names)",
     )
-    p_cd.add_argument("name", nargs="?", default="", help="project name under base")
+    p_cd.add_argument(
+        "name",
+        nargs="*",
+        default=[],
+        help=(
+            "project name under base. Filter tokens (e.g. '#infra') may "
+            "precede the name to narrow tab completion; they are ignored "
+            "at execution and only the last positional is used as the name."
+        ),
+    )
 
     p_deworktree = sub.add_parser(
         "deworktree",

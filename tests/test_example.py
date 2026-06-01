@@ -199,3 +199,17 @@ def test_cache_warms(tmp_path: Path) -> None:
     active, archived, _ts = cache_load_rows(target)
     assert len(active) >= 10  # active + worktrees
     assert len(archived) == example.ARCHIVE_COUNT
+
+
+def test_tag_symlinks_populated(tmp_path: Path) -> None:
+    target = _generate(tmp_path, count=20, seed=12)
+    tags_root = target / "_tags"
+    assert tags_root.is_dir()
+    tag_dirs = [p for p in tags_root.iterdir() if p.is_dir()]
+    assert tag_dirs, "_tags/ should contain at least one tag directory"
+    total_links = 0
+    for tag_dir in tag_dirs:
+        for entry in tag_dir.iterdir():
+            assert entry.is_symlink(), f"{entry} should be a symlink"
+            total_links += 1
+    assert total_links >= len(tag_dirs)

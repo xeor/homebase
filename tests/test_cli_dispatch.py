@@ -19,6 +19,7 @@ def _stub_dispatch_kwargs(**overrides: object) -> dict[str, object]:
     override specific entries to assert routing behavior."""
     base = dict(
         cmd_ls=lambda _a, **_kw: 0,
+        cmd_json=lambda _a, **_kw: 0,
         cmd_new=lambda _ns, _bd, _cwd: 0,
         cmd_completion=lambda _a: 0,
         cmd_internal_complete=lambda _a, _b, _c: 0,
@@ -74,8 +75,53 @@ def test_dispatch_command_ls_path() -> None:
             "long_format": True,
             "with_git": False,
             "show_archived": True,
+            "with_created": False,
+            "with_active": False,
+            "with_wip": False,
+            "with_worktree_of": False,
+            "with_src": False,
+            "with_path": False,
+            "with_description": False,
+            "with_props": False,
         }
     ]
+
+
+def test_dispatch_command_json_routes_through_cmd_json() -> None:
+    """``b json '#infra' --archived`` parses cleanly and reaches
+    ``cmd_json`` with the joined filter expression and the archived
+    flags forwarded."""
+    parser = cli_dispatch.build_cli_parser()
+    ns = parser.parse_args(["json", "#infra", "--archived"])
+    seen: list[dict[str, object]] = []
+    def _capture(_base, **kw):
+        seen.append(kw)
+        return 9
+    rc = cli_dispatch.dispatch_command(
+        ns,
+        base_dir=Path("."),
+        bin_dir=Path("."),
+        cwd=Path("."),
+        no_arg_flow=lambda _a, _b, _c: 0,
+        initial_filter_expr="",
+        **_stub_dispatch_kwargs(cmd_json=_capture),
+    )
+    assert rc == 9
+    assert seen == [{
+        "filter_expr": "#infra",
+        "include_archived": True,
+        "archived_only": False,
+    }]
+
+
+def test_dispatch_command_json_archived_only_is_mutually_exclusive() -> None:
+    """``--archived`` and ``--archived-only`` are mutually exclusive
+    at the parser level — using both must fail at parse time, so
+    consumers can't accidentally combine them."""
+    import pytest
+    parser = cli_dispatch.build_cli_parser()
+    with pytest.raises(SystemExit):
+        parser.parse_args(["json", "--archived", "--archived-only"])
 
 
 def test_bare_b_archive_routes_to_mv_cwd() -> None:

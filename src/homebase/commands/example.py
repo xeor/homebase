@@ -110,12 +110,17 @@ def cmd_example_generate(path: str, count: int, seed: int | None) -> int:
 
 
 def _generate(target: Path, count: int, rng: random.Random) -> dict[str, int]:
+    from ..metadata.api import sync_tag_symlinks
+
     target.mkdir(parents=True)
     _write_homebase_dir(target)
     projects = _generate_active_projects(target, count, rng)
     worktrees = _attach_worktrees(target, projects, rng)
     archive_total, archive_packed = _generate_archive_entries(target, rng)
     _warm_cache(target, projects, rng)
+    err = sync_tag_symlinks(target)
+    if err:
+        print(f"warning: _tags/ sync after generate failed: {err}", file=sys.stderr)
     return {
         "active": len(projects),
         "git_repos": sum(1 for p in projects if p.git),

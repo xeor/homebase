@@ -5,6 +5,7 @@ from pathlib import Path
 _TOP_LEVEL_COMMANDS = [
     "help",
     "ls",
+    "json",
     "new",
     "n",
     "recent",
@@ -43,6 +44,56 @@ def _active_project_names(base_dir: Path) -> list[str]:
         names.append(entry.name)
     names.sort()
     return names
+
+
+def _cd_candidates(
+    words: list[str], cword: int, *, base_dir: Path,
+) -> list[str]:
+    """Project names offered by ``b cd <tab>``. Tokens that appear
+    between ``cd`` and the token currently being completed are joined
+    and treated as a filter expression (same syntax as ``b ls`` and
+    the TUI QUERY input). Examples:
+
+        b cd <tab>               → all active projects
+        b cd '#infra' <tab>      → only projects tagged ``infra``
+        b cd '#infra' my<tab>    → projects tagged ``infra`` whose name
+                                    starts with ``my``
+
+    When no prior tokens exist, we use a cheap filesystem listing (no
+    cache I/O). With filter tokens, we read the SQLite cache so that
+    tags/properties/etc. are available; a cold or unreadable cache
+    falls back to the unfiltered filesystem listing rather than
+    showing nothing."""
+    prior = [str(t) for t in words[1 : max(1, cword - 1)] if str(t).strip()]
+    filter_expr = " ".join(prior).strip()
+    if not filter_expr:
+        return _active_project_names(base_dir)
+
+    try:
+        from ..cache.api import cache_load_rows
+        from ..config.prefs import load_saved_filter_queries
+        from ..workspace.filter_compile import compile_filter_expr
+    except ImportError:
+        return _active_project_names(base_dir)
+
+    try:
+        active, _archived, _ts = cache_load_rows(base_dir)
+    except (OSError, ValueError):
+        return _active_project_names(base_dir)
+    if not active:
+        return _active_project_names(base_dir)
+
+    # ``@name`` tokens resolve through the user's saved-filter prefs.
+    # The completion subprocess starts with an empty NAMED_FILTERS
+    # dict, so populate it before compiling — otherwise every named
+    # token silently turns into "match nothing".
+    try:
+        load_saved_filter_queries(base_dir)
+    except (OSError, ValueError):
+        pass
+
+    pred, _hint = compile_filter_expr(filter_expr)
+    return sorted({str(row.name) for row in active if pred(row)})
 
 
 def _new_child_source_keys(base_dir: Path) -> list[str]:
@@ -203,8 +254,25 @@ def _subcommand_candidates(
         if prev == "--template":
             return _new_template_keys(base_dir)
         return [*_NEW_MODE_FLAGS, *_NEW_COMMON_FLAGS]
+    if cmd == "ls":
+        return [
+            "-l",
+            "--long",
+            "--git",
+            "--archived",
+            "--created",
+            "--active",
+            "--wip",
+            "--worktree-of",
+            "--src",
+            "--path",
+            "--description",
+            "--props",
+        ]
+    if cmd == "json":
+        return ["--archived", "--archived-only"]
     if cmd == "cd":
-        return _active_project_names(base_dir)
+        return _cd_candidates(words, cword, base_dir=base_dir)
     if cmd == "rm":
         return [*_active_project_names(base_dir), "--force", "--force-outside-base"]
     if cmd == "fix":

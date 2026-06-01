@@ -29,6 +29,7 @@ from ..commands.hooks_cmd import cmd_hooks_refresh
 from ..commands.setup import (
     cmd_cache_warm,
     cmd_cd,
+    cmd_json,
     cmd_ls,
     cmd_recent,
     cmd_setup,
@@ -423,13 +424,8 @@ def main(argv: list[str]) -> int:
                 initial_filter_expr=initial,
                 ctx=ui_ctx,
             ),
-            cmd_ls=lambda bd, filter_expr="", long_format=False, with_git=False, show_archived=False: cmd_ls(
-                bd,
-                filter_expr=filter_expr,
-                long_format=long_format,
-                with_git=with_git,
-                show_archived=show_archived,
-            ),
+            cmd_ls=lambda bd, **kw: cmd_ls(bd, **kw),
+            cmd_json=lambda bd, **kw: cmd_json(bd, **kw),
             cmd_new=lambda ns_obj, bd, cwd_path: cmd_new(
                 ns_obj,
                 bd,

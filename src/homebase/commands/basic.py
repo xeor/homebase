@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 from typing import Any, Callable
@@ -36,6 +37,39 @@ def cmd_tags_sync(
     return 0
 
 
+_JSON_FIELDS: tuple[str, ...] = (
+    "name", "branch", "dirty", "last", "src", "created", "description",
+    "created_ts", "last_ts", "git_ts", "opened_ts",
+    "is_fork", "is_tmp", "archived", "archived_ts",
+    "wip", "suffix",
+    "size_bytes",
+    "worktree_of", "repo_dir",
+    "tags", "properties",
+)
+
+
+def _row_to_json_dict(row: Any) -> dict[str, Any]:
+    """Serialize a ``ProjectRow`` for ``b json``. ``Path`` / optional
+    ``Path`` fields are stringified (or null) so the output is plain
+    JSON; internal cache bookkeeping (haystack_lower, tags_lower,
+    cache_age_s, …) is dropped — consumers don't need it and it's
+    not stable across runs."""
+    out: dict[str, Any] = {}
+    path = getattr(row, "path", None)
+    out["path"] = str(path) if path is not None else None
+    restore = getattr(row, "restore_target", None)
+    out["restore_target"] = str(restore) if restore is not None else None
+    for field_name in _JSON_FIELDS:
+        if not hasattr(row, field_name):
+            continue
+        value = getattr(row, field_name)
+        if isinstance(value, (list, tuple)):
+            out[field_name] = [str(v) for v in value]
+        else:
+            out[field_name] = value
+    return out
+
+
 def cmd_ls(
     base_dir: Path,
     *,
@@ -48,6 +82,14 @@ def cmd_ls(
     long_format: bool = False,
     with_git: bool = False,
     show_archived: bool = False,
+    with_created: bool = False,
+    with_active: bool = False,
+    with_wip: bool = False,
+    with_worktree_of: bool = False,
+    with_src: bool = False,
+    with_path: bool = False,
+    with_description: bool = False,
+    with_props: bool = False,
 ) -> int:
     """Fast, cache-backed `ls` over the workspace.
 
@@ -59,6 +101,12 @@ def cmd_ls(
 
     Opt-in slower data sources go behind explicit flags:
       ``with_git`` — refresh + show branch / dirty status.
+
+    Additional ``with_*`` flags append extra columns
+    (CREATED / ACTIVE / WIP / WORKTREE-OF / SRC / PATH / DESCRIPTION /
+    PROPS). Any of these also implicitly switches on long format so
+    the user can opt into a single extra column without having to add
+    ``-l``.
 
     The ``filter_expr`` accepts the same syntax as the TUI's QUERY
     input (compiled via ``compile_filter_expr``)."""
@@ -77,23 +125,46 @@ def cmd_ls(
     if with_git and enrich_git is not None:
         enrich_git(rows)
 
-    if not long_format and not with_git:
+    extras_on = any((
+        with_created, with_active, with_wip, with_worktree_of,
+        with_src, with_path, with_description, with_props,
+    ))
+    if not long_format and not with_git and not extras_on:
         for row in rows:
             print(row.name)
         return 0
 
+    def _ymd_or_dash(ts: int) -> str:
+        return fmt_ymd(ts) if ts > 0 else "-"
+
     # Long format. Width-allocated columns; truncated values keep the
     # output grep-friendly when piped. No ANSI — pipe-clean by design.
+    # Column order is fixed (independent of flag order on the CLI);
+    # the *last* column rendered is always emitted without truncation
+    # so free-form fields (TAGS, PROPS, DESCRIPTION, PATH) stay
+    # complete when they happen to be at the tail.
     cols: list[tuple[str, int, Callable[[Any], str]]] = [
         ("NAME", 28, lambda r: str(r.name)),
-        (
-            "MODIFIED",
-            12,
-            lambda r: fmt_ymd(getattr(r, "last_ts", 0) or 0)
-            if (getattr(r, "last_ts", 0) or 0) > 0
-            else str(getattr(r, "last", "") or "-"),
-        ),
     ]
+    if with_created:
+        cols.append((
+            "CREATED",
+            12,
+            lambda r: _ymd_or_dash(int(getattr(r, "created_ts", 0) or 0)),
+        ))
+    cols.append((
+        "MODIFIED",
+        12,
+        lambda r: fmt_ymd(getattr(r, "last_ts", 0) or 0)
+        if (getattr(r, "last_ts", 0) or 0) > 0
+        else str(getattr(r, "last", "") or "-"),
+    ))
+    if with_active:
+        cols.append((
+            "ACTIVE",
+            12,
+            lambda r: _ymd_or_dash(int(getattr(r, "opened_ts", 0) or 0)),
+        ))
     if with_git:
         cols.append((
             "BRANCH",
@@ -103,27 +174,126 @@ def cmd_ls(
                 + ("*" if str(getattr(r, "dirty", "")).strip() else "")
             ),
         ))
+    if with_wip:
+        cols.append((
+            "WIP",
+            5,
+            lambda r: "wip" if bool(getattr(r, "wip", False)) else "-",
+        ))
     cols.append((
         "SIZE",
         10,
         lambda r: fmt_size_human(int(getattr(r, "size_bytes", 0) or 0)),
     ))
+    if with_worktree_of:
+        cols.append((
+            "WORKTREE-OF",
+            16,
+            lambda r: str(getattr(r, "worktree_of", "") or "-"),
+        ))
+    if with_src:
+        cols.append((
+            "SRC",
+            24,
+            lambda r: str(getattr(r, "src", "") or "-"),
+        ))
+    if with_path:
+        cols.append((
+            "PATH",
+            40,
+            lambda r: str(getattr(r, "path", "") or "-"),
+        ))
+    if with_description:
+        cols.append((
+            "DESCRIPTION",
+            40,
+            lambda r: str(getattr(r, "description", "") or "-"),
+        ))
     cols.append((
         "TAGS",
         24,
         lambda r: ",".join(getattr(r, "tags", []) or []) or "-",
     ))
+    if with_props:
+        cols.append((
+            "PROPS",
+            24,
+            lambda r: ",".join(getattr(r, "properties", []) or []) or "-",
+        ))
 
-    header = "  ".join(f"{label:<{width}}" for label, width, _ in cols)
-    print(header)
+    last_idx = len(cols) - 1
+    header_parts = [
+        label if i == last_idx else f"{label:<{width}}"
+        for i, (label, width, _) in enumerate(cols)
+    ]
+    print("  ".join(header_parts))
     for row in rows:
         parts: list[str] = []
-        for _label, width, render in cols:
+        for i, (_label, width, render) in enumerate(cols):
             text = str(render(row))
+            if i == last_idx:
+                parts.append(text)
+                continue
             if len(text) > width:
                 text = text[: max(1, width - 1)] + "…"
             parts.append(f"{text:<{width}}")
         print("  ".join(parts))
+    return 0
+
+
+def cmd_json(
+    base_dir: Path,
+    *,
+    cache_load_rows: Callable[[Path], tuple[list[Any], list[Any], int]],
+    compile_filter_expr: Callable[[str], tuple[Callable[[Any], bool], str | None]],
+    filter_expr: str = "",
+    include_archived: bool = False,
+    archived_only: bool = False,
+) -> int:
+    """Cache-backed JSON dump of project rows. Counterpart to
+    ``cmd_ls`` for machine consumers — no column flags, every field
+    is always present.
+
+    Selection rules:
+      * default → active rows only.
+      * ``--archived`` → active + archived rows, with
+        ``is_archived: true`` added to the archived entries so
+        consumers can tell them apart.
+      * ``--archived-only`` → archived rows only (no
+        ``is_archived`` field; everything in the list is archived).
+
+    Filter expression uses the same syntax as ``b ls`` / the TUI's
+    QUERY input."""
+    active, archived, _ts = cache_load_rows(base_dir)
+    if archived_only:
+        rows: list[Any] = list(archived)
+        mark_archived = False
+    elif include_archived:
+        rows = list(active) + list(archived)
+        mark_archived = True
+    else:
+        rows = list(active)
+        mark_archived = False
+    archived_paths: set[Any] = (
+        {getattr(r, "path", None) for r in archived} if mark_archived else set()
+    )
+
+    if filter_expr.strip():
+        pred, err = compile_filter_expr(filter_expr)
+        if err:
+            print(f"b json: invalid filter: {err}", file=sys.stderr)
+            return 2
+        rows = [r for r in rows if pred(r)]
+
+    rows = sorted(rows, key=lambda r: str(getattr(r, "name", "")).lower())
+
+    payload: list[dict[str, Any]] = []
+    for row in rows:
+        item = _row_to_json_dict(row)
+        if mark_archived and getattr(row, "path", None) in archived_paths:
+            item["is_archived"] = True
+        payload.append(item)
+    print(json.dumps(payload, indent=2))
     return 0
 
 

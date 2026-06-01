@@ -58,6 +58,10 @@ def completion_counts(app: Any) -> tuple[list[tuple[str, int]], list[tuple[str, 
 
 def query_completion_candidates(app: Any, token: str) -> list[str]:
     t = token.strip()
+    neg = ""
+    if t.startswith("-"):
+        neg = "-"
+        t = t[1:]
     tag_rank, prop_rank = completion_counts(app)
     base_dir = getattr(app, "base_dir", None)
     # Hide group-only tags from the regular ``#X`` pool: those exist
@@ -117,8 +121,8 @@ def query_completion_candidates(app: Any, token: str) -> list[str]:
     if t.startswith("#") and not t.startswith("##"):
         pool = [c for c in pool if not c.startswith("##")]
     if not t:
-        return pool[:120]
-    return [x for x in pool if x.lower().startswith(t.lower())][:120]
+        return [f"{neg}{x}" for x in pool[:120]]
+    return [f"{neg}{x}" for x in pool if x.lower().startswith(t.lower())][:120]
 
 
 def apply_query_completion(app: Any, forward: bool) -> None:

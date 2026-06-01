@@ -1,14 +1,44 @@
 # homebase
 
-> AI usage note: This project is heavily AI-assisted with strict review discipline.
-> Changes are developed through detailed prompts, small iterative patches, strong
-> test coverage, and manual verification. The engineering bar is practical and
-> conservative: reproducible tests, lint-clean code, explicit error handling, and
-> non-destructive git workflows.
-
 Personal project workspace TUI + CLI. The `b` (or `homebase`) command
 opens a textual UI over a directory of projects, with archive,
 filtering, tagging, and tmux integration.
+
+[Screenshots](docs/screenshots.md)
+
+## What this solves and "the why"
+
+I got many projects, you got many projects. They are scattered around your computer.
+You use tmux with multiple tabs, maybe a notes-application to open additional notes about the project.
+It is a "home" project, and a "programming". But you can't have it in two folders...
+
+Feel the pain?
+
+Over the years I have tried a lot of solutions to just manage your mess, your projects, your failings, your WIP's, your life.
+* Scattered around where your system wants it doesnt work. What even is a `Document` anyway...
+* Put everything in `~/data` in a hierarky is better. But you won't find stuff easiely after a while.
+* Do as a friend and put everything flat in `random_crap`.. Kinda works with the first 5 things, but then what..?
+
+So... In the day of AI, I wanted to create my dream-tool to solve this problem.
+Yes it is vibe-coded, but the ideas and architecture are human.
+I've been deep-thinking about this project for a while. Fixing every bug I can find. Making it the tool I really want.
+
+The AI-discipline:
+
+- **Tests as the safety net** — well over 1000 tests in the suite. Every change
+  runs `uv run pytest` and `uv run ruff check` before it lands.
+- **Explicit conventions** — `AGENTS.md` pins layering, error
+  handling, and file placement rules; the AI reads it each session.
+- **No autonomous git or destructive actions** — commits, pushes,
+  force-pushes, `rm -rf` need an explicit ask.
+- **Iteration, not generation** — directed prompts, manual diff
+  review, smoke test against the real workspace, then next change.
+- **TODO-md's on big changes** - When doing big changes or a new major function
+  a TODO-*.md is made and iterated over till it looks good. A todo.md usually
+  ends up around 800 lines of details before the AI starts working on it.
+
+`uv sync && uv run pytest` reproduces the green state from any
+checkout.
 
 ## Quickstart
 

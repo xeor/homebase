@@ -269,3 +269,87 @@ def test_normalize_filter_preserves_colon_tokens() -> None:
     )
     assert ":modified=@-7d" in normalized
     assert ":created>=2025" in normalized
+
+
+def test_tag_glob_matches_any_tag() -> None:
+    pred, _ = _compile("#lang*")
+    assert pred(Row(tags=["lang:python"])) is True
+    assert pred(Row(tags=["language"])) is True
+    assert pred(Row(tags=["api"])) is False
+
+
+def test_property_glob_matches_any_alias() -> None:
+    pred, _ = _compile("!*git*")
+    assert pred(Row(properties=["git"])) is True
+    assert pred(Row(properties=["anygit"])) is True
+    assert pred(Row(properties=["py"])) is False
+
+
+def test_suffix_glob_matches() -> None:
+    pred, _ = _compile(".tm*")
+    assert pred(Row(suffix="tmp")) is True
+    assert pred(Row(suffix="tmux")) is True
+    assert pred(Row(suffix="fork")) is False
+
+
+def test_tree_tag_glob_walks_ancestors() -> None:
+    tree = {"py-cli": frozenset({"py-cli", "python", "programming"})}
+    pred, _ = filter_engine.compile_filter_expr(
+        "##prog*",
+        token_re=TOKEN_RE,
+        match_query_fn=lambda row, q: q in row.name.lower(),
+        property_alias_set_fn=lambda key: {key.lower()},
+        get_named_filter=lambda _name: "",
+        tag_ancestors_fn=lambda t: tree.get(t, frozenset()),
+    )
+    assert pred(Row(tags=["py-cli"])) is True
+    assert pred(Row(tags=["unrelated"])) is False
+
+
+def test_negation_excludes_tag() -> None:
+    pred, _ = _compile("-#data")
+    assert pred(Row(tags=["api"])) is True
+    assert pred(Row(tags=["data"])) is False
+
+
+def test_negation_combines_with_other_terms_as_and() -> None:
+    pred, _ = _compile("#api -#legacy")
+    assert pred(Row(tags=["api"])) is True
+    assert pred(Row(tags=["api", "legacy"])) is False
+    assert pred(Row(tags=["web"])) is False
+
+
+def test_negation_works_on_property_glob() -> None:
+    pred, _ = _compile("-!*readme*")
+    assert pred(Row(properties=["git"])) is True
+    assert pred(Row(properties=["readme"])) is False
+    assert pred(Row(properties=["has-readme"])) is False
+
+
+def test_negation_works_on_suffix() -> None:
+    pred, _ = _compile("-.tmp")
+    assert pred(Row(suffix="fork")) is True
+    assert pred(Row(suffix="tmp")) is False
+
+
+def test_negation_works_on_tree_tag_glob() -> None:
+    tree = {"py-cli": frozenset({"py-cli", "programming"})}
+    pred, _ = filter_engine.compile_filter_expr(
+        "-##prog*",
+        token_re=TOKEN_RE,
+        match_query_fn=lambda row, q: q in row.name.lower(),
+        property_alias_set_fn=lambda key: {key.lower()},
+        get_named_filter=lambda _name: "",
+        tag_ancestors_fn=lambda t: tree.get(t, frozenset()),
+    )
+    assert pred(Row(tags=["py-cli"])) is False
+    assert pred(Row(tags=["api"])) is True
+
+
+def test_query_uses_filter_syntax_detects_negated_sigil_tokens() -> None:
+    assert filter_engine.query_uses_filter_syntax("-#data") is True
+    assert filter_engine.query_uses_filter_syntax("-!readme") is True
+    assert filter_engine.query_uses_filter_syntax("-.tmp") is True
+    assert filter_engine.query_uses_filter_syntax("-@hot") is True
+    assert filter_engine.query_uses_filter_syntax("-:tags=0") is True
+    assert filter_engine.query_uses_filter_syntax("foo -#bar") is True

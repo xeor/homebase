@@ -149,6 +149,14 @@ def cmd_ls(
     long_format: bool = False,
     with_git: bool = False,
     show_archived: bool = False,
+    with_created: bool = False,
+    with_active: bool = False,
+    with_wip: bool = False,
+    with_worktree_of: bool = False,
+    with_src: bool = False,
+    with_path: bool = False,
+    with_description: bool = False,
+    with_props: bool = False,
 ) -> int:
     from ..cache.api import cache_load_rows
     from ..workspace.filter_compile import compile_filter_expr
@@ -178,6 +186,34 @@ def cmd_ls(
         long_format=long_format,
         with_git=with_git,
         show_archived=show_archived,
+        with_created=with_created,
+        with_active=with_active,
+        with_wip=with_wip,
+        with_worktree_of=with_worktree_of,
+        with_src=with_src,
+        with_path=with_path,
+        with_description=with_description,
+        with_props=with_props,
+    )
+
+
+def cmd_json(
+    base_dir: Path,
+    *,
+    filter_expr: str = "",
+    include_archived: bool = False,
+    archived_only: bool = False,
+) -> int:
+    from ..cache.api import cache_load_rows
+    from ..workspace.filter_compile import compile_filter_expr
+
+    return commands_basic.cmd_json(
+        base_dir,
+        cache_load_rows=cache_load_rows,
+        compile_filter_expr=compile_filter_expr,
+        filter_expr=filter_expr,
+        include_archived=include_archived,
+        archived_only=archived_only,
     )
 
 
