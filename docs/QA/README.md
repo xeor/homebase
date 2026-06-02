@@ -32,8 +32,8 @@ Last run: `2026-06-02` · source: 218 files / 47k LOC · tests: 165 files / ~28k
 | vulture       | findings (min-confidence 80)    | 0            | 0             | green    |
 | vulture       | findings (min-confidence 60)    | ~289 lns     | review        | baseline |
 | bandit        | High / Medium / Low             | 4 / 7 / 141  | 0 / 0 / < 20  | baseline |
-| radon (cc)    | avg complexity                  | D (20.3)     | B (≤ 10)      | baseline |
-| radon (cc)    | functions ranked C or worse     | 202          | 0             | baseline |
+| radon (cc)    | avg complexity                  | D (20.0)     | B (≤ 10)      | baseline |
+| radon (cc)    | functions ranked C or worse     | 201          | 0             | baseline |
 | radon (mi)    | files at maintainability ≤ C    | 14           | 0             | baseline |
 | benchmark     | latest score / warm / cold      | 168.7 / 170.8 / 163.7 | ↑ over time | tracked  |
 
@@ -236,11 +236,11 @@ criterion. Tick `[x]` when the snapshot number reaches the target.
 
 ### Phase 2 — complexity hotspots (radon cc)
 
-- [ ] Split or simplify the rank-F / rank-E functions first:
-      `filter.engine.compile_filter_expr` (E40),
-      `filter.tag_index.sync_tag_symlinks_detailed` (E37),
-      `commands.basic.cmd_ls` (F45).
-- [ ] Bring all rank-D entries to ≤ C, then average to ≤ B.
+- [x] Split or simplify the rank-F / rank-E functions first:
+      `filter.engine.compile_filter_expr` (E40 → B7),
+      `filter.tag_index.sync_tag_symlinks_detailed` (E37 → B6),
+      `commands.basic.cmd_ls` (F45 → C11).
+- [ ] Bring all remaining rank-D+ entries to ≤ C, then average to ≤ B.
 - Exit: avg ≤ B, no rank D+ functions.
 
 ### Phase 3 — typing (mypy)

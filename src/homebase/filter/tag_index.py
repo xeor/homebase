@@ -9,6 +9,15 @@ from typing import Any, Callable
 
 import yaml
 
+_FS_ERRORS: tuple[type[BaseException], ...] = (
+    OSError,
+    ValueError,
+    TypeError,
+    sqlite3.Error,
+    yaml.YAMLError,
+    subprocess.SubprocessError,
+)
+
 
 def safe_tag_component(tag: str) -> str:
     cleaned = re.sub(r"[^A-Za-z0-9._-]+", "_", tag.strip())
@@ -30,6 +39,124 @@ def project_tag_link_name(base_dir: Path, project_path: Path) -> str:
     return safe_link_name(rel.parts[-1])
 
 
+def _collect_desired_links(
+    base_dir: Path,
+    root: Path,
+    rows: list[Any],
+    *,
+    debug: bool,
+    lines: list[str],
+) -> dict[Path, Path]:
+    desired: dict[Path, Path] = {}
+    for row in rows:
+        target = row.path.resolve()
+        tags = sorted({str(tag).strip() for tag in row.tags if str(tag).strip()})
+        if debug:
+            rel = target.relative_to(base_dir)
+            lines.append(f"project: {rel} tags={','.join(tags) if tags else '-'}")
+        if not tags:
+            continue
+
+        base_name = project_tag_link_name(base_dir, row.path)
+        for raw_tag in tags:
+            tag_dir = root / safe_tag_component(raw_tag)
+            tag_dir.mkdir(parents=True, exist_ok=True)
+            candidate = tag_dir / base_name
+            n = 2
+            while candidate in desired and desired[candidate] != target:
+                candidate = tag_dir / f"{base_name}_{n}"
+                n += 1
+            desired[candidate] = target
+            if debug:
+                lines.append(f"want: {candidate.relative_to(base_dir)} -> {target}")
+    return desired
+
+
+def _apply_one_link(
+    link_path: Path,
+    target: Path,
+    *,
+    verbose: bool,
+    lines: list[str],
+) -> tuple[int, int, int, int]:
+    """Return (created, updated, kept, skipped_conflicts) deltas for one link."""
+    if link_path.exists() or link_path.is_symlink():
+        if link_path.is_symlink():
+            try:
+                if link_path.resolve() == target:
+                    return (0, 0, 1, 0)
+            except OSError:
+                pass
+            link_path.unlink(missing_ok=True)
+            if verbose:
+                lines.append(f"update symlink: {link_path} -> {target}")
+            link_path.symlink_to(target)
+            return (0, 1, 0, 0)
+        if verbose:
+            lines.append(f"skip non-symlink path: {link_path}")
+        return (0, 0, 0, 1)
+    link_path.symlink_to(target)
+    if verbose:
+        lines.append(f"create symlink: {link_path} -> {target}")
+    return (1, 0, 0, 0)
+
+
+def _apply_desired_links(
+    desired: dict[Path, Path],
+    *,
+    verbose: bool,
+    lines: list[str],
+) -> tuple[int, int, int, int]:
+    created = updated = kept = skipped_conflicts = 0
+    for link_path, target in desired.items():
+        dc, du, dk, ds = _apply_one_link(link_path, target, verbose=verbose, lines=lines)
+        created += dc
+        updated += du
+        kept += dk
+        skipped_conflicts += ds
+    return created, updated, kept, skipped_conflicts
+
+
+def _remove_stale_links(
+    root: Path,
+    desired: dict[Path, Path],
+    *,
+    verbose: bool,
+    lines: list[str],
+) -> int:
+    removed = 0
+    for cur in root.rglob("*"):
+        if not cur.is_symlink() or cur in desired:
+            continue
+        cur.unlink(missing_ok=True)
+        removed += 1
+        if verbose:
+            lines.append(f"remove stale symlink: {cur}")
+    return removed
+
+
+def _remove_empty_dirs(
+    root: Path,
+    *,
+    verbose: bool,
+    lines: list[str],
+) -> int:
+    dirs = [p for p in root.rglob("*") if p.is_dir() and not p.is_symlink()]
+    dirs.sort(key=lambda p: len(p.parts), reverse=True)
+    removed = 0
+    for d in dirs:
+        try:
+            next(d.iterdir())
+        except StopIteration:
+            d.rmdir()
+            removed += 1
+            if verbose:
+                lines.append(f"remove empty dir: {d}")
+        except OSError:
+            pass
+    return removed
+
+
 def sync_tag_symlinks_detailed(
     base_dir: Path,
     *,
@@ -40,12 +167,6 @@ def sync_tag_symlinks_detailed(
 ) -> tuple[str | None, list[str]]:
     root = (base_dir / "_tags").resolve()
     lines: list[str] = []
-    created = 0
-    updated = 0
-    kept = 0
-    skipped_conflicts = 0
-    removed_stale = 0
-    removed_empty_dirs = 0
 
     if root.exists() and not root.is_dir():
         return f"_tags is not a directory: {root}", lines
@@ -61,75 +182,18 @@ def sync_tag_symlinks_detailed(
             lines.append(f"markers found: {len(markers)}")
             lines.append(f"active projects scanned: {len(rows)}")
 
-        desired: dict[Path, Path] = {}
-        for row in rows:
-            target = row.path.resolve()
-            tags = sorted({str(tag).strip() for tag in row.tags if str(tag).strip()})
-            if debug:
-                rel = target.relative_to(base_dir)
-                lines.append(f"project: {rel} tags={','.join(tags) if tags else '-'}")
-            if not tags:
-                continue
-
-            base_name = project_tag_link_name(base_dir, row.path)
-            for raw_tag in tags:
-                tag_dir = root / safe_tag_component(raw_tag)
-                tag_dir.mkdir(parents=True, exist_ok=True)
-                candidate = tag_dir / base_name
-                n = 2
-                while candidate in desired and desired[candidate] != target:
-                    candidate = tag_dir / f"{base_name}_{n}"
-                    n += 1
-                desired[candidate] = target
-                if debug:
-                    lines.append(f"want: {candidate.relative_to(base_dir)} -> {target}")
+        desired = _collect_desired_links(
+            base_dir, root, rows, debug=debug, lines=lines,
+        )
 
         if verbose:
             lines.append(f"desired symlinks: {len(desired)}")
 
-        for link_path, target in desired.items():
-            if link_path.exists() or link_path.is_symlink():
-                if link_path.is_symlink():
-                    try:
-                        if link_path.resolve() == target:
-                            kept += 1
-                            continue
-                    except OSError:
-                        pass
-                    link_path.unlink(missing_ok=True)
-                    updated += 1
-                    if verbose:
-                        lines.append(f"update symlink: {link_path} -> {target}")
-                else:
-                    skipped_conflicts += 1
-                    if verbose:
-                        lines.append(f"skip non-symlink path: {link_path}")
-                    continue
-
-            link_path.symlink_to(target)
-            created += 1
-            if verbose:
-                lines.append(f"create symlink: {link_path} -> {target}")
-
-        stale = [cur for cur in root.rglob("*") if cur.is_symlink() and cur not in desired]
-        for cur in stale:
-            cur.unlink(missing_ok=True)
-            removed_stale += 1
-            if verbose:
-                lines.append(f"remove stale symlink: {cur}")
-
-        dirs = [p for p in root.rglob("*") if p.is_dir() and not p.is_symlink()]
-        dirs.sort(key=lambda p: len(p.parts), reverse=True)
-        for d in dirs:
-            try:
-                next(d.iterdir())
-            except StopIteration:
-                d.rmdir()
-                removed_empty_dirs += 1
-                if verbose:
-                    lines.append(f"remove empty dir: {d}")
-            except OSError:
-                pass
+        created, updated, kept, skipped_conflicts = _apply_desired_links(
+            desired, verbose=verbose, lines=lines,
+        )
+        removed_stale = _remove_stale_links(root, desired, verbose=verbose, lines=lines)
+        removed_empty_dirs = _remove_empty_dirs(root, verbose=verbose, lines=lines)
 
         lines.append(
             "summary: "
@@ -138,14 +202,7 @@ def sync_tag_symlinks_detailed(
             f"skipped_conflicts={skipped_conflicts}"
         )
         return None, lines
-    except (
-        OSError,
-        ValueError,
-        TypeError,
-        sqlite3.Error,
-        yaml.YAMLError,
-        subprocess.SubprocessError,
-    ) as exc:
+    except _FS_ERRORS as exc:
         return str(exc), lines
 
 

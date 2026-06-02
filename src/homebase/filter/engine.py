@@ -15,9 +15,347 @@ STRUCTURED_TERM_RE = re.compile(
 )
 STRUCTURED_OPS = frozenset({"=", "!=", "<", "<=", ">", ">=", "~"})
 
+_DURATION_MULT = {
+    "s": 1,
+    "h": 3600,
+    "d": 86400,
+    "w": 604800,
+    "m": 2592000,
+    "y": 31536000,
+}
+
 
 def _has_glob(pattern: str) -> bool:
     return any(ch in pattern for ch in "*?[")
+
+
+def _compare_int(lhs: int, op: str, rhs: int) -> bool:
+    if op == "=":
+        return lhs == rhs
+    if op == "!=":
+        return lhs != rhs
+    if op == ">":
+        return lhs > rhs
+    if op == ">=":
+        return lhs >= rhs
+    if op == "<":
+        return lhs < rhs
+    if op == "<=":
+        return lhs <= rhs
+    return False
+
+
+def _compare_key(lhs: tuple[int, ...], op: str, rhs: tuple[int, ...]) -> bool:
+    if op == "=":
+        return lhs == rhs
+    if op == "!=":
+        return lhs != rhs
+    if op == "<":
+        return lhs < rhs
+    if op == "<=":
+        return lhs <= rhs
+    if op == ">":
+        return lhs > rhs
+    if op == ">=":
+        return lhs >= rhs
+    return False
+
+
+def _parse_relative_span_to_seconds(spec: str) -> int | None:
+    parts = re.findall(r"(\d+)([ymwdhs])", spec)
+    if not parts:
+        return None
+    rebuilt = "".join(f"{n}{u}" for n, u in parts)
+    if rebuilt != spec:
+        return None
+    return sum(int(n) * _DURATION_MULT.get(u, 1) for n, u in parts)
+
+
+def _row_ts(row: Any, field: str) -> int:
+    if field == "created":
+        return int(getattr(row, "created_ts", 0))
+    if field == "active":
+        return int(getattr(row, "opened_ts", 0))
+    return int(getattr(row, "last_ts", 0))
+
+
+def _parse_date_literal(value: str) -> tuple[int, ...] | None:
+    if re.fullmatch(r"\d{4}", value):
+        return (int(value),)
+    if re.fullmatch(r"\d{4}-\d{2}", value):
+        year, month = value.split("-", 1)
+        yy, mm = int(year), int(month)
+        return (yy, mm) if 1 <= mm <= 12 else None
+    if re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
+        year, month, day = value.split("-", 2)
+        yy, mm, dd = int(year), int(month), int(day)
+        try:
+            datetime(yy, mm, dd)
+        except (TypeError, ValueError):
+            return None
+        return (yy, mm, dd)
+    return None
+
+
+def _date_key(ts: int, precision: int) -> tuple[int, ...] | None:
+    if ts <= 0:
+        return None
+    dt = datetime.fromtimestamp(ts).astimezone()
+    if precision == 1:
+        return (dt.year,)
+    if precision == 2:
+        return (dt.year, dt.month)
+    return (dt.year, dt.month, dt.day)
+
+
+def _make_time_builder(field: str, *, now_ts: int) -> StructuredTermBuilder:
+    def build(op: str, value: str) -> tuple[str | None, Callable[[Any], bool] | None]:
+        if value.startswith("@-"):
+            seconds = _parse_relative_span_to_seconds(value[2:])
+            if seconds is None:
+                return f"invalid relative span: :{field}{op}{value}", None
+            if op != "=":
+                return (
+                    f"operator {op} not implemented for :{field} with relative span",
+                    None,
+                )
+            threshold = now_ts - seconds
+            return None, (lambda row: _row_ts(row, field) >= threshold)
+        rhs_key = _parse_date_literal(value)
+        if rhs_key is None:
+            return f"invalid value for :{field}: {value!r}", None
+        precision = len(rhs_key)
+
+        def pred(row: Any) -> bool:
+            lhs_key = _date_key(_row_ts(row, field), precision)
+            if lhs_key is None:
+                return False
+            return _compare_key(lhs_key, op, rhs_key)
+
+        return None, pred
+
+    return build
+
+
+def _make_count_builder(field: str) -> StructuredTermBuilder:
+    def build(op: str, value: str) -> tuple[str | None, Callable[[Any], bool] | None]:
+        if not re.fullmatch(r"\d+", value):
+            return f"invalid value for :{field}: {value!r}", None
+        rhs = int(value)
+
+        def pred(row: Any) -> bool:
+            lhs = len(getattr(row, field, []))
+            return _compare_int(lhs, op, rhs)
+
+        return None, pred
+
+    return build
+
+
+def _make_suffix_pred(pattern: str) -> Callable[[Any], bool]:
+    if _has_glob(pattern):
+        return lambda row: fnmatch.fnmatchcase(
+            (getattr(row, "suffix", "") or "").lower(), pattern
+        )
+    return lambda row: (getattr(row, "suffix", "") or "").lower() == pattern
+
+
+def _make_tag_match_pred(pattern: str) -> Callable[[Any], bool]:
+    def pred(row: Any) -> bool:
+        cached = getattr(row, "tags_lower", None)
+        if cached is not None:
+            return pattern in cached
+        for tag in getattr(row, "tags", []):
+            if str(tag).lower() == pattern:
+                return True
+        return False
+
+    return pred
+
+
+def _make_tag_glob_pred(pattern: str) -> Callable[[Any], bool]:
+    def pred(row: Any) -> bool:
+        cached = getattr(row, "tags_lower", None)
+        iterable = cached if cached is not None else (
+            str(t).lower() for t in getattr(row, "tags", [])
+        )
+        for tag_low in iterable:
+            if fnmatch.fnmatchcase(tag_low, pattern):
+                return True
+        return False
+
+    return pred
+
+
+def _tag_self_match(row: Any, pattern: str, *, is_glob: bool) -> bool:
+    tags = getattr(row, "tags", []) or []
+    cached = getattr(row, "tags_lower", None)
+    if is_glob:
+        iterable = cached if cached is not None else (str(t).lower() for t in tags)
+        return any(fnmatch.fnmatchcase(tag_low, pattern) for tag_low in iterable)
+    if cached is not None:
+        return pattern in cached
+    return any(str(tag).lower() == pattern for tag in tags)
+
+
+def _tag_ancestor_match(
+    row: Any,
+    pattern: str,
+    *,
+    is_glob: bool,
+    tag_ancestors_fn: Callable[[str], frozenset[str]],
+) -> bool:
+    for tag in getattr(row, "tags", []) or []:
+        for anc in tag_ancestors_fn(str(tag)):
+            anc_low = anc.lower()
+            if is_glob:
+                if fnmatch.fnmatchcase(anc_low, pattern):
+                    return True
+            elif anc_low == pattern:
+                return True
+    return False
+
+
+def _make_tag_tree_pred(
+    pattern: str,
+    *,
+    tag_ancestors_fn: Callable[[str], frozenset[str]] | None,
+) -> Callable[[Any], bool]:
+    is_glob = _has_glob(pattern)
+
+    def pred(row: Any) -> bool:
+        if _tag_self_match(row, pattern, is_glob=is_glob):
+            return True
+        if tag_ancestors_fn is None:
+            return False
+        return _tag_ancestor_match(
+            row, pattern, is_glob=is_glob, tag_ancestors_fn=tag_ancestors_fn,
+        )
+
+    return pred
+
+
+def _make_property_pred(
+    pattern: str,
+    *,
+    property_alias_set_fn: Callable[[str], set[str]],
+) -> Callable[[Any], bool]:
+    if _has_glob(pattern):
+        return lambda row: any(
+            any(fnmatch.fnmatchcase(alias, pattern) for alias in property_alias_set_fn(str(prop)))
+            for prop in getattr(row, "properties", [])
+        )
+    return lambda row: any(
+        pattern in property_alias_set_fn(str(prop))
+        for prop in getattr(row, "properties", [])
+    )
+
+
+_TOKEN_KINDS = {"(": "LP", ")": "RP", "OR": "OR"}
+
+
+def _classify(token: str) -> str:
+    return _TOKEN_KINDS.get(token, "TERM")
+
+
+def _needs_glue(prev_kind: str, kind: str) -> bool:
+    return prev_kind in {"TERM", "RP"} and kind in {"TERM", "LP"}
+
+
+def _glue_op(prev_kind: str, prev_term: str, kind: str, token: str) -> str:
+    if (
+        prev_kind == "TERM"
+        and kind == "TERM"
+        and prev_term.startswith("@")
+        and token.startswith("@")
+    ):
+        return "OR"
+    return "AND"
+
+
+def _insert_implicit_ops(tokens: list[str]) -> list[str]:
+    normalized = [
+        "OR" if (token.upper() == "OR" or token == "|") else token
+        for token in tokens
+    ]
+    out: list[str] = []
+    prev_kind = ""
+    prev_term = ""
+    for token in normalized:
+        kind = _classify(token)
+        if out and _needs_glue(prev_kind, kind):
+            out.append(_glue_op(prev_kind, prev_term, kind, token))
+        out.append(token)
+        prev_kind = kind
+        prev_term = token if kind == "TERM" else ""
+    return out
+
+
+_RPN_PREC = {"OR": 1, "AND": 2}
+
+
+def _rpn_consume_operator(token: str, out: list[str], ops: list[str]) -> None:
+    while ops and ops[-1] in _RPN_PREC and _RPN_PREC[ops[-1]] >= _RPN_PREC[token]:
+        out.append(ops.pop())
+    ops.append(token)
+
+
+def _rpn_consume_rparen(out: list[str], ops: list[str]) -> str | None:
+    while ops and ops[-1] != "(":
+        out.append(ops.pop())
+    if not ops or ops[-1] != "(":
+        return "filter parse error: unmatched ')'"
+    ops.pop()
+    return None
+
+
+def _to_rpn(tokens: list[str]) -> tuple[list[str], str | None]:
+    out: list[str] = []
+    ops: list[str] = []
+    for token in tokens:
+        if token in _RPN_PREC:
+            _rpn_consume_operator(token, out, ops)
+        elif token == "(":
+            ops.append(token)
+        elif token == ")":
+            err = _rpn_consume_rparen(out, ops)
+            if err is not None:
+                return [], err
+        else:
+            out.append(token)
+    while ops:
+        op = ops.pop()
+        if op in {"(", ")"}:
+            return [], "filter parse error: unmatched '('"
+        out.append(op)
+    return out, None
+
+
+def _and_pred(a: Callable[[Any], bool], b: Callable[[Any], bool]) -> Callable[[Any], bool]:
+    return lambda row: a(row) and b(row)
+
+
+def _or_pred(a: Callable[[Any], bool], b: Callable[[Any], bool]) -> Callable[[Any], bool]:
+    return lambda row: a(row) or b(row)
+
+
+def _evaluate_rpn(
+    rpn: list[str],
+    term_pred: Callable[[str], Callable[[Any], bool]],
+) -> Callable[[Any], bool] | None:
+    stack: list[Callable[[Any], bool]] = []
+    for token in rpn:
+        if token == "AND" or token == "OR":
+            if len(stack) < 2:
+                return None
+            b = stack.pop()
+            a = stack.pop()
+            stack.append(_and_pred(a, b) if token == "AND" else _or_pred(a, b))
+        else:
+            stack.append(term_pred(token))
+    if len(stack) != 1:
+        return None
+    return stack[0]
 
 
 def compile_filter_expr(
@@ -35,126 +373,25 @@ def compile_filter_expr(
         return (lambda _row: True), None
 
     tokens = [m.group(0) for m in token_re.finditer(raw)]
-    normalized = ["OR" if (token.upper() == "OR" or token == "|") else token for token in tokens]
-
-    with_and: list[str] = []
-    prev_kind = ""
-    prev_term = ""
-    for token in normalized:
-        kind = "TERM"
-        if token == "(":
-            kind = "LP"
-        elif token == ")":
-            kind = "RP"
-        elif token == "OR":
-            kind = "OR"
-        if with_and and prev_kind in {"TERM", "RP"} and kind in {"TERM", "LP"}:
-            if prev_kind == "TERM" and kind == "TERM" and prev_term.startswith("@") and token.startswith("@"):
-                with_and.append("OR")
-            else:
-                with_and.append("AND")
-        with_and.append(token)
-        prev_kind = kind
-        prev_term = token if kind == "TERM" else ""
-
-    prec = {"OR": 1, "AND": 2}
-    out: list[str] = []
-    ops: list[str] = []
-    for token in with_and:
-        if token in {"AND", "OR"}:
-            while ops and ops[-1] in prec and prec[ops[-1]] >= prec[token]:
-                out.append(ops.pop())
-            ops.append(token)
-            continue
-        if token == "(":
-            ops.append(token)
-            continue
-        if token == ")":
-            while ops and ops[-1] != "(":
-                out.append(ops.pop())
-            if not ops or ops[-1] != "(":
-                return (lambda _row: True), "filter parse error: unmatched ')'"
-            ops.pop()
-            continue
-        out.append(token)
-    while ops:
-        op = ops.pop()
-        if op in {"(", ")"}:
-            return (lambda _row: True), "filter parse error: unmatched '('"
-        out.append(op)
+    with_ops = _insert_implicit_ops(tokens)
+    rpn, parse_err = _to_rpn(with_ops)
+    if parse_err is not None:
+        return (lambda _row: True), parse_err
 
     now_ts = int(time.time())
+    structured_builders: dict[str, StructuredTermBuilder] = {
+        "created": _make_time_builder("created", now_ts=now_ts),
+        "modified": _make_time_builder("modified", now_ts=now_ts),
+        "active": _make_time_builder("active", now_ts=now_ts),
+        "tags": _make_count_builder("tags"),
+        "properties": _make_count_builder("properties"),
+    }
+    if extra_term_builders:
+        structured_builders.update(extra_term_builders)
+
+    hints: list[str] = []
     compiled_named: dict[str, Callable[[Any], bool]] = {}
     compiling_named: set[str] = set()
-    hints: list[str] = []
-
-    def compare_int(lhs: int, op: str, rhs: int) -> bool:
-        if op == "=":
-            return lhs == rhs
-        if op == "!=":
-            return lhs != rhs
-        if op == ">":
-            return lhs > rhs
-        if op == ">=":
-            return lhs >= rhs
-        if op == "<":
-            return lhs < rhs
-        if op == "<=":
-            return lhs <= rhs
-        return False
-
-    def duration_to_seconds(n: int, unit: str) -> int:
-        mult = {"s": 1, "h": 3600, "d": 86400, "w": 604800, "m": 2592000, "y": 31536000}
-        return n * mult.get(unit, 1)
-
-    def parse_relative_span_to_seconds(spec: str) -> int | None:
-        parts = re.findall(r"(\d+)([ymwdhs])", spec)
-        if not parts:
-            return None
-        rebuilt = "".join(f"{n}{u}" for n, u in parts)
-        if rebuilt != spec:
-            return None
-        total = 0
-        for n, u in parts:
-            total += duration_to_seconds(int(n), u)
-        return total
-
-    def row_ts(row: Any, field: str) -> int:
-        if field == "created":
-            return int(getattr(row, "created_ts", 0))
-        if field == "active":
-            return int(getattr(row, "opened_ts", 0))
-        return int(getattr(row, "last_ts", 0))
-
-    def parse_date_literal(value: str) -> tuple[int, ...] | None:
-        if re.fullmatch(r"\d{4}", value):
-            return (int(value),)
-        if re.fullmatch(r"\d{4}-\d{2}", value):
-            year, month = value.split("-", 1)
-            yy = int(year)
-            mm = int(month)
-            return (yy, mm) if 1 <= mm <= 12 else None
-        if re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
-            year, month, day = value.split("-", 2)
-            yy = int(year)
-            mm = int(month)
-            dd = int(day)
-            try:
-                datetime(yy, mm, dd)
-            except (TypeError, ValueError):
-                return None
-            return (yy, mm, dd)
-        return None
-
-    def date_key(ts: int, precision: int) -> tuple[int, ...] | None:
-        if ts <= 0:
-            return None
-        dt = datetime.fromtimestamp(ts).astimezone()
-        if precision == 1:
-            return (dt.year,)
-        if precision == 2:
-            return (dt.year, dt.month)
-        return (dt.year, dt.month, dt.day)
 
     def named_pred(name: str) -> Callable[[Any], bool]:
         if name in compiled_named:
@@ -179,68 +416,18 @@ def compile_filter_expr(
         compiled_named[name] = pred
         return pred
 
-    def _make_time_builder(field: str) -> StructuredTermBuilder:
-        def build(op: str, value: str) -> tuple[str | None, Callable[[Any], bool] | None]:
-            if value.startswith("@-"):
-                seconds = parse_relative_span_to_seconds(value[2:])
-                if seconds is None:
-                    return f"invalid relative span: :{field}{op}{value}", None
-                if op != "=":
-                    return (
-                        f"operator {op} not implemented for :{field} with relative span",
-                        None,
-                    )
-                threshold = now_ts - seconds
-                return None, (lambda row: row_ts(row, field) >= threshold)
-            rhs_key = parse_date_literal(value)
-            if rhs_key is None:
-                return f"invalid value for :{field}: {value!r}", None
-            precision = len(rhs_key)
-
-            def pred(row: Any) -> bool:
-                lhs_key = date_key(row_ts(row, field), precision)
-                if lhs_key is None:
-                    return False
-                if op == "=":
-                    return lhs_key == rhs_key
-                if op == "!=":
-                    return lhs_key != rhs_key
-                if op == "<":
-                    return lhs_key < rhs_key
-                if op == "<=":
-                    return lhs_key <= rhs_key
-                if op == ">":
-                    return lhs_key > rhs_key
-                if op == ">=":
-                    return lhs_key >= rhs_key
-                return False
-
-            return None, pred
-
-        return build
-
-    def _make_count_builder(field: str) -> StructuredTermBuilder:
-        def build(op: str, value: str) -> tuple[str | None, Callable[[Any], bool] | None]:
-            if not re.fullmatch(r"\d+", value):
-                return f"invalid value for :{field}: {value!r}", None
-            rhs = int(value)
-
-            def lhs(row: Any) -> int:
-                return len(getattr(row, field, []))
-
-            return None, (lambda row: compare_int(lhs(row), op, rhs))
-
-        return build
-
-    structured_builders: dict[str, StructuredTermBuilder] = {
-        "created": _make_time_builder("created"),
-        "modified": _make_time_builder("modified"),
-        "active": _make_time_builder("active"),
-        "tags": _make_count_builder("tags"),
-        "properties": _make_count_builder("properties"),
-    }
-    if extra_term_builders:
-        structured_builders.update(extra_term_builders)
+    def structured_pred(match: re.Match[str]) -> Callable[[Any], bool]:
+        key, op, value = match.group(1), match.group(2), match.group(3)
+        builder = structured_builders.get(key)
+        if builder is None:
+            hints.append(f"unknown filter key: :{key}")
+            return lambda _row: False
+        hint, pred = builder(op, value)
+        if hint is not None or pred is None:
+            if hint is not None:
+                hints.append(hint)
+            return lambda _row: False
+        return pred
 
     def term_pred(token: str) -> Callable[[Any], bool]:
         if token.startswith("-") and len(token) > 1:
@@ -248,132 +435,29 @@ def compile_filter_expr(
             return lambda row: not inner(row)
 
         low = token.lower()
-
         m_struct = STRUCTURED_TERM_RE.match(low)
-        if m_struct:
-            key = m_struct.group(1)
-            op = m_struct.group(2)
-            value = m_struct.group(3)
-            builder = structured_builders.get(key)
-            if builder is None:
-                hints.append(f"unknown filter key: :{key}")
-                return lambda _row: False
-            hint, struct_pred = builder(op, value)
-            if hint is not None:
-                hints.append(hint)
-                return lambda _row: False
-            assert struct_pred is not None
-            return struct_pred
-
+        if m_struct is not None:
+            return structured_pred(m_struct)
         if token.startswith("@") and len(token) > 1:
             return named_pred(token[1:].strip())
         if token.startswith(".") and len(token) > 1:
-            pattern = token[1:].strip().lower()
-            if _has_glob(pattern):
-                return lambda row: fnmatch.fnmatchcase(
-                    (getattr(row, "suffix", "") or "").lower(), pattern
-                )
-            return lambda row: (getattr(row, "suffix", "") or "").lower() == pattern
+            return _make_suffix_pred(token[1:].strip().lower())
         if token.startswith("##") and len(token) > 2:
-            pattern = token[2:].lower()
-            is_glob = _has_glob(pattern)
-
-            def _tree_tag_match(row: Any) -> bool:
-                tags = getattr(row, "tags", []) or []
-                cached = getattr(row, "tags_lower", None)
-                if is_glob:
-                    iterable = cached if cached is not None else (str(t).lower() for t in tags)
-                    for tag_low in iterable:
-                        if fnmatch.fnmatchcase(tag_low, pattern):
-                            return True
-                else:
-                    if cached is not None and pattern in cached:
-                        return True
-                    if cached is None:
-                        for tag in tags:
-                            if str(tag).lower() == pattern:
-                                return True
-                if tag_ancestors_fn is None:
-                    return False
-                for tag in tags:
-                    for anc in tag_ancestors_fn(str(tag)):
-                        anc_low = anc.lower()
-                        if is_glob:
-                            if fnmatch.fnmatchcase(anc_low, pattern):
-                                return True
-                        elif anc_low == pattern:
-                            return True
-                return False
-
-            return _tree_tag_match
+            return _make_tag_tree_pred(
+                token[2:].lower(), tag_ancestors_fn=tag_ancestors_fn,
+            )
         if token.startswith("#") and len(token) > 1:
             pattern = token[1:].lower()
-            if _has_glob(pattern):
-                def _tag_glob(row: Any) -> bool:
-                    cached = getattr(row, "tags_lower", None)
-                    iterable = cached if cached is not None else (
-                        str(t).lower() for t in getattr(row, "tags", [])
-                    )
-                    for tag_low in iterable:
-                        if fnmatch.fnmatchcase(tag_low, pattern):
-                            return True
-                    return False
-
-                return _tag_glob
-
-            def _tag_match(row: Any) -> bool:
-                cached = getattr(row, "tags_lower", None)
-                if cached is not None:
-                    return pattern in cached
-                for tag in getattr(row, "tags", []):
-                    if str(tag).lower() == pattern:
-                        return True
-                return False
-
-            return _tag_match
+            return _make_tag_glob_pred(pattern) if _has_glob(pattern) else _make_tag_match_pred(pattern)
         if token.startswith("!") and len(token) > 1:
-            pattern = token[1:].lower()
-            if _has_glob(pattern):
-                return lambda row: any(
-                    any(fnmatch.fnmatchcase(alias, pattern) for alias in property_alias_set_fn(str(prop)))
-                    for prop in getattr(row, "properties", [])
-                )
-            return lambda row: any(
-                pattern in property_alias_set_fn(str(prop))
-                for prop in getattr(row, "properties", [])
+            return _make_property_pred(
+                token[1:].lower(), property_alias_set_fn=property_alias_set_fn,
             )
         return lambda row: match_query_fn(row, low)
 
-    def _and_pred(a: Callable[[Any], bool], b: Callable[[Any], bool]) -> Callable[[Any], bool]:
-        return lambda row: a(row) and b(row)
-
-    def _or_pred(a: Callable[[Any], bool], b: Callable[[Any], bool]) -> Callable[[Any], bool]:
-        return lambda row: a(row) or b(row)
-
-    pred_stack: list[Callable[[Any], bool]] = []
-    malformed = False
-    for token in out:
-        if token == "AND":
-            if len(pred_stack) < 2:
-                malformed = True
-                break
-            b = pred_stack.pop()
-            a = pred_stack.pop()
-            pred_stack.append(_and_pred(a, b))
-        elif token == "OR":
-            if len(pred_stack) < 2:
-                malformed = True
-                break
-            b = pred_stack.pop()
-            a = pred_stack.pop()
-            pred_stack.append(_or_pred(a, b))
-        else:
-            pred_stack.append(term_pred(token))
-
-    if malformed or len(pred_stack) != 1:
+    predicate = _evaluate_rpn(rpn, term_pred)
+    if predicate is None:
         return (lambda _row: False), None
-
-    predicate = pred_stack[0]
     hint_msg = "; ".join(hints) if hints else None
     return predicate, hint_msg
 

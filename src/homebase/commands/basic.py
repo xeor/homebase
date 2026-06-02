@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
@@ -70,6 +71,124 @@ def _row_to_json_dict(row: Any) -> dict[str, Any]:
     return out
 
 
+@dataclass(frozen=True)
+class _LsColumn:
+    label: str
+    width: int
+    render: Callable[[Any], str]
+
+
+def _ls_modified_value(row: Any, fmt_ymd: Callable[[int], str]) -> str:
+    ts = getattr(row, "last_ts", 0) or 0
+    if ts > 0:
+        return fmt_ymd(ts)
+    return str(getattr(row, "last", "") or "-")
+
+
+def _ls_branch_value(row: Any) -> str:
+    branch = getattr(row, "branch", "") or "-"
+    suffix = "*" if str(getattr(row, "dirty", "")).strip() else ""
+    return f"{branch}{suffix}"
+
+
+def _ls_columns(
+    *,
+    fmt_ymd: Callable[[int], str],
+    fmt_size_human: Callable[[int], str],
+    flags: dict[str, bool],
+) -> list[_LsColumn]:
+    """Build the active column list. The spec table fixes column
+    *order* (independent of CLI flag order). The *last* column is
+    rendered without truncation so a free-form tail field (TAGS,
+    PROPS, DESCRIPTION, PATH) stays complete."""
+    def ymd_or_dash(ts: int) -> str:
+        return fmt_ymd(ts) if ts > 0 else "-"
+
+    specs: list[tuple[str | None, _LsColumn]] = [
+        (None, _LsColumn("NAME", 28, lambda r: str(r.name))),
+        ("with_created", _LsColumn(
+            "CREATED", 12,
+            lambda r: ymd_or_dash(int(getattr(r, "created_ts", 0) or 0)),
+        )),
+        (None, _LsColumn("MODIFIED", 12, lambda r: _ls_modified_value(r, fmt_ymd))),
+        ("with_active", _LsColumn(
+            "ACTIVE", 12,
+            lambda r: ymd_or_dash(int(getattr(r, "opened_ts", 0) or 0)),
+        )),
+        ("with_git", _LsColumn("BRANCH", 18, _ls_branch_value)),
+        ("with_wip", _LsColumn(
+            "WIP", 5,
+            lambda r: "wip" if bool(getattr(r, "wip", False)) else "-",
+        )),
+        (None, _LsColumn(
+            "SIZE", 10,
+            lambda r: fmt_size_human(int(getattr(r, "size_bytes", 0) or 0)),
+        )),
+        ("with_worktree_of", _LsColumn(
+            "WORKTREE-OF", 16,
+            lambda r: str(getattr(r, "worktree_of", "") or "-"),
+        )),
+        ("with_src", _LsColumn(
+            "SRC", 24, lambda r: str(getattr(r, "src", "") or "-"),
+        )),
+        ("with_path", _LsColumn(
+            "PATH", 40, lambda r: str(getattr(r, "path", "") or "-"),
+        )),
+        ("with_description", _LsColumn(
+            "DESCRIPTION", 40,
+            lambda r: str(getattr(r, "description", "") or "-"),
+        )),
+        (None, _LsColumn(
+            "TAGS", 24,
+            lambda r: ",".join(getattr(r, "tags", []) or []) or "-",
+        )),
+        ("with_props", _LsColumn(
+            "PROPS", 24,
+            lambda r: ",".join(getattr(r, "properties", []) or []) or "-",
+        )),
+    ]
+    return [col for flag, col in specs if flag is None or flags.get(flag, False)]
+
+
+def _print_ls_table(cols: list[_LsColumn], rows: list[Any]) -> None:
+    """Width-allocated, no-ANSI rendering. Header + one row per
+    project. The last column is never truncated so piped output keeps
+    the tail field whole."""
+    last_idx = len(cols) - 1
+    header_parts = [
+        col.label if i == last_idx else f"{col.label:<{col.width}}"
+        for i, col in enumerate(cols)
+    ]
+    print("  ".join(header_parts))
+    for row in rows:
+        parts: list[str] = []
+        for i, col in enumerate(cols):
+            text = str(col.render(row))
+            if i == last_idx:
+                parts.append(text)
+                continue
+            if len(text) > col.width:
+                text = text[: max(1, col.width - 1)] + "…"
+            parts.append(f"{text:<{col.width}}")
+        print("  ".join(parts))
+
+
+def _apply_filter_or_error(
+    rows: list[Any],
+    *,
+    filter_expr: str,
+    compile_filter_expr: Callable[[str], tuple[Callable[[Any], bool], str | None]],
+    error_prefix: str,
+) -> tuple[list[Any] | None, int]:
+    if not filter_expr.strip():
+        return rows, 0
+    pred, err = compile_filter_expr(filter_expr)
+    if err:
+        print(f"{error_prefix}: invalid filter: {err}", file=sys.stderr)
+        return None, 2
+    return [r for r in rows if pred(r)], 0
+
+
 def cmd_ls(
     base_dir: Path,
     *,
@@ -111,133 +230,41 @@ def cmd_ls(
     The ``filter_expr`` accepts the same syntax as the TUI's QUERY
     input (compiled via ``compile_filter_expr``)."""
     active, archived, _ts = cache_load_rows(base_dir)
-    rows = archived if show_archived else active
+    source = archived if show_archived else active
 
-    if filter_expr.strip():
-        pred, err = compile_filter_expr(filter_expr)
-        if err:
-            print(f"b ls: invalid filter: {err}", file=sys.stderr)
-            return 2
-        rows = [r for r in rows if pred(r)]
+    rows, rc = _apply_filter_or_error(
+        list(source),
+        filter_expr=filter_expr,
+        compile_filter_expr=compile_filter_expr,
+        error_prefix="b ls",
+    )
+    if rows is None:
+        return rc
 
     rows = sorted(rows, key=lambda r: str(getattr(r, "name", "")).lower())
 
     if with_git and enrich_git is not None:
         enrich_git(rows)
 
-    extras_on = any((
-        with_created, with_active, with_wip, with_worktree_of,
-        with_src, with_path, with_description, with_props,
-    ))
+    flags = {
+        "with_created": with_created,
+        "with_active": with_active,
+        "with_git": with_git,
+        "with_wip": with_wip,
+        "with_worktree_of": with_worktree_of,
+        "with_src": with_src,
+        "with_path": with_path,
+        "with_description": with_description,
+        "with_props": with_props,
+    }
+    extras_on = any(v for k, v in flags.items() if k != "with_git")
     if not long_format and not with_git and not extras_on:
         for row in rows:
             print(row.name)
         return 0
 
-    def _ymd_or_dash(ts: int) -> str:
-        return fmt_ymd(ts) if ts > 0 else "-"
-
-    # Long format. Width-allocated columns; truncated values keep the
-    # output grep-friendly when piped. No ANSI — pipe-clean by design.
-    # Column order is fixed (independent of flag order on the CLI);
-    # the *last* column rendered is always emitted without truncation
-    # so free-form fields (TAGS, PROPS, DESCRIPTION, PATH) stay
-    # complete when they happen to be at the tail.
-    cols: list[tuple[str, int, Callable[[Any], str]]] = [
-        ("NAME", 28, lambda r: str(r.name)),
-    ]
-    if with_created:
-        cols.append((
-            "CREATED",
-            12,
-            lambda r: _ymd_or_dash(int(getattr(r, "created_ts", 0) or 0)),
-        ))
-    cols.append((
-        "MODIFIED",
-        12,
-        lambda r: fmt_ymd(getattr(r, "last_ts", 0) or 0)
-        if (getattr(r, "last_ts", 0) or 0) > 0
-        else str(getattr(r, "last", "") or "-"),
-    ))
-    if with_active:
-        cols.append((
-            "ACTIVE",
-            12,
-            lambda r: _ymd_or_dash(int(getattr(r, "opened_ts", 0) or 0)),
-        ))
-    if with_git:
-        cols.append((
-            "BRANCH",
-            18,
-            lambda r: (
-                f"{getattr(r, 'branch', '') or '-'}"
-                + ("*" if str(getattr(r, "dirty", "")).strip() else "")
-            ),
-        ))
-    if with_wip:
-        cols.append((
-            "WIP",
-            5,
-            lambda r: "wip" if bool(getattr(r, "wip", False)) else "-",
-        ))
-    cols.append((
-        "SIZE",
-        10,
-        lambda r: fmt_size_human(int(getattr(r, "size_bytes", 0) or 0)),
-    ))
-    if with_worktree_of:
-        cols.append((
-            "WORKTREE-OF",
-            16,
-            lambda r: str(getattr(r, "worktree_of", "") or "-"),
-        ))
-    if with_src:
-        cols.append((
-            "SRC",
-            24,
-            lambda r: str(getattr(r, "src", "") or "-"),
-        ))
-    if with_path:
-        cols.append((
-            "PATH",
-            40,
-            lambda r: str(getattr(r, "path", "") or "-"),
-        ))
-    if with_description:
-        cols.append((
-            "DESCRIPTION",
-            40,
-            lambda r: str(getattr(r, "description", "") or "-"),
-        ))
-    cols.append((
-        "TAGS",
-        24,
-        lambda r: ",".join(getattr(r, "tags", []) or []) or "-",
-    ))
-    if with_props:
-        cols.append((
-            "PROPS",
-            24,
-            lambda r: ",".join(getattr(r, "properties", []) or []) or "-",
-        ))
-
-    last_idx = len(cols) - 1
-    header_parts = [
-        label if i == last_idx else f"{label:<{width}}"
-        for i, (label, width, _) in enumerate(cols)
-    ]
-    print("  ".join(header_parts))
-    for row in rows:
-        parts: list[str] = []
-        for i, (_label, width, render) in enumerate(cols):
-            text = str(render(row))
-            if i == last_idx:
-                parts.append(text)
-                continue
-            if len(text) > width:
-                text = text[: max(1, width - 1)] + "…"
-            parts.append(f"{text:<{width}}")
-        print("  ".join(parts))
+    cols = _ls_columns(fmt_ymd=fmt_ymd, fmt_size_human=fmt_size_human, flags=flags)
+    _print_ls_table(cols, rows)
     return 0
 
 
@@ -278,14 +305,15 @@ def cmd_json(
         {getattr(r, "path", None) for r in archived} if mark_archived else set()
     )
 
-    if filter_expr.strip():
-        pred, err = compile_filter_expr(filter_expr)
-        if err:
-            print(f"b json: invalid filter: {err}", file=sys.stderr)
-            return 2
-        rows = [r for r in rows if pred(r)]
-
-    rows = sorted(rows, key=lambda r: str(getattr(r, "name", "")).lower())
+    filtered, rc = _apply_filter_or_error(
+        rows,
+        filter_expr=filter_expr,
+        compile_filter_expr=compile_filter_expr,
+        error_prefix="b json",
+    )
+    if filtered is None:
+        return rc
+    rows = sorted(filtered, key=lambda r: str(getattr(r, "name", "")).lower())
 
     payload: list[dict[str, Any]] = []
     for row in rows:
