@@ -19,7 +19,6 @@ from ..cache.api import (
     cache_store_rows,
     cache_upsert_rows,
 )
-from ..commands.archive import archive_pack_internal, archive_unpack_internal
 from ..config.prefs import resolve_filter_expression
 from ..core import utils as core_utils
 from ..core.constants import (
@@ -38,7 +37,7 @@ from ..core.constants import (
     PACKED_ARCHIVE_SUFFIX,
     TEST_REPORT_FILE_NAME,
 )
-from ..metadata.api import save_base_tags, sync_tag_symlinks
+from ..metadata.api import save_base_tags
 from . import benchmark_report
 from .projects import git_info, project_row
 from .rows import (
@@ -56,6 +55,9 @@ from .seed import (
     make_temp_basefolder,
     pack_archive_entry,
 )
+from .tag_sync import sync_tag_symlinks
+
+ArchiveOp = Callable[[Path, Path], Path]
 
 
 def archive_iso_from_ts(ts: int) -> str:
@@ -142,13 +144,18 @@ def _benchmark_make_project(base_dir: Path, idx: int) -> None:
         (path / "requirements.txt").write_text("pyyaml\ntextual\n")
 
 
-def _benchmark_seed_dataset(base_dir: Path) -> dict[str, int]:
+def _benchmark_seed_dataset(
+    base_dir: Path,
+    *,
+    archive_pack_internal: ArchiveOp | None = None,
+) -> dict[str, int]:
     active_count, archived_dir_count, archived_pack_count = _benchmark_dataset_counts()
     return _seed_benchmark_dataset(
         base_dir,
         active_count=active_count,
         archived_dir_count=archived_dir_count,
         archived_pack_count=archived_pack_count,
+        archive_pack_internal=archive_pack_internal,
     )
 
 
@@ -158,6 +165,7 @@ def _seed_benchmark_dataset(
     active_count: int,
     archived_dir_count: int,
     archived_pack_count: int,
+    archive_pack_internal: ArchiveOp | None = None,
 ) -> dict[str, int]:
     """Parameterized variant used by the production seeder above and by
     the small-dataset regression test. The shape of the returned dict
@@ -201,7 +209,11 @@ def _seed_benchmark_dataset(
         )
         if not matches:
             continue
-        if pack_archive_entry(base_dir, matches[-1]) is not None:
+        if archive_pack_internal is None:
+            continue
+        if pack_archive_entry(
+            base_dir, matches[-1], archive_pack_internal=archive_pack_internal
+        ) is not None:
             packed += 1
 
     return {
@@ -334,11 +346,16 @@ def _benchmark_run_suite(
     bench_root: Path,
     seed_dataset: bool = True,
     dataset_hint: dict[str, object] | None = None,
+    *,
+    archive_pack_internal: ArchiveOp | None = None,
+    archive_unpack_internal: ArchiveOp | None = None,
 ) -> tuple[dict[str, object], list[dict[str, object]], list[str], float, float]:
     notes: list[str] = []
     if seed_dataset:
         t_seed = time.perf_counter()
-        dataset = _benchmark_seed_dataset(bench_root)
+        dataset = _benchmark_seed_dataset(
+            bench_root, archive_pack_internal=archive_pack_internal
+        )
         seed_elapsed_s = time.perf_counter() - t_seed
     else:
         dataset = dict(dataset_hint or {})
@@ -501,57 +518,73 @@ def _benchmark_run_suite(
 
     packed_sample = [r.path for r in packed_rows[:32]]
     archived_dir_sample = [r.path for r in archived_dir_rows[-32:]]
-    if packed_sample:
+    if archive_pack_internal is None or archive_unpack_internal is None:
         metrics.append(
-            _benchmark_timeit(
-                "archive_unpack_32",
-                lambda: [archive_unpack_internal(bench_root, p) for p in packed_sample],
-                repeat=1,
-                warmup=0,
-            )
+            _benchmark_metric_error("archive_unpack_32", "archive handlers unset")
         )
-        unpacked_dirs = [
-            p.with_name(p.name[: -len(PACKED_ARCHIVE_SUFFIX)]) for p in packed_sample
-        ]
         metrics.append(
-            _benchmark_timeit(
-                "archive_repack_32",
-                lambda: [archive_pack_internal(bench_root, p) for p in unpacked_dirs],
-                repeat=1,
-                warmup=0,
-            )
+            _benchmark_metric_error("archive_repack_32", "archive handlers unset")
+        )
+        metrics.append(
+            _benchmark_metric_error("archive_pack_32", "archive handlers unset")
+        )
+        metrics.append(
+            _benchmark_metric_error("archive_unpack_back_32", "archive handlers unset")
         )
     else:
-        metrics.append(_benchmark_metric_error("archive_unpack_32", "no packed rows"))
-        metrics.append(_benchmark_metric_error("archive_repack_32", "no packed rows"))
+        unpack_op = archive_unpack_internal
+        pack_op = archive_pack_internal
+        if packed_sample:
+            metrics.append(
+                _benchmark_timeit(
+                    "archive_unpack_32",
+                    lambda: [unpack_op(bench_root, p) for p in packed_sample],
+                    repeat=1,
+                    warmup=0,
+                )
+            )
+            unpacked_dirs = [
+                p.with_name(p.name[: -len(PACKED_ARCHIVE_SUFFIX)]) for p in packed_sample
+            ]
+            metrics.append(
+                _benchmark_timeit(
+                    "archive_repack_32",
+                    lambda: [pack_op(bench_root, p) for p in unpacked_dirs],
+                    repeat=1,
+                    warmup=0,
+                )
+            )
+        else:
+            metrics.append(_benchmark_metric_error("archive_unpack_32", "no packed rows"))
+            metrics.append(_benchmark_metric_error("archive_repack_32", "no packed rows"))
 
-    if archived_dir_sample:
-        metrics.append(
-            _benchmark_timeit(
-                "archive_pack_32",
-                lambda: [
-                    archive_pack_internal(bench_root, p) for p in archived_dir_sample
-                ],
-                repeat=1,
-                warmup=0,
+        if archived_dir_sample:
+            metrics.append(
+                _benchmark_timeit(
+                    "archive_pack_32",
+                    lambda: [
+                        pack_op(bench_root, p) for p in archived_dir_sample
+                    ],
+                    repeat=1,
+                    warmup=0,
+                )
             )
-        )
-        repacked = [
-            p.with_name(f"{p.name}{PACKED_ARCHIVE_SUFFIX}") for p in archived_dir_sample
-        ]
-        metrics.append(
-            _benchmark_timeit(
-                "archive_unpack_back_32",
-                lambda: [archive_unpack_internal(bench_root, p) for p in repacked],
-                repeat=1,
-                warmup=0,
+            repacked = [
+                p.with_name(f"{p.name}{PACKED_ARCHIVE_SUFFIX}") for p in archived_dir_sample
+            ]
+            metrics.append(
+                _benchmark_timeit(
+                    "archive_unpack_back_32",
+                    lambda: [unpack_op(bench_root, p) for p in repacked],
+                    repeat=1,
+                    warmup=0,
+                )
             )
-        )
-    else:
-        metrics.append(_benchmark_metric_error("archive_pack_32", "no archive dirs"))
-        metrics.append(
-            _benchmark_metric_error("archive_unpack_back_32", "no archive dirs")
-        )
+        else:
+            metrics.append(_benchmark_metric_error("archive_pack_32", "no archive dirs"))
+            metrics.append(
+                _benchmark_metric_error("archive_unpack_back_32", "no archive dirs")
+            )
 
     tag_targets = [r.path for r in active_rows[:420]]
     metrics.append(
@@ -741,6 +774,9 @@ def cmd_benchmark_run(
     run_cwd: Path,
     comment: str = "",
     keep_basefolder: bool = False,
+    *,
+    archive_pack_internal: ArchiveOp | None = None,
+    archive_unpack_internal: ArchiveOp | None = None,
 ) -> int:
 
     bench_root = make_temp_basefolder(base_dir, "bench")
@@ -765,11 +801,20 @@ def cmd_benchmark_run(
     t_start = time.perf_counter()
     try:
         dataset, cold_metrics, cold_notes, seed_elapsed_s, suite_elapsed_s = (
-            _benchmark_run_suite(bench_root, seed_dataset=True)
+            _benchmark_run_suite(
+                bench_root,
+                seed_dataset=True,
+                archive_pack_internal=archive_pack_internal,
+                archive_unpack_internal=archive_unpack_internal,
+            )
         )
         t_warm = time.perf_counter()
         _dataset2, metrics, notes, _seed2, warm_suite_elapsed_s = _benchmark_run_suite(
-            bench_root, seed_dataset=False, dataset_hint=dataset
+            bench_root,
+            seed_dataset=False,
+            dataset_hint=dataset,
+            archive_pack_internal=archive_pack_internal,
+            archive_unpack_internal=archive_unpack_internal,
         )
         warm_pass_elapsed_s = time.perf_counter() - t_warm
     finally:
@@ -1119,6 +1164,9 @@ def cmd_benchmark(
     comment: str = "",
     keep_basefolder: bool = False,
     ignore_featuresets: set[str] | None = None,
+    *,
+    archive_pack_internal: ArchiveOp | None = None,
+    archive_unpack_internal: ArchiveOp | None = None,
 ) -> int:
     if subcommand == "run":
         return cmd_benchmark_run(
@@ -1126,6 +1174,8 @@ def cmd_benchmark(
             run_cwd,
             comment=comment,
             keep_basefolder=keep_basefolder,
+            archive_pack_internal=archive_pack_internal,
+            archive_unpack_internal=archive_unpack_internal,
         )
     if subcommand == "results":
         return cmd_benchmark_results(base_dir, ignore_featuresets=ignore_featuresets)
@@ -1138,6 +1188,9 @@ def cmd_test(
     run_cwd: Path,
     comment: str = "",
     keep_basefolder: bool = False,
+    *,
+    archive_pack_internal: ArchiveOp | None = None,
+    archive_unpack_internal: ArchiveOp | None = None,
 ) -> int:
 
     test_root = make_temp_basefolder(base_dir, "test")
@@ -1157,7 +1210,9 @@ def cmd_test(
     t_start = time.perf_counter()
     try:
         dataset, metrics, notes, seed_elapsed_s, suite_elapsed_s = _benchmark_run_suite(
-            test_root
+            test_root,
+            archive_pack_internal=archive_pack_internal,
+            archive_unpack_internal=archive_unpack_internal,
         )
     finally:
         t_cleanup = time.perf_counter()

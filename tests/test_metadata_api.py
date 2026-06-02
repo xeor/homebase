@@ -10,8 +10,8 @@ from homebase.metadata.api import (
     load_base_worktree,
     property_tokens,
     save_base_worktree,
-    sync_tag_symlinks,
 )
+from homebase.workspace.tag_sync import sync_tag_symlinks
 
 
 def test_sync_tag_symlinks_does_not_raise_import_error(tmp_path) -> None:

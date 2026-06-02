@@ -26,17 +26,19 @@ from ..hooks.runtime import dispatch_post_cli, dispatch_pre_cli
 from ..hooks.snapshot import snapshot_target_from_path
 from ..metadata.api import (
     append_base_log,
-    cleanup_tag_symlinks_pointing_at,
     ensure_base_marker,
     load_base_repo_dir,
     load_base_worktree,
-    sync_tag_symlinks,
 )
 from ..tmux.flow import open_shell_in_dir
 from ..workspace import worktree_paths
 from ..workspace.rows import (
     archive_destination,
     archived_restore_target,
+)
+from ..workspace.tag_sync import (
+    cleanup_tag_symlinks_pointing_at,
+    sync_tag_symlinks,
 )
 from . import workspace as commands_workspace
 
@@ -706,7 +708,7 @@ def suggest_project_root(path: Path) -> Path:
 def find_marker_root_upward(
     path: Path, marker_file: str = BASE_MARKER_FILE
 ) -> Path | None:
-    return commands_workspace.find_marker_root_upward(path, marker_file)
+    return core_utils.find_marker_root_upward(path, marker_file)
 
 
 def try_parse_archive_suffix_loose(suffix: str) -> int:

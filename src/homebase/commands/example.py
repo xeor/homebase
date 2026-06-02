@@ -110,7 +110,7 @@ def cmd_example_generate(path: str, count: int, seed: int | None) -> int:
 
 
 def _generate(target: Path, count: int, rng: random.Random) -> dict[str, int]:
-    from ..metadata.api import sync_tag_symlinks
+    from ..workspace.tag_sync import sync_tag_symlinks
 
     target.mkdir(parents=True)
     _write_homebase_dir(target)
@@ -304,8 +304,12 @@ def _generate_archive_entries(
         entries,
         k=min(ARCHIVE_PACKED_COUNT, len(entries)),
     )
+    from .archive import archive_pack_internal
+
     for entry in pack_targets:
-        if pack_archive_entry(target, entry) is not None:
+        if pack_archive_entry(
+            target, entry, archive_pack_internal=archive_pack_internal
+        ) is not None:
             packed += 1
     return len(entries), packed
 

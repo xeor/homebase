@@ -14,7 +14,7 @@ from ...core.utils import (
     existing_path_case_mismatch,
     fmt_age_short_from_iso,
 )
-from ...metadata.api import build_project_info_text
+from ...workspace.project_info import project_info_text
 from ..query.notes_paths import render_notes_template
 from ..widgets import ReadmeMarkdownViewer
 from .hooks_panel import render_hooks_panel
@@ -248,8 +248,7 @@ def refresh_side(app: Any, *, base_dir: Path, color_accent_hex: str, level_warn:
             if cached_entry is not None:
                 cached_health = (str(cached_entry[0]), str(cached_entry[1]))
             lines.append(
-                build_project_info_text(
-                    base_dir,
+                project_info_text(
                     selected,
                     wip_hotkey=wip_slots.get(selected.path),
                     include_meta_checks=not selected.archived,

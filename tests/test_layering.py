@@ -69,24 +69,13 @@ ALLOWED_IMPORTS: dict[str, set[str]] = {
 }
 
 KNOWN_LAYERING_EXCEPTIONS = {
-    "src/homebase/cache/api.py:16 imports homebase.metadata.api",
-    "src/homebase/cache/api.py:17 imports homebase.workspace.projects",
     "src/homebase/cli/__init__.py:5 imports homebase.entry",
-    "src/homebase/config/prefs.py:35 imports homebase.filter",
-    "src/homebase/metadata/api.py:28 imports homebase.filter",
-    "src/homebase/metadata/api.py:29 imports homebase.workspace",
-    "src/homebase/metadata/api.py:10 imports homebase.archive",
-    "src/homebase/metadata/app_workspace.py:5 imports homebase.workspace.rows",
-    "src/homebase/tmux/flow.py:8 imports homebase.commands",
-    "src/homebase/ui/__init__.py:3 imports homebase.app",
-    "src/homebase/ui/__init__.py:4 imports homebase.context",
-    "src/homebase/workspace/benchmark.py:23 imports homebase.commands.archive",
-    "src/homebase/workspace/seed/primitives.py imports homebase.commands.archive",
-    "src/homebase/workspace/projects.py:188 imports homebase.tmux.flow",
-    "src/homebase/workspace/projects.py:189 imports homebase.ui",
-    "src/homebase/workspace/projects.py:255 imports homebase.tmux.flow",
-    "src/homebase/workspace/new/cmd.py:192 imports homebase.tmux.flow",
-    "src/homebase/workspace/regression.py:21 imports homebase.commands.archive",
+    "src/homebase/hooks/bundled/post/_tag_symlink_sync_common.py imports homebase.workspace.tag_sync",
+    "src/homebase/tmux/flow.py imports homebase.commands",
+    "src/homebase/ui/__init__.py imports homebase.app",
+    "src/homebase/ui/__init__.py imports homebase.context",
+    "src/homebase/workspace/projects.py imports homebase.tmux.flow",
+    "src/homebase/workspace/new/cmd.py imports homebase.tmux.flow",
 }
 
 

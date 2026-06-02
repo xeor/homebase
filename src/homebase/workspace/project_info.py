@@ -192,3 +192,41 @@ def build_project_info_text(
         lines.append("[cyan]last commit[/]: ")
 
     return "\n".join(lines)
+
+
+def project_info_text(
+    row: Any,
+    *,
+    wip_hotkey: int | None = None,
+    include_meta_checks: bool = True,
+    cached_meta_health: tuple[str, str] | None = None,
+) -> str:
+    """Convenience wrapper that wires the workspace's metadata helpers
+    into ``build_project_info_text``. Used by the UI side panels."""
+    from ..core import utils as core_utils
+    from ..core.constants import (
+        BASE_MARKER_FILE,
+        COLOR_AGE_UNIT_HEX,
+        LEGACY_BASE_MARKER_FILE,
+    )
+    from ..metadata.api import (
+        base_meta_issues,
+        load_base_data,
+        property_display_lines,
+    )
+
+    return build_project_info_text(
+        row,
+        base_marker_file=BASE_MARKER_FILE,
+        legacy_base_marker_file=LEGACY_BASE_MARKER_FILE,
+        color_age_unit_hex=COLOR_AGE_UNIT_HEX,
+        wip_hotkey=wip_hotkey,
+        include_meta_checks=include_meta_checks,
+        fmt_iso=core_utils.fmt_iso,
+        fmt_age_short=core_utils.fmt_age_short,
+        property_display_lines=property_display_lines,
+        base_meta_issues=base_meta_issues,
+        load_base_data=load_base_data,
+        run_out=core_utils.run_out,
+        cached_meta_health=cached_meta_health,
+    )

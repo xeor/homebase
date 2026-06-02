@@ -20,6 +20,63 @@ HOOK_RUN_ERRORS = (
 )
 
 
+def find_marker_root_upward(path: Path, marker_file: str) -> Path | None:
+    cur = path.resolve()
+    while True:
+        if (cur / marker_file).is_file():
+            return cur
+        parent = cur.parent
+        if parent == cur:
+            return None
+        cur = parent
+
+
+def normalize_filter_expression(expr: str, *, token_re: re.Pattern[str]) -> str:
+    tokens = token_re.findall(expr.strip())
+    if not tokens:
+        return ""
+
+    norm = ["OR" if (token == "|" or token.upper() == "OR") else token for token in tokens]
+    changed = True
+    while changed:
+        changed = False
+        while norm and norm[0] in {"OR", ")"}:
+            norm.pop(0)
+            changed = True
+        while norm and norm[-1] in {"OR", "("}:
+            norm.pop()
+            changed = True
+
+        i = 0
+        out: list[str] = []
+        while i < len(norm):
+            cur = norm[i]
+            nxt = norm[i + 1] if i + 1 < len(norm) else ""
+            if cur == "OR" and nxt == "OR":
+                out.append("OR")
+                i += 2
+                changed = True
+                continue
+            if cur == "(" and nxt == ")":
+                i += 2
+                changed = True
+                continue
+            if cur == "(" and nxt == "OR":
+                out.append("(")
+                i += 2
+                changed = True
+                continue
+            if cur == "OR" and nxt == ")":
+                out.append(")")
+                i += 2
+                changed = True
+                continue
+            out.append(cur)
+            i += 1
+        norm = out
+    return " ".join(norm)
+
+
 def run_out(*cmd: str, check: bool = True) -> str:
     p = subprocess.run(
         cmd,

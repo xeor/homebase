@@ -7,6 +7,8 @@ from typing import Any
 
 from ...cache.api import cache_delete_paths, cache_load_rows, cache_upsert_rows
 from ...core.models import ProjectRow
+from ...metadata.api import normalize_property_keys
+from ...workspace.projects import build_row_haystack_lower
 
 
 def touch_rows_cache(
@@ -41,7 +43,12 @@ def touch_rows_cache(
 
 
 def reload_rows_from_cache(app: Any, *, base_dir: Path, cache_max_age_s: int) -> bool:
-    active, archived, refreshed = cache_load_rows(base_dir, cache_max_age_s)
+    active, archived, refreshed = cache_load_rows(
+        base_dir,
+        cache_max_age_s,
+        normalize_property_keys=normalize_property_keys,
+        build_row_haystack_lower=build_row_haystack_lower,
+    )
     if not active and not archived:
         return False
     app.active_rows = active

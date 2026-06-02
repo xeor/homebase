@@ -112,11 +112,15 @@ def test_make_archive_entry_refuses_collision(tmp_path: Path) -> None:
 
 
 def test_pack_archive_entry_produces_tgz_and_removes_source(tmp_path: Path) -> None:
+    from homebase.commands.archive import archive_pack_internal
+
     base = tmp_path / "base"
     base.mkdir()
     entry = make_archive_entry(base, date=date(2020, 1, 5), slug="zip-me")
     (entry / "payload.txt").write_text("hi\n")
-    packed = pack_archive_entry(base, entry)
+    packed = pack_archive_entry(
+        base, entry, archive_pack_internal=archive_pack_internal
+    )
     assert packed is not None
     assert packed.suffix == ".tgz"
     assert packed.is_file()
@@ -124,11 +128,18 @@ def test_pack_archive_entry_produces_tgz_and_removes_source(tmp_path: Path) -> N
 
 
 def test_pack_archive_entry_returns_none_on_invalid_target(tmp_path: Path) -> None:
+    from homebase.commands.archive import archive_pack_internal
+
     base = tmp_path / "base"
     base.mkdir()
     bogus = base / "not-in-archive"
     bogus.mkdir()
-    assert pack_archive_entry(base, bogus) is None
+    assert (
+        pack_archive_entry(
+            base, bogus, archive_pack_internal=archive_pack_internal
+        )
+        is None
+    )
 
 
 def test_make_temp_basefolder_creates_unique_writable_dir(tmp_path: Path) -> None:

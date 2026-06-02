@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from ....metadata.api import sync_tag_symlinks
+from ....workspace.tag_sync import sync_tag_symlinks
 from ...api import HookContext
 
 

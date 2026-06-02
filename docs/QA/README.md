@@ -20,15 +20,15 @@ docs/QA/
 
 ## Status snapshot
 
-Last run: `2026-06-02` · source: 217 files / 47k LOC · tests: 152 files / ~25k LOC
+Last run: `2026-06-02` · source: 218 files / 47k LOC · tests: 165 files / ~28k LOC
 
 | Tool          | Metric                          | Baseline     | Target        | Status   |
 |---------------|---------------------------------|--------------|---------------|----------|
-| pytest        | tests passing                   | 1601/1601    | all           | green    |
+| pytest        | tests passing                   | 1963/1963    | all           | green    |
 | ruff          | lint findings                   | 0            | 0             | green    |
-| mypy          | errors / files affected         | 233 / 47     | 0 / 0         | baseline |
-| pytest-cov    | branch coverage                 | 58.9 %       | 75 %          | baseline |
-| import-linter | contract violations             | 14           | 0             | baseline |
+| mypy          | errors / files affected         | 236 / 45     | 0 / 0         | baseline |
+| pytest-cov    | branch coverage                 | 61.9 %       | 75 %          | baseline |
+| import-linter | contract violations             | 0            | 0             | green    |
 | vulture       | findings (min-confidence 80)    | 0            | 0             | green    |
 | vulture       | findings (min-confidence 60)    | ~289 lns     | review        | baseline |
 | bandit        | High / Medium / Low             | 4 / 7 / 141  | 0 / 0 / < 20  | baseline |
@@ -230,7 +230,7 @@ criterion. Tick `[x]` when the snapshot number reaches the target.
 
 ### Phase 1 — layering (import-linter)
 
-- [ ] Eliminate inward-layer violations from `cache`, `metadata`,
+- [x] Eliminate inward-layer violations from `cache`, `metadata`,
       `config`, `workspace.seed` etc. (14 → 0).
 - Exit: `uv run lint-imports` reports `0 broken`.
 

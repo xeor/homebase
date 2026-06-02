@@ -6,7 +6,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from ...metadata.api import sync_tag_symlinks
+from ...workspace.tag_sync import sync_tag_symlinks
 
 
 def request_tag_sync(app: Any, *, base_dir: Path, reason: str) -> None:

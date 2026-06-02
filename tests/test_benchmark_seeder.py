@@ -22,12 +22,15 @@ def _read_meta(path: Path) -> dict:
 
 
 def _seed_small(base: Path) -> dict[str, object]:
+    from homebase.commands.archive import archive_pack_internal
+
     base.mkdir()
     return _seed_benchmark_dataset(
         base,
         active_count=12,
         archived_dir_count=8,
         archived_pack_count=3,
+        archive_pack_internal=archive_pack_internal,
     )
 
 

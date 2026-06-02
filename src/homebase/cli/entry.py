@@ -6,6 +6,9 @@ from pathlib import Path
 
 from ..commands import interactive_flow
 from ..commands.archive import (
+    archive_pack_internal,
+    archive_restore_internal,
+    archive_unpack_internal,
     cmd_archive_ls,
     cmd_archive_mv,
     cmd_archive_restore_entry,
@@ -432,6 +435,7 @@ def main(argv: list[str]) -> int:
                 cwd_path,
                 pre_create_hook=_pre_create_hook,
                 post_create_hook=_post_create_hook,
+                run_textual_ui=_run_textual_ui,
             ),
             cmd_completion=lambda shell: _cmd_completion(shell),
             cmd_internal_complete=lambda shell, cword, words: _cmd_internal_complete(
@@ -512,18 +516,26 @@ def main(argv: list[str]) -> int:
                 comment=comment,
                 keep_basefolder=keep_basefolder,
                 ignore_featuresets=(ignore or set()),
+                archive_pack_internal=archive_pack_internal,
+                archive_unpack_internal=archive_unpack_internal,
             ),
             cmd_test_regression=lambda bd, cwd_path, list_only, selected: cmd_test_regression(
                 bd,
                 cwd_path,
                 list_only=list_only,
                 selected=selected,
+                archive_pack_internal=archive_pack_internal,
+                archive_unpack_internal=archive_unpack_internal,
+                archive_restore_internal=archive_restore_internal,
+                cmd_rm=cmd_rm,
             ),
             cmd_test=lambda bd, cwd_path, comment, keep_basefolder: cmd_test(
                 bd,
                 cwd_path,
                 comment=comment,
                 keep_basefolder=keep_basefolder,
+                archive_pack_internal=archive_pack_internal,
+                archive_unpack_internal=archive_unpack_internal,
             ),
             cmd_example_generate=cmd_example_generate,
             initial_filter_expr=initial_filter_expr,

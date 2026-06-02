@@ -2,10 +2,14 @@ from __future__ import annotations
 
 import os
 import shutil
+import sqlite3
 import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
+from typing import Callable
+
+import yaml
 
 from ..core import utils as core_utils
 from ..core.constants import (
@@ -185,10 +189,12 @@ def create_project(
     return target
 
 
-def cmd_new(base_dir: Path) -> int:
-    from ..cache.api import cache_upsert_project_fast
+def cmd_new(
+    base_dir: Path,
+    *,
+    run_textual_ui: Callable[..., tuple[str, Path | None, list[str]]],
+) -> int:
     from ..tmux.flow import open_shell_in_dir
-    from ..ui import run_textual_ui
 
     if not sys.stdin.isatty() or not sys.stdout.isatty():
         print("b new requires an interactive terminal", file=sys.stderr)
@@ -571,3 +577,13 @@ def project_row(
         worktree_of=worktree_of,
         repo_dir=repo_dir,
     )
+
+
+def cache_upsert_project_fast(base_dir: Path, path: Path) -> None:
+    from ..cache.api import cache_upsert_rows
+
+    try:
+        row = project_row(path, include_git_dirty=False)
+        _ = cache_upsert_rows(base_dir, [row], touch_refresh_ts=True)
+    except (OSError, ValueError, TypeError, sqlite3.Error, yaml.YAMLError):
+        return

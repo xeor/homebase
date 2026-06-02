@@ -4,7 +4,6 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from ....cache.api import cache_upsert_project_fast
 from ....metadata.api import (
     append_base_log,
     ensure_base_marker,
@@ -14,6 +13,7 @@ from ....metadata.api import (
     save_base_tags,
     save_base_worktree,
 )
+from ....workspace.projects import cache_upsert_project_fast
 from ..base import NewContext, NewOptions, NewPlan, NewResult, Source
 from ..registry import register_source
 

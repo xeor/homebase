@@ -6,8 +6,8 @@ import sys
 import time
 from pathlib import Path
 
-from ....cache.api import cache_upsert_project_fast
 from ....metadata.api import append_base_log, ensure_base_marker, save_base_tags
+from ....workspace.projects import cache_upsert_project_fast
 from ..base import NewContext, NewOptions, NewPlan, NewResult, Source
 from ..name import resolve_final_name
 from ..registry import register_source

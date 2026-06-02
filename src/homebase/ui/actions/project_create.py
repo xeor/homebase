@@ -9,7 +9,6 @@ from dataclasses import asdict, is_dataclass
 from pathlib import Path
 from typing import Any
 
-from ...cache.api import cache_upsert_project_fast
 from ...hooks import runtime as hooks_runtime
 from ...hooks.snapshot import snapshot_target
 from ...metadata.api import load_base_data
@@ -17,7 +16,7 @@ from ...workspace.new.base import NewContext
 from ...workspace.new.cmd import format_summary, plan_and_apply_one
 from ...workspace.new.config_loader import NewConfigError, load_new_sources
 from ...workspace.new.registry import builtin_keys
-from ...workspace.projects import project_row
+from ...workspace.projects import cache_upsert_project_fast, project_row
 
 
 def action_new_project(app: Any, *, base_dir: Path, new_project_screen: Any) -> None:

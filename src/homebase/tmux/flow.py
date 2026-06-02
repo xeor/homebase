@@ -5,7 +5,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-from ..commands import workspace as commands_workspace
 from ..config.prefs import load_open_mode_config
 from ..core import utils as core_utils
 from ..core.constants import (
@@ -17,12 +16,13 @@ from ..core.constants import (
     TMUX_SHELL_COMMANDS,
 )
 from ..core.models import PaneRef
+from ..core.utils import find_marker_root_upward as _find_marker_root_upward
 from . import commands as tmux_commands
 from . import core as tmux_core
 
 
 def find_marker_root_upward(path: Path) -> Path | None:
-    return commands_workspace.find_marker_root_upward(path, BASE_MARKER_FILE)
+    return _find_marker_root_upward(path, BASE_MARKER_FILE)
 
 
 def _prompt_readline(

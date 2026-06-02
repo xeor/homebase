@@ -150,6 +150,7 @@ from ..tmux.flow import (
 )
 from ..workspace.deworktree import deworktree as deworktree_internal
 from ..workspace.projects import (
+    build_row_haystack_lower,
     classify_name,
     project_row,
     refresh_row_caches,
@@ -381,7 +382,10 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
 
     def _init_rows_state(self, initial_filter: str, persisted: dict[str, object]) -> None:
         cached_active, cached_archived, cache_refreshed = cache_load_rows(
-            self.base_dir, CACHE_MAX_AGE_S
+            self.base_dir,
+            CACHE_MAX_AGE_S,
+            normalize_property_keys=normalize_property_keys,
+            build_row_haystack_lower=build_row_haystack_lower,
         )
         self.active_rows = cached_active
         self.archived_rows = cached_archived

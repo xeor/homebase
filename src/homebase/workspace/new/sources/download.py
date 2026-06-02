@@ -6,8 +6,8 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-from ....cache.api import cache_upsert_project_fast
 from ....metadata.api import append_base_log, ensure_base_marker, save_base_tags
+from ....workspace.projects import cache_upsert_project_fast
 from ..adapters import adapter_for_host, parse_url
 from ..base import NewContext, NewOptions, NewPlan, NewResult, Source
 from ..name import resolve_final_name

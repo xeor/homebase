@@ -8,9 +8,9 @@ from ..core import nested as nested_utils
 from ..core import prompting, setup_tools
 from ..core import utils as core_utils
 from ..core.constants import ARCHIVE_DIR_NAME, BASE_MARKER_FILE, TMUX_BIN_CANDIDATES
-from ..metadata.api import sync_tag_symlinks_detailed
 from ..workspace import discovery_helpers
 from ..workspace.rows import collect_projects, sort_rows
+from ..workspace.tag_sync import sync_tag_symlinks_detailed
 from . import basic as commands_basic
 
 

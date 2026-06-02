@@ -426,13 +426,17 @@ def cmd_new(
     cwd: Path,
     pre_create_hook: Callable[[Namespace, str | None, str | None], tuple[bool, str, Namespace, str | None, str | None]] | None = None,
     post_create_hook: Callable[[NewResult, NewPlan | None, str | None, str | None], None] | None = None,
+    run_textual_ui: Callable[..., tuple[str, Path | None, list[str]]] | None = None,
 ) -> int:
     _ = builtin_keys()  # ensure sources are registered
     raw_inputs: list[str] = list(getattr(ns, "inputs", []) or [])
     multi = bool(getattr(ns, "multi", False))
 
     if not raw_inputs and not getattr(ns, "mode", None) and not getattr(ns, "child_key", None):
-        return legacy_cmd_new(base_dir)
+        if run_textual_ui is None:
+            print("b new requires an interactive UI", file=sys.stderr)
+            return 1
+        return legacy_cmd_new(base_dir, run_textual_ui=run_textual_ui)
 
     try:
         sources_cfg = load_new_sources(base_dir)

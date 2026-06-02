@@ -7,14 +7,13 @@ from pathlib import Path
 import yaml
 from rich.text import Text
 
-from ..archive import io as archive_io
 from ..config.property_defs import load_property_defs
+from ..core import packed_meta
 from ..core import utils as core_utils
 from ..core.constants import (
     ARCHIVE_TZ,
     BASE_MARKER_FILE,
     BASE_META_ALLOWED_KEYS,
-    COLOR_AGE_UNIT_HEX,
     DYNAMIC_PROPERTY_DEFS,
     ENV_BASE_DIR,
     GLOBAL_CONFIG_FILE_NAME,
@@ -24,9 +23,7 @@ from ..core.constants import (
     PACKED_ARCHIVE_SUFFIX,
     PROPERTY_DEFS,
 )
-from ..core.models import ProjectRow, PropertyDef
-from ..filter import tag_index
-from ..workspace import project_info
+from ..core.models import PropertyDef
 from . import property as property_utils
 from . import store as metadata_store
 from . import utils as metadata_utils
@@ -41,11 +38,11 @@ def _is_packed_archive_path(path: Path) -> bool:
 
 
 def _packed_read_base_data(path: Path) -> dict[str, object]:
-    return archive_io.packed_read_base_data(path, base_marker_file=BASE_MARKER_FILE)
+    return packed_meta.packed_read_base_data(path, base_marker_file=BASE_MARKER_FILE)
 
 
 def _packed_write_base_data(path: Path, data: dict[str, object]) -> None:
-    archive_io.packed_write_base_data(path, data, base_marker_file=BASE_MARKER_FILE)
+    packed_meta.packed_write_base_data(path, data, base_marker_file=BASE_MARKER_FILE)
 
 
 def _archive_now_iso() -> str:
@@ -67,8 +64,6 @@ def base_meta_issues(path: Path) -> list[tuple[str, str, str]]:
                     f"packed archive is missing {BASE_MARKER_FILE} metadata",
                 )
             ]
-        if not isinstance(raw, dict):
-            return [("warning", "invalid_root", "root must be a mapping")]
     else:
         meta_file = path / BASE_MARKER_FILE
         legacy_meta_file = path / LEGACY_BASE_MARKER_FILE
@@ -324,73 +319,6 @@ def property_display_lines(keys: list[str]) -> list[str]:
         all_defs=all_property_defs(),
         normalize_keys=normalize_property_keys,
     )
-
-
-def build_project_info_text(
-    base_dir: Path,
-    row: ProjectRow,
-    wip_hotkey: int | None = None,
-    include_meta_checks: bool = True,
-    cached_meta_health: tuple[str, str] | None = None,
-) -> str:
-    return project_info.build_project_info_text(
-        row,
-        base_marker_file=BASE_MARKER_FILE,
-        legacy_base_marker_file=LEGACY_BASE_MARKER_FILE,
-        color_age_unit_hex=COLOR_AGE_UNIT_HEX,
-        wip_hotkey=wip_hotkey,
-        include_meta_checks=include_meta_checks,
-        fmt_iso=core_utils.fmt_iso,
-        fmt_age_short=core_utils.fmt_age_short,
-        property_display_lines=property_display_lines,
-        base_meta_issues=base_meta_issues,
-        load_base_data=load_base_data,
-        run_out=core_utils.run_out,
-        cached_meta_health=cached_meta_health,
-    )
-
-
-def _safe_tag_component(tag: str) -> str:
-    return tag_index.safe_tag_component(tag)
-
-
-def _safe_link_name(name: str) -> str:
-    return tag_index.safe_link_name(name)
-
-
-def _project_tag_link_name(base_dir: Path, project_path: Path) -> str:
-    return tag_index.project_tag_link_name(base_dir, project_path)
-
-
-def sync_tag_symlinks_detailed(
-    base_dir: Path, verbose: bool = False, debug: bool = False
-) -> tuple[str | None, list[str]]:
-    from . import app_workspace
-
-    return tag_index.sync_tag_symlinks_detailed(
-        base_dir,
-        base_marker_file=BASE_MARKER_FILE,
-        collect_projects=app_workspace.collect_projects,
-        verbose=verbose,
-        debug=debug,
-    )
-
-
-def sync_tag_symlinks(base_dir: Path) -> str | None:
-    from . import app_workspace
-
-    return tag_index.sync_tag_symlinks(
-        base_dir,
-        base_marker_file=BASE_MARKER_FILE,
-        collect_projects=app_workspace.collect_projects,
-    )
-
-
-def cleanup_tag_symlinks_pointing_at(base_dir: Path, target: Path) -> int:
-    """Cheap O(|_tags/|) cleanup used after a single project's path is
-    deleted or moved — much faster than a full ``sync_tag_symlinks``
-    rebuild."""
-    return tag_index.cleanup_tag_symlinks_pointing_at(base_dir, target)
 
 
 def save_base_tags(_base_dir: Path, path: Path, new_tags: list[str]) -> None:

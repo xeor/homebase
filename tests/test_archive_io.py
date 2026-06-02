@@ -148,13 +148,17 @@ def test_safe_extract_tar_to_dir_extracts_safe_members(tmp_path: Path) -> None:
 
 
 def test_invalidate_packed_cache_path_drops_entries(tmp_path: Path) -> None:
+    from homebase.core import packed_meta
+
     archive_path = tmp_path / "drop.tgz"
     _write_packed(archive_path, {"tags": ["x"]})
     archive_io.packed_read_base_data(archive_path, base_marker_file=".base.yaml")
-    assert any(k[0] == str(archive_path.resolve()) for k in archive_io._PACKED_BASE_DATA_CACHE)
+    assert any(k[0] == str(archive_path.resolve()) for k in packed_meta._PACKED_BASE_DATA_CACHE)
     archive_io.invalidate_packed_cache_path(archive_path)
-    assert not any(k[0] == str(archive_path.resolve()) for k in archive_io._PACKED_BASE_DATA_CACHE)
+    assert not any(k[0] == str(archive_path.resolve()) for k in packed_meta._PACKED_BASE_DATA_CACHE)
 
 
 def test_packed_cache_key_missing_path_returns_none(tmp_path: Path) -> None:
-    assert archive_io._packed_cache_key(tmp_path / "missing") is None
+    from homebase.core import packed_meta
+
+    assert packed_meta._packed_cache_key(tmp_path / "missing") is None

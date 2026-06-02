@@ -34,7 +34,7 @@ from ..core.constants import (
     WIP_OPEN_SYMBOL_MAP,
 )
 from ..core.models import PostCommandOption
-from ..filter import engine as filter_engine
+from ..core.utils import normalize_filter_expression
 from . import cache_profile as cache_profile_config
 from . import open_mode as open_mode_config
 from . import store as config_store
@@ -741,4 +741,4 @@ def _expand_named_tokens(text: str, depth: int) -> tuple[str, str | None]:
         else:
             out_parts.append(token)
     expanded = " ".join(out_parts)
-    return filter_engine.normalize_filter_expression(expanded, token_re=_FILTER_TOKEN_RE), None
+    return normalize_filter_expression(expanded, token_re=_FILTER_TOKEN_RE), None

@@ -8,6 +8,7 @@ import tempfile
 from collections.abc import Mapping, Sequence
 from datetime import date
 from pathlib import Path
+from typing import Callable
 
 from ...core.constants import ARCHIVE_DIR_NAME
 from ...metadata.api import save_base_data
@@ -99,16 +100,17 @@ def make_archive_entry(
     return entry
 
 
-def pack_archive_entry(base: Path, entry: Path) -> Path | None:
+def pack_archive_entry(
+    base: Path,
+    entry: Path,
+    *,
+    archive_pack_internal: Callable[[Path, Path], Path],
+) -> Path | None:
     """Pack ``entry`` (a dir under ``<base>/_archive/<year>/``) into a
     sibling ``.tgz``. Returns the new packed path, or ``None`` on
-    failure.
-
-    Lazy import keeps the workspace package out of an import-time
-    cycle with ``commands/`` — the production packing wrapper lives
-    there and handles worktree preflight + opened_ts move."""
-    from ...commands.archive import archive_pack_internal
-
+    failure. ``archive_pack_internal`` is injected by the caller — the
+    production wrapper lives in ``commands.archive`` and handles
+    worktree preflight + opened_ts move."""
     try:
         return archive_pack_internal(base, entry)
     except (OSError, ValueError, subprocess.SubprocessError):

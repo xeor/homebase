@@ -5,11 +5,31 @@ from pathlib import Path
 import pytest
 import yaml
 
+from homebase.commands.archive import (
+    archive_pack_internal as _archive_pack_internal,
+)
+from homebase.commands.archive import (
+    archive_restore_internal as _archive_restore_internal,
+)
+from homebase.commands.archive import (
+    archive_unpack_internal as _archive_unpack_internal,
+)
+from homebase.commands.archive import (
+    cmd_rm as _cmd_rm,
+)
 from homebase.core.constants import (
     HOMEBASE_DIR_NAME,
     REGRESSION_TEST_REPORT_FILE_NAME,
 )
 from homebase.workspace import regression
+
+
+@pytest.fixture(autouse=True)
+def _wire_regression_handlers() -> None:
+    regression.archive_pack_internal = _archive_pack_internal
+    regression.archive_unpack_internal = _archive_unpack_internal
+    regression.archive_restore_internal = _archive_restore_internal
+    regression.cmd_rm = _cmd_rm
 
 
 def test_cmd_test_regression_list_only_prints_all_cases(

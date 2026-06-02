@@ -6,7 +6,6 @@ import sys
 import time
 from pathlib import Path
 
-from ....cache.api import cache_upsert_project_fast
 from ....core.constants import BASE_MARKER_FILE, LEGACY_BASE_MARKER_FILE
 from ....core.logging import verbose_enabled
 from ....core.utils import is_under
@@ -16,6 +15,7 @@ from ....metadata.api import (
     save_base_repo_dir,
     save_base_tags,
 )
+from ....workspace.projects import cache_upsert_project_fast
 from ..base import NewContext, NewOptions, NewPlan, NewResult, Source
 from ..detect import classify_input
 from ..name import resolve_final_name

@@ -4,8 +4,7 @@ import json
 import sqlite3
 import time
 from pathlib import Path
-
-import yaml
+from typing import Callable
 
 from ..core.constants import (
     CACHE_MAX_AGE_S,
@@ -13,9 +12,15 @@ from ..core.constants import (
     RECONCILE_USAGE_CACHE_LIMIT,
 )
 from ..core.models import ProjectRow
-from ..metadata.api import normalize_property_keys
-from ..workspace.projects import build_row_haystack_lower, project_row
 from . import store as cache_store
+
+
+def _identity_normalize(keys: list[str]) -> list[str]:
+    return list(keys)
+
+
+def _empty_haystack(**_kwargs: object) -> str:
+    return ""
 
 
 def cache_db_path(base_dir: Path) -> Path:
@@ -31,7 +36,11 @@ def _cache_init(conn: sqlite3.Connection) -> None:
 
 
 def cache_load_rows(
-    base_dir: Path, max_age_s: int = CACHE_MAX_AGE_S
+    base_dir: Path,
+    max_age_s: int = CACHE_MAX_AGE_S,
+    *,
+    normalize_property_keys: Callable[[list[str]], list[str]] = _identity_normalize,
+    build_row_haystack_lower: Callable[..., str] = _empty_haystack,
 ) -> tuple[list[ProjectRow], list[ProjectRow], int]:
     opened_map = cache_store.cache_load_opened_map(
         base_dir,
@@ -196,14 +205,6 @@ def cache_delete_paths(
         paths=paths,
         touch_refresh_ts=touch_refresh_ts,
     )
-
-
-def cache_upsert_project_fast(base_dir: Path, path: Path) -> None:
-    try:
-        row = project_row(path, include_git_dirty=False)
-        _ = cache_upsert_rows(base_dir, [row], touch_refresh_ts=True)
-    except (OSError, ValueError, TypeError, sqlite3.Error, yaml.YAMLError):
-        return
 
 
 def cache_load_reconcile_usage(

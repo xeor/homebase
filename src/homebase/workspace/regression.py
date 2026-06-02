@@ -13,17 +13,11 @@ import tempfile
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Callable
+from typing import Any, Callable
 
 import yaml
 
 from ..cache.api import cache_db_path, cache_load_rows, cache_store_rows
-from ..commands.archive import (
-    archive_pack_internal,
-    archive_restore_internal,
-    archive_unpack_internal,
-    cmd_rm,
-)
 from ..core.constants import (
     ARCHIVE_DIR_NAME,
     BASE_MARKER_FILE,
@@ -40,6 +34,21 @@ from .rows import (
     reconcile_queue_pop_next,
     reconcile_queue_push,
 )
+
+
+def _missing(name: str) -> Callable[..., Any]:
+    def _err(*_args: object, **_kwargs: object) -> Any:
+        raise RuntimeError(
+            f"regression handler {name!r} not configured; "
+            "call cmd_test_regression() via the CLI entrypoint"
+        )
+    return _err
+
+
+archive_pack_internal: Callable[..., Path] = _missing("archive_pack_internal")
+archive_unpack_internal: Callable[..., Path] = _missing("archive_unpack_internal")
+archive_restore_internal: Callable[..., Path] = _missing("archive_restore_internal")
+cmd_rm: Callable[..., int] = _missing("cmd_rm")
 
 
 def _regtest_case_result(
@@ -139,7 +148,7 @@ def _regtest_archive_pack_atomic_failure(root: Path) -> tuple[bool, str]:
             raise OSError("injected replace failure")
         return orig_replace(self, target_path)
 
-    Path.replace = _replace_injected  # type: ignore[assignment]
+    Path.replace = _replace_injected  # type: ignore[method-assign,assignment]
     try:
         try:
             _ = archive_pack_internal(base, src)
@@ -148,7 +157,7 @@ def _regtest_archive_pack_atomic_failure(root: Path) -> tuple[bool, str]:
             if "injected" not in str(exc):
                 return False, f"unexpected error: {exc}"
     finally:
-        Path.replace = orig_replace  # type: ignore[assignment]
+        Path.replace = orig_replace  # type: ignore[method-assign]
 
     if not src.is_dir():
         return False, "source directory was not preserved"
@@ -351,8 +360,22 @@ def cmd_test_regression(
     run_cwd: Path,
     list_only: bool = False,
     selected: list[str] | None = None,
+    *,
+    archive_pack_internal: Callable[[Path, Path], Path] | None = None,
+    archive_unpack_internal: Callable[[Path, Path], Path] | None = None,
+    archive_restore_internal: Callable[..., Path] | None = None,
+    cmd_rm: Callable[..., int] | None = None,
 ) -> int:
     selected = list(selected or [])
+
+    if archive_pack_internal is not None:
+        globals()["archive_pack_internal"] = archive_pack_internal
+    if archive_unpack_internal is not None:
+        globals()["archive_unpack_internal"] = archive_unpack_internal
+    if archive_restore_internal is not None:
+        globals()["archive_restore_internal"] = archive_restore_internal
+    if cmd_rm is not None:
+        globals()["cmd_rm"] = cmd_rm
 
     cases = _regression_cases()
     case_map = {name: fn for name, fn in cases}

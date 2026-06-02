@@ -5,8 +5,9 @@ import subprocess
 from pathlib import Path
 
 from homebase.cli.parser import build_cli_parser
-from homebase.metadata.api import save_base_tags, sync_tag_symlinks
+from homebase.metadata.api import save_base_tags
 from homebase.workspace.new import cmd_new
+from homebase.workspace.tag_sync import sync_tag_symlinks
 
 
 def _run_new(base: Path, cwd: Path, args: list[str]) -> int:

@@ -172,17 +172,6 @@ def suggest_project_root(path: Path) -> Path:
     return current
 
 
-def find_marker_root_upward(path: Path, marker_file: str) -> Path | None:
-    cur = path.resolve()
-    while True:
-        if (cur / marker_file).is_file():
-            return cur
-        parent = cur.parent
-        if parent == cur:
-            return None
-        cur = parent
-
-
 FIX_MARKER = "marker"
 FIX_ARCHIVE_ENTRY = "archive-entry"
 FIX_REPO_DIR = "repo-dir"
