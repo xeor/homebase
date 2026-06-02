@@ -153,3 +153,93 @@ def test_build_project_info_omits_worktree_block_when_meta_unavailable(
     text = _build(row, load_base_data=lambda _p: {})
     assert "worktree of" in text
     assert "parent repo" not in text
+
+
+def test_build_project_info_meta_checks_renders_issue_fix_hints(tmp_path: Path) -> None:
+    row = Row(name="proj", path=tmp_path / "proj")
+    issues = [
+        ("error", "legacy_only", "legacy .base.yml present"),
+        ("warning", "missing_meta", ".base.yaml missing"),
+        ("error", "invalid_yaml", "bad yaml"),
+        ("error", "invalid_root", "root must be mapping"),
+        ("warning", "schema_warn", "unexpected key x"),
+        ("warning", "other", "misc warn"),
+    ]
+    text = _build(
+        row,
+        include_meta_checks=True,
+        base_meta_issues=lambda _path: issues,
+        load_base_data=lambda _p: {"tags": ["a"]},
+    )
+    assert "ERROR" in text and "WARNING" in text
+    assert "legacy_only" in text
+    assert "missing_meta" in text
+    assert "invalid_yaml" in text
+    assert "invalid_root" in text
+    assert "schema_warn" in text
+    assert ".base.yaml keys" in text
+
+
+def test_build_project_info_renders_wip_with_hotkey(tmp_path: Path) -> None:
+    row = Row(name="proj", path=tmp_path / "proj", wip=True)
+    text = _build(row, wip_hotkey=2)
+    assert "wip" in text
+    assert "alt+2" in text
+
+
+def test_build_project_info_renders_dirty_marker(tmp_path: Path) -> None:
+    row = Row(name="proj", path=tmp_path / "proj", branch="main", dirty="*")
+    text = _build(row)
+    assert "main" in text
+    assert "*" in text
+
+
+def test_build_project_info_runs_git_log_for_repo_dir(tmp_path: Path) -> None:
+    repo = tmp_path / "proj"
+    (repo / "repo" / ".git").mkdir(parents=True)
+    row = Row(name="proj", path=repo, repo_dir="repo")
+    captured: dict[str, tuple[str, ...]] = {}
+
+    def fake_run(*args: str) -> str:
+        captured["args"] = args
+        return "abc123 2026-06-01 hello"
+
+    text = _build(row, run_out=fake_run)
+    assert "last commit" in text
+    assert "abc123" in text
+    assert "git" in captured["args"]
+
+
+def test_build_project_info_handles_git_log_failure(tmp_path: Path) -> None:
+    import subprocess as sp
+
+    repo = tmp_path / "proj"
+    (repo / "repo" / ".git").mkdir(parents=True)
+    row = Row(name="proj", path=repo, repo_dir="repo")
+
+    def boom(*_args: str) -> str:
+        raise sp.SubprocessError("nope")
+
+    text = _build(row, run_out=boom)
+    assert "last commit" in text
+
+
+def test_build_project_info_renders_cached_timestamps(tmp_path: Path) -> None:
+    row = Row(
+        name="proj",
+        path=tmp_path / "proj",
+        last_cached_ts=1700000000,
+        last_reconciled_ts=1700000000,
+    )
+    text = _build(row, fmt_iso=lambda ts: f"iso({ts})")
+    assert "last cached" in text
+    assert "last reconciled" in text
+
+
+def test_read_worktree_block_returns_none_on_error(tmp_path: Path) -> None:
+    def boom(_path: Path) -> dict[str, object]:
+        raise OSError("nope")
+
+    assert project_info._read_worktree_block(boom, tmp_path) is None
+    assert project_info._read_worktree_block(lambda _p: {"worktree": "not-a-dict"}, tmp_path) is None
+    assert project_info._read_worktree_block(lambda _p: {"worktree": {"x": 1}}, tmp_path) == {"x": 1}

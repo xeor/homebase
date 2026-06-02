@@ -43,3 +43,70 @@ def test_cli_ls_smoke(tmp_path: Path, monkeypatch, capsys) -> None:
     rc = int(entry.main(["ls"]))
     capsys.readouterr()
     assert rc == 0
+
+
+def test_cli_completion_smoke(tmp_path: Path, monkeypatch, capsys) -> None:
+    entry = importlib.import_module("homebase.cli.entry")
+    monkeypatch.setenv("BASE_FOLDER", str(tmp_path))
+    rc = int(entry.main(["completion", "fish"]))
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "function _b_complete" in out or "complete" in out
+
+
+def test_cli_shell_init_smoke(tmp_path: Path, monkeypatch, capsys) -> None:
+    entry = importlib.import_module("homebase.cli.entry")
+    monkeypatch.setenv("BASE_FOLDER", str(tmp_path))
+    rc = int(entry.main(["shell-init"]))
+    capsys.readouterr()
+    assert rc == 0
+
+
+def test_cli_shell_init_specific_shell(tmp_path: Path, monkeypatch, capsys) -> None:
+    entry = importlib.import_module("homebase.cli.entry")
+    monkeypatch.setenv("BASE_FOLDER", str(tmp_path))
+    rc = int(entry.main(["shell-init", "bash"]))
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert out  # shell-init prints a script
+
+
+def test_cli_internal_complete_smoke(tmp_path: Path, monkeypatch, capsys) -> None:
+    entry = importlib.import_module("homebase.cli.entry")
+    monkeypatch.setenv("BASE_FOLDER", str(tmp_path))
+    rc = int(entry.main(["__complete", "fish", "1", "b"]))
+    capsys.readouterr()
+    assert rc == 0
+
+
+def test_cli_help_unknown_topic_returns_2(tmp_path: Path, monkeypatch, capsys) -> None:
+    entry = importlib.import_module("homebase.cli.entry")
+    monkeypatch.setenv("BASE_FOLDER", str(tmp_path))
+    rc = int(entry.main(["help", "ghost-topic-1234"]))
+    err = capsys.readouterr().err
+    assert rc == 2
+    assert "unknown help topic" in err
+
+
+def test_cli_help_topics_list(tmp_path: Path, monkeypatch, capsys) -> None:
+    entry = importlib.import_module("homebase.cli.entry")
+    monkeypatch.setenv("BASE_FOLDER", str(tmp_path))
+    rc = int(entry.main(["help", "topics"]))
+    capsys.readouterr()
+    assert rc == 0
+
+
+def test_cli_invalid_args_returns_parser_exit_code(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    entry = importlib.import_module("homebase.cli.entry")
+    monkeypatch.setenv("BASE_FOLDER", str(tmp_path))
+    rc = int(entry.main(["this-is-not-a-real-command"]))
+    capsys.readouterr()
+    assert rc != 0
+
+
+def test_resolve_base_dir_uses_env_when_no_arg(tmp_path: Path, monkeypatch) -> None:
+    entry = importlib.import_module("homebase.cli.entry")
+    monkeypatch.setenv("BASE_FOLDER", str(tmp_path))
+    assert entry.resolve_base_dir(None) == tmp_path.resolve()

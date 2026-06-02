@@ -186,3 +186,232 @@ def test_git_info_worktree_cache_invalidates_on_commit(tmp_path: Path) -> None:
     assert ts2 != ts1
 
 
+def test_discover_copier_templates_returns_sorted_visible_dirs(tmp_path: Path) -> None:
+    base = tmp_path / "base"
+    base.mkdir()
+    assert projects.discover_copier_templates(base) == []
+
+    copier = base / ".copier"
+    copier.mkdir()
+    (copier / "Beta").mkdir()
+    (copier / "alpha").mkdir()
+    (copier / ".hidden").mkdir()
+    (copier / "afile").write_text("x")
+    out = projects.discover_copier_templates(base)
+    assert out == ["alpha", "Beta"]
+
+
+def test_resolve_new_project_name_strips_legacy_prefix_and_tmp() -> None:
+    name = projects.resolve_new_project_name(
+        "2025-01-01_demo.tmp", add_date_prefix=True, add_tmp_suffix=False
+    )
+    assert name.endswith("_demo")
+    assert name.startswith(datetime.now().strftime("%Y-%m-%d_"))
+
+
+def test_resolve_new_project_name_rejects_invalid_inputs() -> None:
+    import pytest
+
+    for bad in ("", "   ", ".", "..", "a/b", "a\\b"):
+        with pytest.raises(ValueError):
+            projects.resolve_new_project_name(
+                bad, add_date_prefix=False, add_tmp_suffix=False
+            )
+
+
+def test_classify_name_detects_suffixes() -> None:
+    assert projects.classify_name("alpha.fork") == (True, False, "fork")
+    assert projects.classify_name("beta.tmp") == (False, True, "tmp")
+    assert projects.classify_name("gamma") == (False, False, None)
+
+
+def test_alpha_name_at_and_next_available(tmp_path: Path) -> None:
+    base = tmp_path / "b"
+    base.mkdir()
+    assert projects._alpha_name_at(0) == "a"
+    assert projects._alpha_name_at(25) == "z"
+    assert projects._alpha_name_at(26) == "aa"
+    assert projects._alpha_name_at(26 + 25) == "az"
+
+    nxt = projects._next_available_alpha_name(
+        base, add_date_prefix=False, add_tmp_suffix=False
+    )
+    assert nxt == "a"
+    (base / "a").mkdir()
+    (base / "b").mkdir()
+    nxt2 = projects._next_available_alpha_name(
+        base, add_date_prefix=False, add_tmp_suffix=False
+    )
+    assert nxt2 == "c"
+
+
+def test_path_size_bytes_handles_file_and_dir_and_missing(tmp_path: Path) -> None:
+    f = tmp_path / "f.txt"
+    f.write_bytes(b"hello")
+    assert projects._path_size_bytes(f) == 5
+
+    d = tmp_path / "d"
+    d.mkdir()
+    (d / "a.bin").write_bytes(b"abc")
+    (d / "b.bin").write_bytes(b"de")
+    assert projects._path_size_bytes(d) == 5
+
+    missing = tmp_path / "missing"
+    assert projects._path_size_bytes(missing) == 0
+
+
+def test_resolve_row_size_refresh_branches(tmp_path: Path) -> None:
+    d = tmp_path / "p"
+    d.mkdir()
+    (d / "f.bin").write_bytes(b"x" * 100)
+
+    size_a, count_a = projects._resolve_row_size(d, None, 0)
+    assert size_a == 100
+    assert count_a == 1
+
+    (d / "g.bin").write_bytes(b"y" * 50)
+    size_b, count_b = projects._resolve_row_size(d, size_a, count_a)
+    assert size_b == size_a
+    assert count_b == count_a + 1
+
+    size_c, _ = projects._resolve_row_size(d, size_b, count_b, force_refresh=True)
+    assert size_c == 150
+
+
+def test_create_project_writes_marker_and_tags(tmp_path: Path) -> None:
+    base = tmp_path / "base"
+    base.mkdir()
+    target = projects.create_project(
+        base,
+        "alpha",
+        add_date_prefix=False,
+        add_tmp_suffix=False,
+        copier_template=None,
+        initial_tags=["alpha", "  ", "beta", "alpha"],
+    )
+    assert target.is_dir()
+    assert (target / ".base.yaml").is_file()
+    text = (target / ".base.yaml").read_text()
+    # tags deduped and sorted
+    assert "alpha" in text and "beta" in text
+
+
+def test_create_project_rejects_existing_target(tmp_path: Path) -> None:
+    import pytest
+
+    base = tmp_path / "base"
+    base.mkdir()
+    (base / "alpha").mkdir()
+    with pytest.raises(ValueError, match="already exists"):
+        projects.create_project(
+            base, "alpha", add_date_prefix=False, add_tmp_suffix=False
+        )
+
+
+def test_create_project_scaffolds_plain_template(tmp_path: Path) -> None:
+    base = tmp_path / "base"
+    base.mkdir()
+    tmpl_dir = base / ".copier" / "plain"
+    (tmpl_dir / "subdir").mkdir(parents=True)
+    (tmpl_dir / "subdir" / "inner.txt").write_text("inner\n")
+    (tmpl_dir / "root.txt").write_text("root\n")
+    target = projects.create_project(
+        base,
+        "beta",
+        add_date_prefix=False,
+        add_tmp_suffix=False,
+        copier_template="plain",
+    )
+    assert (target / "root.txt").read_text() == "root\n"
+    assert (target / "subdir" / "inner.txt").read_text() == "inner\n"
+
+
+def test_create_project_missing_template_raises(tmp_path: Path) -> None:
+    import pytest
+
+    base = tmp_path / "base"
+    base.mkdir()
+    with pytest.raises(ValueError, match="template not found"):
+        projects.create_project(
+            base,
+            "gamma",
+            add_date_prefix=False,
+            add_tmp_suffix=False,
+            copier_template="missing",
+        )
+    assert not (base / "gamma").exists()
+
+
+def test_scaffold_template_directory_noops_on_empty(tmp_path: Path) -> None:
+    src = tmp_path / "src"
+    src.mkdir()
+    dst = tmp_path / "dst"
+    dst.mkdir()
+    projects.scaffold_template_directory(src, dst)
+    assert list(dst.iterdir()) == []
+
+
+def test_run_post_commands_runs_and_succeeds(tmp_path: Path, capsys) -> None:
+    projects.run_post_commands(tmp_path, [])  # no-op fast path
+
+    target = tmp_path / "work"
+    target.mkdir()
+    projects.run_post_commands(target, ["echo hi > marker.txt"])
+    assert (target / "marker.txt").exists()
+
+
+def test_run_post_commands_raises_on_nonzero_exit(tmp_path: Path) -> None:
+    import pytest
+
+    target = tmp_path / "work"
+    target.mkdir()
+    with pytest.raises(ValueError, match="post command failed"):
+        projects.run_post_commands(target, ["exit 7"])
+
+
+def test_resolve_git_dirs_handles_gitfile_pointer(tmp_path: Path) -> None:
+    parent = tmp_path / "parent"
+    _init_git_repo(parent)
+    wt = tmp_path / "wt"
+    subprocess.run(
+        ["git", "-C", str(parent), "worktree", "add", "-b", "feat", str(wt)],
+        check=True,
+        capture_output=True,
+    )
+    result = projects._resolve_git_dirs(wt)
+    assert result is not None
+    gitdir, commondir = result
+    assert gitdir != commondir
+    assert (commondir / "HEAD").is_file() or (commondir / "refs").is_dir()
+
+
+def test_resolve_git_dirs_returns_none_for_non_repo(tmp_path: Path) -> None:
+    assert projects._resolve_git_dirs(tmp_path) is None
+
+
+def test_resolve_head_ref_text_returns_input_when_not_ref(tmp_path: Path) -> None:
+    assert projects._resolve_head_ref_text(tmp_path, "abc123") == "abc123"
+    # ref:<missing> path returns input
+    assert projects._resolve_head_ref_text(tmp_path, "ref: ").startswith("ref: ")
+
+
+def test_combine_dirty_truth_table() -> None:
+    assert projects._combine_dirty("", "") == ""
+    assert projects._combine_dirty("*", "") == "*"
+    assert projects._combine_dirty("", "*") == "*"
+    assert projects._combine_dirty("?", "") == "?"
+    assert projects._combine_dirty("", "?") == "?"
+
+
+def test_git_info_no_repo_dir_returns_dashes(tmp_path: Path) -> None:
+    plain = tmp_path / "plain"
+    plain.mkdir()
+    branch, dirty, ts = projects.git_info(plain, repo_dir="")
+    assert (branch, dirty, ts) == ("-", "-", 0)
+
+
+def test_git_info_missing_dotgit_returns_dashes(tmp_path: Path) -> None:
+    plain = tmp_path / "plain2"
+    plain.mkdir()
+    branch, dirty, ts = projects.git_info(plain, repo_dir=".")
+    assert (branch, dirty, ts) == ("-", "-", 0)
