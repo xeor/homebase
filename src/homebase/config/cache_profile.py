@@ -95,6 +95,41 @@ def load_cache_profile_table(data: object) -> dict[str, dict[str, dict[str, obje
     return out
 
 
+def _apply_profile_overrides(
+    resolved: dict[str, object],
+    view: str,
+    profile_overrides: Mapping[str, object],
+) -> dict[str, object]:
+    if not isinstance(profile_overrides, Mapping):
+        raise ValueError("cache_profile_overrides must be a mapping")
+    override_all = profile_overrides.get(_CACHE_PROFILE_SCOPE_ALL, {})
+    override_view = profile_overrides.get(view, {})
+    if override_all and not isinstance(override_all, Mapping):
+        raise ValueError("cache_profile_overrides.all must be a mapping")
+    if override_view and not isinstance(override_view, Mapping):
+        raise ValueError(f"cache_profile_overrides.{view} must be a mapping")
+    return _merge_profile_layers(
+        [resolved, dict(override_all or {}), dict(override_view or {})]
+    )
+
+
+def _validate_resolved_keys(resolved: dict[str, object]) -> None:
+    invalid = sorted(
+        str(k) for k in resolved if str(k) not in _CACHE_PROFILE_KEYS
+    )
+    if invalid:
+        raise ValueError(
+            f"resolved cache profile has invalid keys: {', '.join(invalid)}"
+        )
+    missing = sorted(
+        k for k in _CACHE_PROFILE_REQUIRED_KEYS if k not in resolved
+    )
+    if missing:
+        raise ValueError(
+            f"resolved cache profile missing keys: {', '.join(missing)}"
+        )
+
+
 def resolve_cache_profile(
     *,
     profile_name: str,
@@ -105,14 +140,12 @@ def resolve_cache_profile(
 ) -> dict[str, object]:
     if view not in _CACHE_PROFILE_VIEWS:
         raise ValueError(f"unknown cache profile view: {view}")
-
     all_scope = profile_table.get(_CACHE_PROFILE_SCOPE_ALL, {})
     view_scope = profile_table.get(view, {})
     base_layer = all_scope.get(profile_name)
     view_layer = view_scope.get(profile_name)
     if base_layer is None and view_layer is None:
         raise ValueError(f"unknown cache_profile reference: {profile_name}")
-
     resolved = _merge_profile_layers(
         [
             _CACHE_PROFILE_HARD_DEFAULTS,
@@ -121,26 +154,7 @@ def resolve_cache_profile(
             explicit_fields or {},
         ]
     )
-
     if profile_overrides is not None:
-        if not isinstance(profile_overrides, Mapping):
-            raise ValueError("cache_profile_overrides must be a mapping")
-        override_all = profile_overrides.get(_CACHE_PROFILE_SCOPE_ALL, {})
-        override_view = profile_overrides.get(view, {})
-        if override_all and not isinstance(override_all, Mapping):
-            raise ValueError("cache_profile_overrides.all must be a mapping")
-        if override_view and not isinstance(override_view, Mapping):
-            raise ValueError(f"cache_profile_overrides.{view} must be a mapping")
-        resolved = _merge_profile_layers(
-            [resolved, dict(override_all or {}), dict(override_view or {})]
-        )
-
-    invalid = sorted(str(k) for k in resolved if str(k) not in _CACHE_PROFILE_KEYS)
-    if invalid:
-        invalid_csv = ", ".join(invalid)
-        raise ValueError(f"resolved cache profile has invalid keys: {invalid_csv}")
-    missing = sorted(k for k in _CACHE_PROFILE_REQUIRED_KEYS if k not in resolved)
-    if missing:
-        missing_csv = ", ".join(missing)
-        raise ValueError(f"resolved cache profile missing keys: {missing_csv}")
+        resolved = _apply_profile_overrides(resolved, view, profile_overrides)
+    _validate_resolved_keys(resolved)
     return resolved

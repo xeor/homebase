@@ -342,103 +342,78 @@ def _default_score_metric_profile(metrics: list[dict[str, object]]) -> list[str]
     return benchmark_report.default_score_metric_profile(metrics)
 
 
-def _benchmark_run_suite(
+def _bench_seed_phase(
     bench_root: Path,
-    seed_dataset: bool = True,
-    dataset_hint: dict[str, object] | None = None,
-    *,
-    archive_pack_internal: ArchiveOp | None = None,
-    archive_unpack_internal: ArchiveOp | None = None,
-) -> tuple[dict[str, object], list[dict[str, object]], list[str], float, float]:
-    notes: list[str] = []
-    if seed_dataset:
-        t_seed = time.perf_counter()
-        dataset = _benchmark_seed_dataset(
-            bench_root, archive_pack_internal=archive_pack_internal
-        )
-        seed_elapsed_s = time.perf_counter() - t_seed
-    else:
-        dataset = dict(dataset_hint or {})
-        seed_elapsed_s = 0.0
-
-    t_suite = time.perf_counter()
-    metrics: list[dict[str, object]] = []
-
-    metrics.append(
-        _benchmark_timeit(
-            "collect_projects", lambda: collect_projects(bench_root), repeat=4
-        )
+    seed_dataset: bool,
+    dataset_hint: dict[str, object] | None,
+    archive_pack_internal: ArchiveOp | None,
+) -> tuple[dict[str, object], float]:
+    if not seed_dataset:
+        return dict(dataset_hint or {}), 0.0
+    t_seed = time.perf_counter()
+    dataset = _benchmark_seed_dataset(
+        bench_root, archive_pack_internal=archive_pack_internal
     )
-    metrics.append(
-        _benchmark_timeit(
-            "collect_archived", lambda: collect_archived(bench_root), repeat=4
-        )
-    )
+    return dataset, time.perf_counter() - t_seed
 
-    active_rows, archived_rows = collect_workspace_rows(bench_root)
-    packed_rows = [r for r in archived_rows if r.packed]
-    archived_dir_rows = [r for r in archived_rows if not r.packed]
 
-    metrics.append(
+def _bench_cache_metrics(
+    bench_root: Path,
+    active_rows: list,
+    archived_rows: list,
+) -> list[dict[str, object]]:
+    upsert_rows = active_rows[:240]
+    delete_paths = [r.path for r in active_rows[240:480]]
+    return [
         _benchmark_timeit(
             "cache_store_rows_full",
             lambda: cache_store_rows(bench_root, active_rows, archived_rows),
             repeat=4,
-        )
-    )
-    metrics.append(
+        ),
         _benchmark_timeit(
             "cache_load_rows_warm",
             lambda: cache_load_rows(bench_root, CACHE_MAX_AGE_S),
             repeat=8,
-        )
-    )
-
-    upsert_rows = active_rows[:240]
-    delete_paths = [r.path for r in active_rows[240:480]]
-    metrics.append(
+        ),
         _benchmark_timeit(
             "cache_upsert_rows_240",
-            lambda: cache_upsert_rows(bench_root, upsert_rows, touch_refresh_ts=False),
+            lambda: cache_upsert_rows(
+                bench_root, upsert_rows, touch_refresh_ts=False
+            ),
             repeat=4,
-        )
-    )
-    metrics.append(
+        ),
         _benchmark_timeit(
             "cache_delete_paths_240",
             lambda: cache_delete_paths(
                 bench_root, delete_paths, touch_refresh_ts=False
             ),
             repeat=4,
-        )
-    )
-    metrics.append(
+        ),
         _benchmark_timeit(
             "cache_restore_after_delete",
             lambda: cache_store_rows(bench_root, active_rows, archived_rows),
             repeat=2,
-        )
-    )
+        ),
+    ]
 
+
+def _bench_query_metrics(active_rows: list) -> list[dict[str, object]]:
     q_plain = "bench-01"
     q_plain2 = "#cli"
     q_expr = "(#cli OR #api) :tags>1 :properties>=0 :created>=2000"
     q_expr2 = "(:created>=2023 AND :tags>0) OR !pkg"
-    metrics.append(
+    metrics: list[dict[str, object]] = [
         _benchmark_timeit(
             "query_plain_name_scan",
             lambda: [r for r in active_rows if match_query(r, q_plain)],
             repeat=8,
-        )
-    )
-    metrics.append(
+        ),
         _benchmark_timeit(
             "query_plain_tag_scan",
             lambda: [r for r in active_rows if match_query(r, q_plain2)],
             repeat=8,
-        )
-    )
-
+        ),
+    ]
     pred1, pred1_err = compile_filter_expr(q_expr)
     if pred1_err:
         metrics.append(_benchmark_metric_error("query_expr_scan_1", pred1_err))
@@ -450,7 +425,6 @@ def _benchmark_run_suite(
                 repeat=8,
             )
         )
-
     pred2, pred2_err = compile_filter_expr(q_expr2)
     if pred2_err:
         metrics.append(_benchmark_metric_error("query_expr_scan_2", pred2_err))
@@ -462,7 +436,10 @@ def _benchmark_run_suite(
                 repeat=8,
             )
         )
+    return metrics
 
+
+def _bench_named_filter_metric(bench_root: Path) -> dict[str, object]:
     named_conf = bench_root / HOMEBASE_DIR_NAME / GLOBAL_CONFIG_FILE_NAME
     named_conf.parent.mkdir(parents=True, exist_ok=True)
     named_conf.write_text(
@@ -479,115 +456,138 @@ def _benchmark_run_suite(
             default_flow_style=False,
         )
     )
-    metrics.append(
-        _benchmark_timeit(
-            "resolve_filter_expression_named",
-            lambda: resolve_filter_expression(bench_root, "@hot AND :tags>1"),
-            repeat=25,
-            warmup=2,
-        )
+    return _benchmark_timeit(
+        "resolve_filter_expression_named",
+        lambda: resolve_filter_expression(bench_root, "@hot AND :tags>1"),
+        repeat=25,
+        warmup=2,
     )
 
+
+def _bench_git_metrics(bench_root: Path) -> list[dict[str, object]]:
     git_small = bench_root / "bench-git-small"
     git_medium = bench_root / "bench-git-medium"
     git_large = bench_root / "bench-git-large"
-    metrics.append(
-        _benchmark_timeit("git_info_small", lambda: git_info(git_small), repeat=10)
-    )
-    metrics.append(
-        _benchmark_timeit("git_info_medium", lambda: git_info(git_medium), repeat=10)
-    )
-    metrics.append(
-        _benchmark_timeit("git_info_large", lambda: git_info(git_large), repeat=10)
-    )
-    metrics.append(
+    return [
+        _benchmark_timeit(
+            "git_info_small", lambda: git_info(git_small), repeat=10
+        ),
+        _benchmark_timeit(
+            "git_info_medium", lambda: git_info(git_medium), repeat=10
+        ),
+        _benchmark_timeit(
+            "git_info_large", lambda: git_info(git_large), repeat=10
+        ),
         _benchmark_timeit(
             "project_row_git_small", lambda: project_row(git_small), repeat=8
-        )
-    )
-    metrics.append(
+        ),
         _benchmark_timeit(
-            "project_row_git_medium", lambda: project_row(git_medium), repeat=8
-        )
-    )
-    metrics.append(
+            "project_row_git_medium",
+            lambda: project_row(git_medium),
+            repeat=8,
+        ),
         _benchmark_timeit(
             "project_row_git_large", lambda: project_row(git_large), repeat=8
-        )
-    )
+        ),
+    ]
 
-    packed_sample = [r.path for r in packed_rows[:32]]
-    archived_dir_sample = [r.path for r in archived_dir_rows[-32:]]
+
+def _bench_archive_unpack_repack(
+    bench_root: Path,
+    packed_sample: list[Path],
+    pack_op: ArchiveOp,
+    unpack_op: ArchiveOp,
+) -> list[dict[str, object]]:
+    if not packed_sample:
+        return [
+            _benchmark_metric_error("archive_unpack_32", "no packed rows"),
+            _benchmark_metric_error("archive_repack_32", "no packed rows"),
+        ]
+    unpacked_dirs = [
+        p.with_name(p.name[: -len(PACKED_ARCHIVE_SUFFIX)]) for p in packed_sample
+    ]
+    return [
+        _benchmark_timeit(
+            "archive_unpack_32",
+            lambda: [unpack_op(bench_root, p) for p in packed_sample],
+            repeat=1,
+            warmup=0,
+        ),
+        _benchmark_timeit(
+            "archive_repack_32",
+            lambda: [pack_op(bench_root, p) for p in unpacked_dirs],
+            repeat=1,
+            warmup=0,
+        ),
+    ]
+
+
+def _bench_archive_pack_unpack_back(
+    bench_root: Path,
+    archived_dir_sample: list[Path],
+    pack_op: ArchiveOp,
+    unpack_op: ArchiveOp,
+) -> list[dict[str, object]]:
+    if not archived_dir_sample:
+        return [
+            _benchmark_metric_error("archive_pack_32", "no archive dirs"),
+            _benchmark_metric_error("archive_unpack_back_32", "no archive dirs"),
+        ]
+    repacked = [
+        p.with_name(f"{p.name}{PACKED_ARCHIVE_SUFFIX}")
+        for p in archived_dir_sample
+    ]
+    return [
+        _benchmark_timeit(
+            "archive_pack_32",
+            lambda: [pack_op(bench_root, p) for p in archived_dir_sample],
+            repeat=1,
+            warmup=0,
+        ),
+        _benchmark_timeit(
+            "archive_unpack_back_32",
+            lambda: [unpack_op(bench_root, p) for p in repacked],
+            repeat=1,
+            warmup=0,
+        ),
+    ]
+
+
+def _bench_archive_metrics(
+    bench_root: Path,
+    archived_rows: list,
+    archive_pack_internal: ArchiveOp | None,
+    archive_unpack_internal: ArchiveOp | None,
+) -> list[dict[str, object]]:
+    packed_sample = [r.path for r in archived_rows if r.packed][:32]
+    archived_dir_sample = [r.path for r in archived_rows if not r.packed][-32:]
     if archive_pack_internal is None or archive_unpack_internal is None:
-        metrics.append(
-            _benchmark_metric_error("archive_unpack_32", "archive handlers unset")
-        )
-        metrics.append(
-            _benchmark_metric_error("archive_repack_32", "archive handlers unset")
-        )
-        metrics.append(
-            _benchmark_metric_error("archive_pack_32", "archive handlers unset")
-        )
-        metrics.append(
-            _benchmark_metric_error("archive_unpack_back_32", "archive handlers unset")
-        )
-    else:
-        unpack_op = archive_unpack_internal
-        pack_op = archive_pack_internal
-        if packed_sample:
-            metrics.append(
-                _benchmark_timeit(
-                    "archive_unpack_32",
-                    lambda: [unpack_op(bench_root, p) for p in packed_sample],
-                    repeat=1,
-                    warmup=0,
-                )
-            )
-            unpacked_dirs = [
-                p.with_name(p.name[: -len(PACKED_ARCHIVE_SUFFIX)]) for p in packed_sample
-            ]
-            metrics.append(
-                _benchmark_timeit(
-                    "archive_repack_32",
-                    lambda: [pack_op(bench_root, p) for p in unpacked_dirs],
-                    repeat=1,
-                    warmup=0,
-                )
-            )
-        else:
-            metrics.append(_benchmark_metric_error("archive_unpack_32", "no packed rows"))
-            metrics.append(_benchmark_metric_error("archive_repack_32", "no packed rows"))
+        return [
+            _benchmark_metric_error("archive_unpack_32", "archive handlers unset"),
+            _benchmark_metric_error("archive_repack_32", "archive handlers unset"),
+            _benchmark_metric_error("archive_pack_32", "archive handlers unset"),
+            _benchmark_metric_error(
+                "archive_unpack_back_32", "archive handlers unset"
+            ),
+        ]
+    return [
+        *_bench_archive_unpack_repack(
+            bench_root, packed_sample, archive_pack_internal, archive_unpack_internal
+        ),
+        *_bench_archive_pack_unpack_back(
+            bench_root,
+            archived_dir_sample,
+            archive_pack_internal,
+            archive_unpack_internal,
+        ),
+    ]
 
-        if archived_dir_sample:
-            metrics.append(
-                _benchmark_timeit(
-                    "archive_pack_32",
-                    lambda: [
-                        pack_op(bench_root, p) for p in archived_dir_sample
-                    ],
-                    repeat=1,
-                    warmup=0,
-                )
-            )
-            repacked = [
-                p.with_name(f"{p.name}{PACKED_ARCHIVE_SUFFIX}") for p in archived_dir_sample
-            ]
-            metrics.append(
-                _benchmark_timeit(
-                    "archive_unpack_back_32",
-                    lambda: [unpack_op(bench_root, p) for p in repacked],
-                    repeat=1,
-                    warmup=0,
-                )
-            )
-        else:
-            metrics.append(_benchmark_metric_error("archive_pack_32", "no archive dirs"))
-            metrics.append(
-                _benchmark_metric_error("archive_unpack_back_32", "no archive dirs")
-            )
 
+def _bench_tag_metrics(
+    bench_root: Path, active_rows: list
+) -> list[dict[str, object]]:
     tag_targets = [r.path for r in active_rows[:420]]
-    metrics.append(
+    return [
         _benchmark_timeit(
             "tags_write_420",
             lambda: [
@@ -596,17 +596,20 @@ def _benchmark_run_suite(
             ],
             repeat=2,
             warmup=0,
-        )
-    )
-    metrics.append(
+        ),
         _benchmark_timeit(
             "tags_sync_symlink",
             lambda: sync_tag_symlinks(bench_root),
             repeat=2,
             warmup=0,
-        )
-    )
+        ),
+    ]
 
+
+def _bench_collect_count_notes(
+    active_rows: list, archived_rows: list, dataset: dict
+) -> list[str]:
+    notes: list[str] = []
     if len(active_rows) < int(dataset.get("active_projects", 0)):
         notes.append("active row count lower than expected")
     if len(archived_rows) < int(dataset.get("archived_dirs", 0)):
@@ -615,7 +618,48 @@ def _benchmark_run_suite(
         dataset.get("archived_packed", 0)
     ):
         notes.append("packed archived rows lower than expected")
+    return notes
 
+
+def _benchmark_run_suite(
+    bench_root: Path,
+    seed_dataset: bool = True,
+    dataset_hint: dict[str, object] | None = None,
+    *,
+    archive_pack_internal: ArchiveOp | None = None,
+    archive_unpack_internal: ArchiveOp | None = None,
+) -> tuple[dict[str, object], list[dict[str, object]], list[str], float, float]:
+    dataset, seed_elapsed_s = _bench_seed_phase(
+        bench_root, seed_dataset, dataset_hint, archive_pack_internal
+    )
+    t_suite = time.perf_counter()
+    metrics: list[dict[str, object]] = []
+    metrics.append(
+        _benchmark_timeit(
+            "collect_projects",
+            lambda: collect_projects(bench_root),
+            repeat=4,
+        )
+    )
+    metrics.append(
+        _benchmark_timeit(
+            "collect_archived",
+            lambda: collect_archived(bench_root),
+            repeat=4,
+        )
+    )
+    active_rows, archived_rows = collect_workspace_rows(bench_root)
+    metrics.extend(_bench_cache_metrics(bench_root, active_rows, archived_rows))
+    metrics.extend(_bench_query_metrics(active_rows))
+    metrics.append(_bench_named_filter_metric(bench_root))
+    metrics.extend(_bench_git_metrics(bench_root))
+    metrics.extend(
+        _bench_archive_metrics(
+            bench_root, archived_rows, archive_pack_internal, archive_unpack_internal
+        )
+    )
+    metrics.extend(_bench_tag_metrics(bench_root, active_rows))
+    notes = _bench_collect_count_notes(active_rows, archived_rows, dataset)
     suite_elapsed_s = time.perf_counter() - t_suite
     return dataset, metrics, notes, seed_elapsed_s, suite_elapsed_s
 
@@ -945,60 +989,50 @@ def cmd_benchmark_run(
     return 0
 
 
-def cmd_benchmark_results(base_dir: Path, ignore_featuresets: set[str] | None = None) -> int:
-    ignore_featuresets = set(ignore_featuresets or set())
-    report_path = _benchmark_report_path(base_dir, BENCHMARK_REPORT_FILE_NAME)
-    all_runs = _benchmark_load_runs(report_path)
-    if not all_runs:
-        print(f"no benchmark runs found: {report_path}")
-        return 1
-
+def _filter_current_suite_runs(all_runs: list[dict]) -> tuple[list[dict], int]:
     runs = [
         r
         for r in all_runs
         if int(r.get("suite_version", BENCHMARK_SUITE_VERSION))
         == BENCHMARK_SUITE_VERSION
     ]
-    skipped = len(all_runs) - len(runs)
-    if not runs:
-        print(
-            f"no benchmark runs for suite_version={BENCHMARK_SUITE_VERSION} in: {report_path}"
-        )
-        return 1
+    return runs, len(all_runs) - len(runs)
 
-    available_featuresets = _available_featuresets(runs)
-    invalid_featuresets = sorted(
-        fs for fs in ignore_featuresets if fs not in available_featuresets
-    )
-    if invalid_featuresets:
+
+def _validate_featuresets(
+    runs: list[dict], ignore_featuresets: set[str]
+) -> tuple[set[str], int]:
+    available = _available_featuresets(runs)
+    invalid = sorted(fs for fs in ignore_featuresets if fs not in available)
+    if not invalid:
+        return available, 0
+    print("invalid featureset(s): " + ", ".join(invalid), file=sys.stderr)
+    if available:
         print(
-            "invalid featureset(s): " + ", ".join(invalid_featuresets),
+            "valid featuresets: " + ", ".join(sorted(available)),
             file=sys.stderr,
         )
-        if available_featuresets:
-            print(
-                "valid featuresets: " + ", ".join(sorted(available_featuresets)),
-                file=sys.stderr,
-            )
-        else:
-            print("valid featuresets: (none)", file=sys.stderr)
-        return 1
+    else:
+        print("valid featuresets: (none)", file=sys.stderr)
+    return available, 1
 
-    scored = _benchmark_score_runs(runs, ignore_featuresets=ignore_featuresets)
-    if ignore_featuresets:
-        kept_any = False
-        for run in runs:
-            total_n, kept_n = _run_filtered_metric_counts(run, ignore_featuresets)
-            if total_n > 0 and kept_n > 0:
-                kept_any = True
-                break
-        if not kept_any:
-            print(
-                "ignore-featureset removed all score metrics; nothing left to compare",
-                file=sys.stderr,
-            )
-            return 1
 
+def _any_metrics_kept(runs: list[dict], ignore_featuresets: set[str]) -> bool:
+    for run in runs:
+        total_n, kept_n = _run_filtered_metric_counts(run, ignore_featuresets)
+        if total_n > 0 and kept_n > 0:
+            return True
+    return False
+
+
+def _print_results_header(
+    report_path: Path,
+    scored: list[dict],
+    runs: list[dict],
+    available_featuresets: set[str],
+    ignore_featuresets: set[str],
+    skipped: int,
+) -> None:
     print(f"benchmark report: {report_path}")
     print(f"suite_version: {BENCHMARK_SUITE_VERSION}")
     print(f"runs: {len(scored)}")
@@ -1011,7 +1045,8 @@ def cmd_benchmark_results(base_dir: Path, ignore_featuresets: set[str] | None = 
         print("available featuresets: " + ", ".join(sorted(available_featuresets)))
     if ignore_featuresets:
         print(
-            f"compare basis: filtered metrics (ignore featureset={','.join(sorted(ignore_featuresets))})"
+            "compare basis: filtered metrics "
+            f"(ignore featureset={','.join(sorted(ignore_featuresets))})"
         )
         total_n, kept_n = _run_filtered_metric_counts(runs[-1], ignore_featuresets)
         print(f"filtered profile metrics: kept={kept_n}/{total_n}")
@@ -1021,139 +1056,199 @@ def cmd_benchmark_results(base_dir: Path, ignore_featuresets: set[str] | None = 
         print(f"skipped old-suite runs: {skipped}")
     print("")
 
+
+def _fmt_optional_float(value: object) -> float | None:
+    if isinstance(value, (int, float)):
+        return float(value)
+    return None
+
+
+def _print_results_table(scored: list[dict]) -> None:
     header = (
         f"{'#':>3}  {'timestamp':19}  {'score':>8}  {'best%':>7}  "
-        f"{'warm_sc':>8}  {'cold_sc':>8}  {'warm_s':>10}  {'cold_s':>10}  {'delta':>9}  comment"
+        f"{'warm_sc':>8}  {'cold_sc':>8}  {'warm_s':>10}  "
+        f"{'cold_s':>10}  {'delta':>9}  comment"
     )
     print(header)
     print("-" * len(header))
     for i, run in enumerate(scored, start=1):
-        ts = _short_ts(str(run.get("timestamp", "")))
-        score_raw = run.get("score")
-        score = float(score_raw) if isinstance(score_raw, (int, float)) else None
-        best_pct_raw = run.get("score_best_pct")
-        best_pct = (
-            float(best_pct_raw) if isinstance(best_pct_raw, (int, float)) else None
-        )
-        warm_elapsed = run.get("warm_elapsed_s", run.get("elapsed_s"))
-        cold_elapsed = run.get("cold_elapsed_s", run.get("cold_suite_elapsed_s"))
-        warm_score_raw = run.get("score_warm", run.get("score"))
-        warm_score = (
-            float(warm_score_raw) if isinstance(warm_score_raw, (int, float)) else None
-        )
-        cold_score_raw = run.get("score_cold")
-        cold_score = (
-            float(cold_score_raw) if isinstance(cold_score_raw, (int, float)) else None
-        )
-        delta = run.get("delta_prev_pct")
-        comment = str(run.get("comment", "")).strip()
-        if len(comment) > 48:
-            comment = comment[:45] + "..."
-        best_pct_text = f"{best_pct:.1f}%" if best_pct is not None else "-"
-        print(
-            f"{i:>3}  {ts:19}  {_fmt_score(score):>8}  "
-            f"{best_pct_text:>7}  "
-            f"{_fmt_score(warm_score):>8}  "
-            f"{_fmt_score(cold_score):>8}  "
-            f"{_fmt_bench_value(float(warm_elapsed) if isinstance(warm_elapsed, (int, float)) else None):>10}  "
-            f"{_fmt_bench_value(float(cold_elapsed) if isinstance(cold_elapsed, (int, float)) else None):>10}  "
-            f"{_fmt_bench_delta(delta):>9}  {comment}"
-        )
+        _print_results_row(i, run)
 
-    print("")
-    latest = scored[-1]
-    latest_map = _benchmark_metric_map(latest)
-    prev_map = _benchmark_metric_map(scored[-2]) if len(scored) > 1 else {}
-    latest_elapsed = latest.get("warm_elapsed_s", latest.get("elapsed_s"))
-    latest_cold_elapsed = latest.get(
-        "cold_elapsed_s", latest.get("cold_suite_elapsed_s")
+
+def _print_results_row(i: int, run: dict) -> None:
+    ts = _short_ts(str(run.get("timestamp", "")))
+    score = _fmt_optional_float(run.get("score"))
+    best_pct = _fmt_optional_float(run.get("score_best_pct"))
+    warm_elapsed = _fmt_optional_float(
+        run.get("warm_elapsed_s", run.get("elapsed_s"))
     )
-    latest_core_total = latest.get("total_avg_s")
-    latest_filtered_total = latest.get("filtered_total_s")
+    cold_elapsed = _fmt_optional_float(
+        run.get("cold_elapsed_s", run.get("cold_suite_elapsed_s"))
+    )
+    warm_score = _fmt_optional_float(run.get("score_warm", run.get("score")))
+    cold_score = _fmt_optional_float(run.get("score_cold"))
+    delta = run.get("delta_prev_pct")
+    comment = str(run.get("comment", "")).strip()
+    if len(comment) > 48:
+        comment = comment[:45] + "..."
+    best_pct_text = f"{best_pct:.1f}%" if best_pct is not None else "-"
+    print(
+        f"{i:>3}  {ts:19}  {_fmt_score(score):>8}  "
+        f"{best_pct_text:>7}  "
+        f"{_fmt_score(warm_score):>8}  "
+        f"{_fmt_score(cold_score):>8}  "
+        f"{_fmt_bench_value(warm_elapsed):>10}  "
+        f"{_fmt_bench_value(cold_elapsed):>10}  "
+        f"{_fmt_bench_delta(delta):>9}  {comment}"
+    )
+
+
+def _print_latest_basis(latest: dict, ignore_featuresets: set[str]) -> None:
+    latest_elapsed = _fmt_optional_float(
+        latest.get("warm_elapsed_s", latest.get("elapsed_s"))
+    )
+    latest_cold_elapsed = _fmt_optional_float(
+        latest.get("cold_elapsed_s", latest.get("cold_suite_elapsed_s"))
+    )
+    latest_core_total = _fmt_optional_float(latest.get("total_avg_s"))
+    latest_filtered_total = _fmt_optional_float(latest.get("filtered_total_s"))
+    suffix = ""
+    if ignore_featuresets:
+        suffix = f", filtered_total={_fmt_bench_value(latest_filtered_total)}"
     print(
         "latest basis: "
-        f"elapsed={_fmt_bench_value(float(latest_elapsed) if isinstance(latest_elapsed, (int, float)) else None)}"
-        f", cold_elapsed={_fmt_bench_value(float(latest_cold_elapsed) if isinstance(latest_cold_elapsed, (int, float)) else None)}"
-        f", core_total={_fmt_bench_value(float(latest_core_total) if isinstance(latest_core_total, (int, float)) else None)}"
-        + (
-            f", filtered_total={_fmt_bench_value(float(latest_filtered_total) if isinstance(latest_filtered_total, (int, float)) else None)}"
-            if ignore_featuresets
-            else ""
-        )
+        f"elapsed={_fmt_bench_value(latest_elapsed)}"
+        f", cold_elapsed={_fmt_bench_value(latest_cold_elapsed)}"
+        f", core_total={_fmt_bench_value(latest_core_total)}"
+        + suffix
     )
-    print("latest run metrics (avg_s):")
-    for name in sorted(latest_map.keys()):
-        cur = latest_map.get(name)
+
+
+def _delta_pct(cur: float | None, prev: float | None) -> float | None:
+    if prev is None or prev <= 0 or cur is None:
+        return None
+    return ((prev - cur) / prev) * 100.0
+
+
+def _print_metric_delta_list(
+    cur_map: dict[str, float],
+    prev_map: dict[str, float],
+    *,
+    label_width: int = 18,
+) -> None:
+    for name in sorted(cur_map.keys()):
+        cur = cur_map.get(name)
         prev = prev_map.get(name)
-        delta = None
-        if prev is not None and prev > 0 and cur is not None:
-            delta = ((prev - cur) / prev) * 100.0
+        delta = _delta_pct(cur, prev)
         print(
-            f"- {name:<18} {_fmt_bench_value(cur):>10}  delta={_fmt_bench_delta(delta):>9}"
+            f"- {name:<{label_width}} {_fmt_bench_value(cur):>10}  "
+            f"delta={_fmt_bench_delta(delta):>9}"
         )
 
+
+def _print_latest_run_metrics(latest: dict, scored: list[dict]) -> None:
+    latest_map = _benchmark_metric_map(latest)
+    prev_map = _benchmark_metric_map(scored[-2]) if len(scored) > 1 else {}
+    print("latest run metrics (avg_s):")
+    _print_metric_delta_list(latest_map, prev_map)
+
+
+def _print_latest_metric_groups(latest: dict, scored: list[dict]) -> None:
     latest_groups = _benchmark_group_totals(latest)
     prev_groups = _benchmark_group_totals(scored[-2]) if len(scored) > 1 else {}
-    if latest_groups:
-        print("")
-        print("latest metric groups (sum avg_s):")
-        for group in sorted(latest_groups.keys()):
-            cur = latest_groups.get(group)
-            prev = prev_groups.get(group)
-            delta = None
-            if prev is not None and prev > 0 and cur is not None:
-                delta = ((prev - cur) / prev) * 100.0
-            print(
-                f"- {group:<18} {_fmt_bench_value(cur):>10}  delta={_fmt_bench_delta(delta):>9}"
-            )
+    if not latest_groups:
+        return
+    print("")
+    print("latest metric groups (sum avg_s):")
+    _print_metric_delta_list(latest_groups, prev_groups)
 
+
+def _print_latest_git_context(latest: dict) -> None:
     git_ctx = latest.get("git_context")
-    if isinstance(git_ctx, dict) and bool(git_ctx.get("repo", False)):
-        branch = str(git_ctx.get("branch", "")).strip() or "-"
-        head = str(git_ctx.get("head", "")).strip() or "-"
-        dirty = bool(git_ctx.get("dirty", False))
-        print("")
-        print(
-            "latest run context: "
-            f"branch={branch} head={head[:12]} dirty={'yes' if dirty else 'no'}"
-        )
+    if not isinstance(git_ctx, dict) or not bool(git_ctx.get("repo", False)):
+        return
+    branch = str(git_ctx.get("branch", "")).strip() or "-"
+    head = str(git_ctx.get("head", "")).strip() or "-"
+    dirty = bool(git_ctx.get("dirty", False))
+    print("")
+    print(
+        "latest run context: "
+        f"branch={branch} head={head[:12]} dirty={'yes' if dirty else 'no'}"
+    )
 
+
+def _best_score(scored: list[dict], key: str) -> float:
+    return max(
+        [float(r.get(key)) for r in scored if isinstance(r.get(key), (int, float))]
+        or [0.0]
+    )
+
+
+def _trend_bar(value: float, best: float, ch: str, bar_w: int = 28) -> str:
+    rel = (value / best) if best > 0 else 0.0
+    fill = max(1, int(round(rel * bar_w))) if value > 0 else 0
+    return ch * fill + "." * (bar_w - fill)
+
+
+def _print_trend(scored: list[dict]) -> None:
     print("")
     print("trend (warm + cold, relative to best):")
-    best_score = max(
-        [
-            float(r.get("score"))
-            for r in scored
-            if isinstance(r.get("score"), (int, float))
-        ]
-        or [0.0]
-    )
-    best_cold_score = max(
-        [
-            float(r.get("score_cold"))
-            for r in scored
-            if isinstance(r.get("score_cold"), (int, float))
-        ]
-        or [0.0]
-    )
+    best_score = _best_score(scored, "score")
+    best_cold_score = _best_score(scored, "score_cold")
     for i, run in enumerate(scored, start=1):
-        raw_score = run.get("score")
-        score = float(raw_score) if isinstance(raw_score, (int, float)) else 0.0
-        rel = (score / best_score) if best_score > 0 else 0.0
-        raw_cold_score = run.get("score_cold")
+        score = float(run.get("score") or 0.0) if isinstance(run.get("score"), (int, float)) else 0.0
         cold_score = (
-            float(raw_cold_score) if isinstance(raw_cold_score, (int, float)) else 0.0
+            float(run.get("score_cold") or 0.0)
+            if isinstance(run.get("score_cold"), (int, float))
+            else 0.0
         )
-        cold_rel = (cold_score / best_cold_score) if best_cold_score > 0 else 0.0
-        bar_w = 28
-        fill = max(1, int(round(rel * bar_w))) if score > 0 else 0
-        fill_cold = max(1, int(round(cold_rel * bar_w))) if cold_score > 0 else 0
-        bar = "#" * fill + "." * (bar_w - fill)
-        bar_cold = "=" * fill_cold + "." * (bar_w - fill_cold)
+        bar = _trend_bar(score, best_score, "#")
+        bar_cold = _trend_bar(cold_score, best_cold_score, "=")
         print(
-            f"{i:>3} W:{bar} ({_fmt_score(score):>8})  C:{bar_cold} ({_fmt_score(cold_score):>8})  {_short_ts(str(run.get('timestamp', '')))}"
+            f"{i:>3} W:{bar} ({_fmt_score(score):>8})  "
+            f"C:{bar_cold} ({_fmt_score(cold_score):>8})  "
+            f"{_short_ts(str(run.get('timestamp', '')))}"
         )
 
+
+def cmd_benchmark_results(base_dir: Path, ignore_featuresets: set[str] | None = None) -> int:
+    ignore_featuresets = set(ignore_featuresets or set())
+    report_path = _benchmark_report_path(base_dir, BENCHMARK_REPORT_FILE_NAME)
+    all_runs = _benchmark_load_runs(report_path)
+    if not all_runs:
+        print(f"no benchmark runs found: {report_path}")
+        return 1
+
+    runs, skipped = _filter_current_suite_runs(all_runs)
+    if not runs:
+        print(
+            f"no benchmark runs for suite_version={BENCHMARK_SUITE_VERSION} in: {report_path}"
+        )
+        return 1
+
+    available_featuresets, err = _validate_featuresets(runs, ignore_featuresets)
+    if err:
+        return err
+
+    scored = _benchmark_score_runs(runs, ignore_featuresets=ignore_featuresets)
+    if ignore_featuresets and not _any_metrics_kept(runs, ignore_featuresets):
+        print(
+            "ignore-featureset removed all score metrics; nothing left to compare",
+            file=sys.stderr,
+        )
+        return 1
+
+    _print_results_header(
+        report_path, scored, runs, available_featuresets, ignore_featuresets, skipped
+    )
+    _print_results_table(scored)
+    print("")
+    latest = scored[-1]
+    _print_latest_basis(latest, ignore_featuresets)
+    _print_latest_run_metrics(latest, scored)
+    _print_latest_metric_groups(latest, scored)
+    _print_latest_git_context(latest)
+    _print_trend(scored)
     return 0
 
 

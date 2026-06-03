@@ -296,33 +296,70 @@ def _compute_intents(
     return {fx.id: fx.intent(selected=fx.id in selected) for fx in fixes}
 
 
+def _group_fixes_by_intent(
+    fixes: list[SetupFix], intents: dict[str, str]
+) -> dict[str, list[SetupFix]]:
+    groups: dict[str, list[SetupFix]] = {
+        INTENT_CREATE: [],
+        INTENT_REMOVE: [],
+        INTENT_KEEP: [],
+        INTENT_ABSENT: [],
+        INTENT_CANNOT_REMOVE: [],
+        INTENT_CANNOT_CREATE: [],
+    }
+    for fx in fixes:
+        intent = intents[fx.id]
+        if intent in groups:
+            groups[intent].append(fx)
+    return groups
+
+
+def _format_intent_section(
+    label_text: str, prefix: str, suffix: str, fixes: list[SetupFix]
+) -> list[str]:
+    if not fixes:
+        return []
+    out = [f"{label_text} ({len(fixes)})[/]:"]
+    for fx in fixes:
+        out.append(f"  {prefix} {fx.title}{suffix}")
+    return out
+
+
 def _format_action_plan(fixes: list[SetupFix], selected: set[str]) -> str:
     intents = _compute_intents(fixes, selected)
-    creates = [fx for fx in fixes if intents[fx.id] == INTENT_CREATE]
-    removes = [fx for fx in fixes if intents[fx.id] == INTENT_REMOVE]
-    keeps = [fx for fx in fixes if intents[fx.id] == INTENT_KEEP]
-    absent = [fx for fx in fixes if intents[fx.id] == INTENT_ABSENT]
-    cannot_remove = [fx for fx in fixes if intents[fx.id] == INTENT_CANNOT_REMOVE]
-    cannot_create = [fx for fx in fixes if intents[fx.id] == INTENT_CANNOT_CREATE]
+    groups = _group_fixes_by_intent(fixes, intents)
+    creates = groups[INTENT_CREATE]
+    removes = groups[INTENT_REMOVE]
+    keeps = groups[INTENT_KEEP]
+    absent = groups[INTENT_ABSENT]
+    cannot_remove = groups[INTENT_CANNOT_REMOVE]
+    cannot_create = groups[INTENT_CANNOT_CREATE]
     lines: list[str] = []
-    if creates:
-        lines.append(f"[bold bright_green]install ({len(creates)})[/]:")
-        for fx in creates:
-            lines.append(f"  + {fx.title}")
-    if removes:
-        lines.append(f"[bold bright_red]REMOVE ({len(removes)})[/]:")
-        for fx in removes:
-            lines.append(f"  - {fx.title}")
-    if cannot_create:
-        lines.append(f"[bold bright_red]cannot install ({len(cannot_create)})[/]:")
-        for fx in cannot_create:
-            lines.append(f"  ! {fx.title} (no installer)")
-    if cannot_remove:
-        lines.append(f"[bold bright_red]cannot uninstall ({len(cannot_remove)})[/]:")
-        for fx in cannot_remove:
-            lines.append(f"  ! {fx.title} (remove by hand)")
-    if not creates and not removes and not cannot_create and not cannot_remove:
-        lines.append("[bright_cyan]no changes — every item already matches your selection.[/]")
+    lines.extend(
+        _format_intent_section(
+            "[bold bright_green]install", "+", "", creates
+        )
+    )
+    lines.extend(
+        _format_intent_section("[bold bright_red]REMOVE", "-", "", removes)
+    )
+    lines.extend(
+        _format_intent_section(
+            "[bold bright_red]cannot install", "!", " (no installer)", cannot_create
+        )
+    )
+    lines.extend(
+        _format_intent_section(
+            "[bold bright_red]cannot uninstall",
+            "!",
+            " (remove by hand)",
+            cannot_remove,
+        )
+    )
+    if not (creates or removes or cannot_create or cannot_remove):
+        lines.append(
+            "[bright_cyan]no changes — every item already matches your selection.[/]"
+        )
     if keeps or absent:
         lines.append("")
         lines.append(

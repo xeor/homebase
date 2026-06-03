@@ -140,135 +140,151 @@ def hotbar_target_style_rules_map(app: Any) -> dict[str, list[dict[str, str]]]:
     return out
 
 
-def valid_action_items(
-    app: Any,
-    *,
-    color_accent_hex: str,
-    base_meta_issues: Callable[[Path], list[tuple[str, str, str]]],
-) -> list[tuple[str, str]]:
-    def builtin_label(action_id: str, fallback: str) -> str:
-        meta = BUILTIN_ACTIONS.get(action_id)
-        return meta.default_label if meta is not None else fallback
+def _builtin_label(action_id: str, fallback: str) -> str:
+    meta = BUILTIN_ACTIONS.get(action_id)
+    return meta.default_label if meta is not None else fallback
 
-    targets = app._target_rows()
-    out: list[tuple[str, str]] = []
 
-    out.extend(app._readme_button_actions())
-    out.extend(app._notes_button_actions())
+_BULK_PREFLIGHT_KEYS = frozenset(
+    {"archive", "restore", "pack", "unpack", "toggle_pack", "delete"}
+)
 
-    if targets:
-        out.append(("tags_set", f"[white]{builtin_label('tags_set', 'Tags...')}[/]"))
+
+def _target_basics(app: Any, targets: list[ProjectRow]) -> list[tuple[str, str]]:
+    if not targets:
+        return []
+    out: list[tuple[str, str]] = [
+        ("tags_set", f"[white]{_builtin_label('tags_set', 'Tags...')}[/]"),
+        (
+            "reconcile_selection_cache",
+            f"[white]{_builtin_label('reconcile_selection_cache', 'Reconcile target cache now')}[/]",
+        ),
+    ]
+    if app.view_mode == "active":
         out.append(
-            (
-                "reconcile_selection_cache",
-                f"[white]{builtin_label('reconcile_selection_cache', 'Reconcile target cache now')}[/]",
-            )
+            ("suffix_set", f"[white]{_builtin_label('suffix_set', 'Suffix...')}[/]")
         )
-        if app.view_mode == "active":
-            out.append(("suffix_set", f"[white]{builtin_label('suffix_set', 'Suffix...')}[/]"))
+    return out
 
+
+def _ready_suffix_for_bulk(
+    app: Any, key: str, targets: list[ProjectRow]
+) -> tuple[bool, str]:
+    """Return (include, ready_suffix). include=False to skip the entry."""
+    runnable, skipped = app._preflight_bulk_action(key, [r.path for r in targets])
+    if not runnable:
+        return False, ""
+    if skipped:
+        return True, f" [dim]({len(runnable)}/{len(targets)} ready)[/]"
+    return True, ""
+
+
+def _new_worktree_valid(targets: list[ProjectRow]) -> bool:
+    # Single-target only, must be a live row with a git repo under the
+    # configured repo_dir.
+    if len(targets) != 1:
+        return False
+    row = targets[0]
+    if getattr(row, "archived", False):
+        return False
+    if not getattr(row, "repo_dir", ""):
+        return False
+    repo_subdir = row.path / row.repo_dir
+    return (repo_subdir / ".git").exists()
+
+
+def _view_config_items(app: Any, targets: list[ProjectRow]) -> list[tuple[str, str]]:
+    out: list[tuple[str, str]] = []
     for key, label in app.view_config[app.view_mode]["actions"]:
         meta = BUILTIN_ACTIONS.get(key)
         scope = meta.scope if meta is not None else "target"
         if scope == "target" and not targets:
             continue
         ready_suffix = ""
-        if scope == "target" and key in {"archive", "restore", "pack", "unpack", "toggle_pack", "delete"}:
-            runnable, skipped = app._preflight_bulk_action(key, [r.path for r in targets])
-            if not runnable:
+        if scope == "target" and key in _BULK_PREFLIGHT_KEYS:
+            include, ready_suffix = _ready_suffix_for_bulk(app, key, targets)
+            if not include:
                 continue
-            if skipped:
-                ready_suffix = f" [dim]({len(runnable)}/{len(targets)} ready)[/]"
-        if key == "deworktree":
-            # Only valid when at least one target row is a worktree.
-            if not any(getattr(r, "worktree_of", "") for r in targets):
-                continue
-        if key == "new_worktree":
-            # Single-target only, must be a live row with a git repo
-            # under the configured repo_dir.
-            if len(targets) != 1:
-                continue
-            row = targets[0]
-            if getattr(row, "archived", False):
-                continue
-            if not getattr(row, "repo_dir", ""):
-                continue
-            repo_subdir = (row.path / row.repo_dir) if row.repo_dir else None
-            if repo_subdir is None or not (repo_subdir / ".git").exists():
-                continue
+        if key == "deworktree" and not any(
+            getattr(r, "worktree_of", "") for r in targets
+        ):
+            continue
+        if key == "new_worktree" and not _new_worktree_valid(targets):
+            continue
         out.append((key, f"[white]{label}[/]{ready_suffix}"))
+    return out
 
-    if targets:
-        out.append(("rename_item", f"[white]{builtin_label('rename_item', 'Rename item...')}[/]"))
-        has_review_meta = False
-        has_legacy_meta = False
-        for row in targets:
-            issue_codes = {code for _lvl, code, _msg in base_meta_issues(row.path)}
-            if issue_codes and not row.packed:
-                has_review_meta = True
-            if (
-                ("legacy_only" in issue_codes or "legacy_conflict" in issue_codes)
-                and not row.packed
-            ):
-                has_legacy_meta = True
-        if has_review_meta:
-            out.append(
-                (
-                    "review_meta",
-                    f"[white]{builtin_label('review_meta', 'Open .base.yaml and review warnings')}[/]",
-                )
-            )
-        if has_legacy_meta:
-            out.append(
-                (
-                    "rename_meta_ext",
-                    f"[white]{builtin_label('rename_meta_ext', 'Rename .base.yml -> .base.yaml')}[/]",
-                )
-            )
 
-    out.extend(
-        [
-            ("refresh_cache", f"[white]{builtin_label('refresh_cache', 'Refresh cache')}[/]"),
+def _classify_meta_health(
+    targets: list[ProjectRow],
+    base_meta_issues: Callable[[Path], list[tuple[str, str, str]]],
+) -> tuple[bool, bool]:
+    has_review_meta = False
+    has_legacy_meta = False
+    for row in targets:
+        issue_codes = {code for _lvl, code, _msg in base_meta_issues(row.path)}
+        if not issue_codes or row.packed:
+            continue
+        has_review_meta = True
+        if "legacy_only" in issue_codes or "legacy_conflict" in issue_codes:
+            has_legacy_meta = True
+    return has_review_meta, has_legacy_meta
+
+
+def _meta_review_items(
+    targets: list[ProjectRow],
+    base_meta_issues: Callable[[Path], list[tuple[str, str, str]]],
+) -> list[tuple[str, str]]:
+    if not targets:
+        return []
+    out: list[tuple[str, str]] = [
+        ("rename_item", f"[white]{_builtin_label('rename_item', 'Rename item...')}[/]"),
+    ]
+    has_review_meta, has_legacy_meta = _classify_meta_health(targets, base_meta_issues)
+    if has_review_meta:
+        out.append(
             (
-                "full_reconcile",
-                f"[white]{builtin_label('full_reconcile', 'Full reconcile (force rescan)')}[/]",
-            ),
+                "review_meta",
+                f"[white]{_builtin_label('review_meta', 'Open .base.yaml and review warnings')}[/]",
+            )
+        )
+    if has_legacy_meta:
+        out.append(
             (
-                "reload_global_config",
-                f"[white]{builtin_label('reload_global_config', 'Reload global config')}[/]",
-            ),
-            (
-                "edit_global_config",
-                f"[white]{builtin_label('edit_global_config', 'Edit global config in $EDITOR')}[/]",
-            ),
-        ]
-    )
+                "rename_meta_ext",
+                f"[white]{_builtin_label('rename_meta_ext', 'Rename .base.yml -> .base.yaml')}[/]",
+            )
+        )
+    return out
+
+
+def _global_default_items(app: Any) -> list[tuple[str, str]]:
+    out = [
+        ("refresh_cache", f"[white]{_builtin_label('refresh_cache', 'Refresh cache')}[/]"),
+        (
+            "full_reconcile",
+            f"[white]{_builtin_label('full_reconcile', 'Full reconcile (force rescan)')}[/]",
+        ),
+        (
+            "reload_global_config",
+            f"[white]{_builtin_label('reload_global_config', 'Reload global config')}[/]",
+        ),
+        (
+            "edit_global_config",
+            f"[white]{_builtin_label('edit_global_config', 'Edit global config in $EDITOR')}[/]",
+        ),
+    ]
     if app.active_rows or app.archived_rows:
         out.append(
             (
                 "reconcile_all_cache",
-                f"[white]{builtin_label('reconcile_all_cache', 'Reconcile all cached rows now')}[/]",
+                f"[white]{_builtin_label('reconcile_all_cache', 'Reconcile all cached rows now')}[/]",
             )
         )
+    return out
 
-    if targets:
-        out.extend(custom_actions_for_scope(app, "target", color_accent_hex=color_accent_hex))
-    out.extend(
-        custom_actions_for_scope(
-            app,
-            "global",
-            color_accent_hex=color_accent_hex,
-        )
-    )
 
-    if targets and any(_action_is_note_kind(app, aid) for aid, _ in out):
-        if _any_target_note_case_mismatch(app, targets):
-            out = [
-                (aid, lbl)
-                for aid, lbl in out
-                if not _action_is_note_kind(app, aid)
-            ]
-
+def _dedupe_actions(out: list[tuple[str, str]]) -> list[tuple[str, str]]:
     uniq: list[tuple[str, str]] = []
     seen: set[str] = set()
     for aid, label in out:
@@ -277,6 +293,41 @@ def valid_action_items(
         seen.add(aid)
         uniq.append((aid, label))
     return uniq
+
+
+def _strip_note_actions_on_case_mismatch(
+    app: Any, out: list[tuple[str, str]], targets: list[ProjectRow]
+) -> list[tuple[str, str]]:
+    if not (targets and any(_action_is_note_kind(app, aid) for aid, _ in out)):
+        return out
+    if not _any_target_note_case_mismatch(app, targets):
+        return out
+    return [(aid, lbl) for aid, lbl in out if not _action_is_note_kind(app, aid)]
+
+
+def valid_action_items(
+    app: Any,
+    *,
+    color_accent_hex: str,
+    base_meta_issues: Callable[[Path], list[tuple[str, str, str]]],
+) -> list[tuple[str, str]]:
+    targets = app._target_rows()
+    out: list[tuple[str, str]] = []
+    out.extend(app._readme_button_actions())
+    out.extend(app._notes_button_actions())
+    out.extend(_target_basics(app, targets))
+    out.extend(_view_config_items(app, targets))
+    out.extend(_meta_review_items(targets, base_meta_issues))
+    out.extend(_global_default_items(app))
+    if targets:
+        out.extend(
+            custom_actions_for_scope(app, "target", color_accent_hex=color_accent_hex)
+        )
+    out.extend(
+        custom_actions_for_scope(app, "global", color_accent_hex=color_accent_hex)
+    )
+    out = _strip_note_actions_on_case_mismatch(app, out, targets)
+    return _dedupe_actions(out)
 
 
 def _action_is_note_kind(app: Any, action_id: str) -> bool:
@@ -339,88 +390,65 @@ def render_custom_command(template_text: str, context: dict[str, str]) -> str:
     return action_template.render_template(template_text, context)
 
 
-def run_custom_action(app: Any, action_id: str, *, base_dir: Path, fmt_ymd: Callable[[int], str]) -> None:
-    action = custom_action_by_id(app, action_id)
-    if action is None:
-        app._log(f"custom action not found: {action_id}", "error")
-        app._refresh_side()
-        return
-    scope = "global" if action.scope == "workspace" else "target"
-    list_command = str(action.list_command or "").strip()
-    run_command = str(action.command or "").strip()
-    if list_command and run_command:
-        _run_custom_list_action(
-            app,
-            action_id,
-            list_command=list_command,
-            run_command=run_command,
-            base_dir=base_dir,
-            fmt_ymd=fmt_ymd,
+def _run_custom_global_action(
+    app: Any, action_id: str, template_text: str, base_dir: Path
+) -> None:
+    ctx = action_template.build_always_context(app, base_dir)
+    cmd = render_custom_command(template_text, ctx)
+    try:
+        app._start_managed_shell_command(
+            cmd,
+            cwd=base_dir,
+            label=f"custom global: {action_id}",
+            wait=False,
+            terminate_on_quit=True,
         )
-        return
-    note_command = str(action.op or "") if action.kind == "note" else ""
-    if note_command:
-        _run_custom_note_action(
-            app,
-            action_id,
-            note_command=note_command,
+        app._log(f"custom global action started: {action_id}", "info")
+    except (subprocess.SubprocessError, OSError, ValueError) as exc:
+        app._show_runtime_error(f"run custom action ({action_id})", exc)
+    app._refresh_side()
+
+
+def _run_custom_target_joined(
+    app: Any,
+    action_id: str,
+    template_text: str,
+    targets: list[ProjectRow],
+    base_dir: Path,
+) -> None:
+    first = targets[0]
+    for row in targets:
+        app._mark_row_active(row.path)
+    ctx = {
+        **action_template.build_always_context(app, base_dir),
+        **action_template.build_per_row_context(app, first, base_dir),
+        **action_template.build_list_context(app, list(targets), base_dir),
+    }
+    cmd = render_custom_command(template_text, ctx)
+    try:
+        app._start_managed_shell_command(
+            cmd,
+            cwd=base_dir,
+            label=f"custom target: {action_id}",
+            wait=False,
+            terminate_on_quit=True,
         )
-        return
-    template_text = str(action.command or "").strip()
-    if not template_text:
-        app._log(f"custom action has empty command: {action_id}", "error")
-        app._refresh_side()
-        return
+        app._log(
+            f"custom target action started: {action_id} (1/{len(targets)})",
+            "info",
+        )
+    except (subprocess.SubprocessError, OSError, ValueError) as exc:
+        app._show_runtime_error(f"run custom action ({action_id})", exc)
+    app._refresh_side()
 
-    if scope == "global":
-        ctx = action_template.build_always_context(app, base_dir)
-        cmd = render_custom_command(template_text, ctx)
-        try:
-            app._start_managed_shell_command(
-                cmd,
-                cwd=base_dir,
-                label=f"custom global: {action_id}",
-                wait=False,
-                terminate_on_quit=True,
-            )
-            app._log(f"custom global action started: {action_id}", "info")
-        except (subprocess.SubprocessError, OSError, ValueError) as exc:
-            app._show_runtime_error(f"run custom action ({action_id})", exc)
-        app._refresh_side()
-        return
 
-    targets = app._target_rows()
-    if not targets:
-        app._log("custom target action skipped: no target", "warn")
-        app._refresh_side()
-        return
-    loop_on_multi = action.multi == "per_row"
-    if not loop_on_multi:
-        first = targets[0]
-        for row in targets:
-            app._mark_row_active(row.path)
-        ctx = {
-            **action_template.build_always_context(app, base_dir),
-            **action_template.build_per_row_context(app, first, base_dir),
-            **action_template.build_list_context(app, list(targets), base_dir),
-        }
-        cmd = render_custom_command(template_text, ctx)
-        try:
-            app._start_managed_shell_command(
-                cmd,
-                cwd=base_dir,
-                label=f"custom target: {action_id}",
-                wait=False,
-                terminate_on_quit=True,
-            )
-            app._log(
-                f"custom target action started: {action_id} (1/{len(targets)})",
-                "info",
-            )
-        except (subprocess.SubprocessError, OSError, ValueError) as exc:
-            app._show_runtime_error(f"run custom action ({action_id})", exc)
-        app._refresh_side()
-        return
+def _run_custom_target_per_row(
+    app: Any,
+    action_id: str,
+    template_text: str,
+    targets: list[ProjectRow],
+    base_dir: Path,
+) -> None:
     started = 0
     total = len(targets)
     shown_error = False
@@ -444,9 +472,55 @@ def run_custom_action(app: Any, action_id: str, *, base_dir: Path, fmt_ymd: Call
             app._log(f"custom action failed for {row.name}: {exc}", "error")
             if not shown_error:
                 shown_error = True
-                app._show_runtime_error(f"run custom action ({action_id})", exc)
-    app._log(f"custom target action started: {action_id} ({started}/{total})", "info")
+                app._show_runtime_error(
+                    f"run custom action ({action_id})", exc
+                )
+    app._log(
+        f"custom target action started: {action_id} ({started}/{total})", "info"
+    )
     app._refresh_side()
+
+
+def run_custom_action(app: Any, action_id: str, *, base_dir: Path, fmt_ymd: Callable[[int], str]) -> None:
+    action = custom_action_by_id(app, action_id)
+    if action is None:
+        app._log(f"custom action not found: {action_id}", "error")
+        app._refresh_side()
+        return
+    list_command = str(action.list_command or "").strip()
+    run_command = str(action.command or "").strip()
+    if list_command and run_command:
+        _run_custom_list_action(
+            app,
+            action_id,
+            list_command=list_command,
+            run_command=run_command,
+            base_dir=base_dir,
+            fmt_ymd=fmt_ymd,
+        )
+        return
+    note_command = str(action.op or "") if action.kind == "note" else ""
+    if note_command:
+        _run_custom_note_action(app, action_id, note_command=note_command)
+        return
+    template_text = str(action.command or "").strip()
+    if not template_text:
+        app._log(f"custom action has empty command: {action_id}", "error")
+        app._refresh_side()
+        return
+    scope = "global" if action.scope == "workspace" else "target"
+    if scope == "global":
+        _run_custom_global_action(app, action_id, template_text, base_dir)
+        return
+    targets = app._target_rows()
+    if not targets:
+        app._log("custom target action skipped: no target", "warn")
+        app._refresh_side()
+        return
+    if action.multi == "per_row":
+        _run_custom_target_per_row(app, action_id, template_text, targets, base_dir)
+    else:
+        _run_custom_target_joined(app, action_id, template_text, targets, base_dir)
 
 
 def _run_custom_list_action(
@@ -617,67 +691,74 @@ def _heading_text(level: int, title: str) -> str:
     return f"{'#' * max(1, min(6, int(level)))} {title}"
 
 
-def _extract_log_preview(content: str, *, section_title: str, section_level: int) -> tuple[str, list[str]]:
-    lines = content.splitlines()
-    section_heading = _heading_text(section_level, section_title)
-    section_idx = -1
+def _heading_level(line: str) -> int:
+    """Return the Markdown heading level for ``line`` (0 if not a heading)."""
+    ls = line.lstrip()
+    if not ls.startswith("#"):
+        return 0
+    level = 0
+    for ch in ls:
+        if ch == "#":
+            level += 1
+        else:
+            break
+    if level > 0 and len(ls) > level and ls[level] == " ":
+        return level
+    return 0
+
+
+def _find_section_idx(lines: list[str], section_heading: str) -> int:
     for i, line in enumerate(lines):
         if line.strip() == section_heading:
-            section_idx = i
-            break
-    if section_idx < 0:
-        return "(no log section yet)", []
-    end_idx = len(lines)
-    for i in range(section_idx + 1, len(lines)):
-        ls = lines[i].lstrip()
-        if not ls.startswith("#"):
-            continue
-        level = 0
-        for ch in ls:
-            if ch == "#":
-                level += 1
-            else:
-                break
-        if level > 0 and len(ls) > level and ls[level] == " " and level <= section_level:
-            end_idx = i
-            break
-    entry_level = min(6, section_level + 1)
+            return i
+    return -1
+
+
+def _find_section_end(lines: list[str], start: int, section_level: int) -> int:
+    for i in range(start, len(lines)):
+        level = _heading_level(lines[i])
+        if 0 < level <= section_level:
+            return i
+    return len(lines)
+
+
+def _collect_entries(
+    lines: list[str], section_idx: int, end_idx: int, entry_level: int
+) -> list[tuple[str, list[str]]]:
     entries: list[tuple[str, list[str]]] = []
     i = section_idx + 1
     while i < end_idx:
+        if _heading_level(lines[i]) != entry_level:
+            i += 1
+            continue
         ls = lines[i].lstrip()
-        if ls.startswith("#"):
-            level = 0
-            for ch in ls:
-                if ch == "#":
-                    level += 1
-                else:
-                    break
-            if level == entry_level and len(ls) > level and ls[level] == " ":
-                heading = ls[level + 1 :].strip()
-                body: list[str] = []
-                i += 1
-                while i < end_idx:
-                    nxt = lines[i].lstrip()
-                    if nxt.startswith("#"):
-                        lvl2 = 0
-                        for ch in nxt:
-                            if ch == "#":
-                                lvl2 += 1
-                            else:
-                                break
-                        if lvl2 == entry_level and len(nxt) > lvl2 and nxt[lvl2] == " ":
-                            break
-                    body.append(lines[i])
-                    i += 1
-                entries.append((heading, body))
-                continue
+        heading = ls[entry_level + 1 :].strip()
+        body: list[str] = []
         i += 1
+        while i < end_idx:
+            if _heading_level(lines[i]) == entry_level:
+                break
+            body.append(lines[i])
+            i += 1
+        entries.append((heading, body))
+    return entries
+
+
+def _extract_log_preview(content: str, *, section_title: str, section_level: int) -> tuple[str, list[str]]:
+    lines = content.splitlines()
+    section_heading = _heading_text(section_level, section_title)
+    section_idx = _find_section_idx(lines, section_heading)
+    if section_idx < 0:
+        return "(no log section yet)", []
+    end_idx = _find_section_end(lines, section_idx + 1, section_level)
+    entry_level = min(6, section_level + 1)
+    entries = _collect_entries(lines, section_idx, end_idx, entry_level)
     if not entries:
         return "(log section exists, no entries)", []
     last_heading, last_body = entries[-1]
     body_preview = " ".join(line.strip() for line in last_body if line.strip())
-    body_preview = body_preview[:180] + ("..." if len(body_preview) > 180 else "")
+    if len(body_preview) > 180:
+        body_preview = body_preview[:180] + "..."
     latest = f"{last_heading} - {body_preview or '(empty)'}"
     older = [h for h, _ in entries[:-1]]
     return latest, older
@@ -715,6 +796,68 @@ def _build_log_dialog_side_info(
     return "\n".join(lines)
 
 
+def _validate_existing_note(
+    app: Any, row: ProjectRow, note_path: Path
+) -> str | None | str:
+    """Return the existing note text on success, None if file does not exist,
+    or the sentinel string ``_NOTE_INVALID`` when the file is unusable."""
+    try:
+        if not note_path.is_file():
+            _notify_skip(app, row, "note path is not a regular file")
+            return _NOTE_INVALID
+    except OSError as exc:
+        _notify_skip(app, row, f"stat failed: {exc}")
+        return _NOTE_INVALID
+    actual_name = existing_path_case_mismatch(note_path)
+    if actual_name is not None:
+        _notify_skip(
+            app,
+            row,
+            f"note case mismatch: expected '{note_path.name}', "
+            f"on-disk '{actual_name}'",
+        )
+        return _NOTE_INVALID
+    try:
+        existing = note_path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        _notify_skip(app, row, f"read failed: {exc}")
+        return _NOTE_INVALID
+    try:
+        validate_note(existing)
+    except NoteValidationError as exc:
+        _notify_skip(app, row, f"validation failed: {exc}")
+        return _NOTE_INVALID
+    return existing
+
+
+def _collect_valid_note_targets(
+    app: Any, targets: list[ProjectRow]
+) -> list[tuple[ProjectRow, Path, str | None]]:
+    valid: list[tuple[ProjectRow, Path, str | None]] = []
+    for row in targets:
+        try:
+            note_path = app._resolve_notes_path_for_row(row)
+        except (OSError, ValueError, RuntimeError) as exc:
+            _notify_skip(app, row, f"resolve notes path failed: {exc}")
+            continue
+        try:
+            exists = note_path.exists()
+        except OSError as exc:
+            _notify_skip(app, row, f"stat failed: {exc}")
+            continue
+        if not exists:
+            valid.append((row, note_path, None))
+            continue
+        result = _validate_existing_note(app, row, note_path)
+        if result is _NOTE_INVALID:
+            continue
+        valid.append((row, note_path, result))
+    return valid
+
+
+_NOTE_INVALID = object()
+
+
 def _run_custom_note_action(
     app: Any,
     action_id: str,
@@ -723,7 +866,8 @@ def _run_custom_note_action(
 ) -> None:
     if note_command != "add_log":
         app._log(
-            f"custom note action has unknown note_command: {note_command}", "error"
+            f"custom note action has unknown note_command: {note_command}",
+            "error",
         )
         app._refresh_side()
         return
@@ -733,48 +877,7 @@ def _run_custom_note_action(
         app._refresh_side()
         return
 
-    valid: list[tuple[ProjectRow, Path, str | None]] = []
-    for row in targets:
-        try:
-            note_path = app._resolve_notes_path_for_row(row)
-        except (OSError, ValueError, RuntimeError) as exc:
-            _notify_skip(app, row, f"resolve notes path failed: {exc}")
-            continue
-        existing: str | None = None
-        try:
-            exists = note_path.exists()
-        except OSError as exc:
-            _notify_skip(app, row, f"stat failed: {exc}")
-            continue
-        if exists:
-            try:
-                if not note_path.is_file():
-                    _notify_skip(app, row, "note path is not a regular file")
-                    continue
-            except OSError as exc:
-                _notify_skip(app, row, f"stat failed: {exc}")
-                continue
-            actual_name = existing_path_case_mismatch(note_path)
-            if actual_name is not None:
-                _notify_skip(
-                    app,
-                    row,
-                    f"note case mismatch: expected '{note_path.name}', "
-                    f"on-disk '{actual_name}'",
-                )
-                continue
-            try:
-                existing = note_path.read_text(encoding="utf-8")
-            except (OSError, UnicodeDecodeError) as exc:
-                _notify_skip(app, row, f"read failed: {exc}")
-                continue
-            try:
-                validate_note(existing)
-            except NoteValidationError as exc:
-                _notify_skip(app, row, f"validation failed: {exc}")
-                continue
-        valid.append((row, note_path, existing))
-
+    valid = _collect_valid_note_targets(app, targets)
     if not valid:
         app._log(f"custom note action {action_id}: no valid targets", "warn")
         notifier = getattr(app, "notify", None)

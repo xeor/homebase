@@ -373,6 +373,88 @@ def _git_clear_cache() -> None:
     _GIT_INFO_CACHE.clear()
 
 
+def _resolve_repo_path(path: Path, repo_dir: str) -> Path:
+    if Path(repo_dir).is_absolute():
+        return Path(repo_dir)
+    return (path / repo_dir).resolve()
+
+
+def _git_info_from_cache(
+    cached: tuple,
+    repo_path: Path,
+    include_dirty: bool,
+) -> tuple[str, str, int]:
+    cached_branch = cached[2]
+    cached_git_ts = cached[3]
+    cached_side_dirty = cached[4]
+    if not include_dirty:
+        return cached_branch, "~", cached_git_ts
+    try:
+        working_dirty = _git_diff_quiet(repo_path, cached=False)
+    except (subprocess.SubprocessError, OSError, ValueError):
+        return cached_branch, "?", cached_git_ts
+    if working_dirty == "?":
+        return cached_branch, _porcelain_dirty(repo_path), cached_git_ts
+    return (
+        cached_branch,
+        _combine_dirty(working_dirty, cached_side_dirty),
+        cached_git_ts,
+    )
+
+
+def _read_branch_name(repo_path: Path) -> str:
+    try:
+        return (
+            core_utils.run_out(
+                "git", "-C", str(repo_path), "branch", "--show-current"
+            )
+            or "(detached)"
+        )
+    except (subprocess.SubprocessError, OSError, ValueError):
+        return "?"
+
+
+def _compute_dirty(repo_path: Path, include_dirty: bool) -> tuple[str, str]:
+    """Return (dirty_str, cached_side_dirty)."""
+    if not include_dirty:
+        return "~", ""
+    try:
+        working_dirty = _git_diff_quiet(repo_path, cached=False)
+        cached_side_dirty = _git_diff_quiet(repo_path, cached=True)
+        if working_dirty == "?" or cached_side_dirty == "?":
+            return _porcelain_dirty(repo_path), cached_side_dirty
+        return _combine_dirty(working_dirty, cached_side_dirty), cached_side_dirty
+    except (subprocess.SubprocessError, OSError, ValueError):
+        return "?", ""
+
+
+def _read_last_commit_ts(repo_path: Path) -> int:
+    try:
+        git_ts_s = core_utils.run_out(
+            "git", "-C", str(repo_path), "log", "-1", "--format=%ct"
+        )
+        return int(git_ts_s) if git_ts_s else 0
+    except (subprocess.SubprocessError, OSError, ValueError):
+        return 0
+
+
+def _maybe_cache_git_info(
+    path: Path,
+    sig: tuple | None,
+    branch: str,
+    git_ts: int,
+    cached_side_dirty: str,
+    include_dirty: bool,
+) -> None:
+    if sig is None or branch == "?":
+        return
+    if include_dirty and cached_side_dirty not in {"", "*"}:
+        return
+    if len(_GIT_INFO_CACHE) >= _GIT_INFO_CACHE_MAX:
+        _GIT_INFO_CACHE.clear()
+    _GIT_INFO_CACHE[path] = (sig[0], sig[1], branch, git_ts, cached_side_dirty)
+
+
 def git_info(
     path: Path,
     include_dirty: bool = True,
@@ -383,11 +465,9 @@ def git_info(
         repo_dir = load_base_repo_dir(path)
     if not repo_dir:
         return "-", "-", 0
-    repo_path = (path / repo_dir).resolve() if not Path(repo_dir).is_absolute() else Path(repo_dir)
-    git_entry = repo_path / ".git"
-    if not git_entry.exists():
+    repo_path = _resolve_repo_path(path, repo_dir)
+    if not (repo_path / ".git").exists():
         return "-", "-", 0
-
     dirs = _resolve_git_dirs(repo_path)
     sig = _git_state_signature(*dirs) if dirs is not None else None
     cached = _GIT_INFO_CACHE.get(path) if sig is not None else None
@@ -397,54 +477,13 @@ def git_info(
         and cached[0] == sig[0]
         and cached[1] == sig[1]
     ):
-        cached_branch = cached[2]
-        cached_git_ts = cached[3]
-        cached_side_dirty = cached[4]
-        if not include_dirty:
-            return cached_branch, "~", cached_git_ts
-        try:
-            working_dirty = _git_diff_quiet(repo_path, cached=False)
-        except (subprocess.SubprocessError, OSError, ValueError):
-            return cached_branch, "?", cached_git_ts
-        if working_dirty == "?":
-            return cached_branch, _porcelain_dirty(repo_path), cached_git_ts
-        return cached_branch, _combine_dirty(working_dirty, cached_side_dirty), cached_git_ts
-
-    try:
-        branch = (
-            core_utils.run_out("git", "-C", str(repo_path), "branch", "--show-current") or "(detached)"
-        )
-    except (subprocess.SubprocessError, OSError, ValueError):
-        branch = "?"
-
-    cached_side_dirty = ""
-    if include_dirty:
-        try:
-            working_dirty = _git_diff_quiet(repo_path, cached=False)
-            cached_side_dirty = _git_diff_quiet(repo_path, cached=True)
-            if working_dirty == "?" or cached_side_dirty == "?":
-                dirty = _porcelain_dirty(repo_path)
-            else:
-                dirty = _combine_dirty(working_dirty, cached_side_dirty)
-        except (subprocess.SubprocessError, OSError, ValueError):
-            dirty = "?"
-    else:
-        dirty = "~"
-
-    try:
-        git_ts_s = core_utils.run_out("git", "-C", str(repo_path), "log", "-1", "--format=%ct")
-        git_ts = int(git_ts_s) if git_ts_s else 0
-    except (subprocess.SubprocessError, OSError, ValueError):
-        git_ts = 0
-
-    if (
-        sig is not None
-        and branch != "?"
-        and (not include_dirty or cached_side_dirty in {"", "*"})
-    ):
-        if len(_GIT_INFO_CACHE) >= _GIT_INFO_CACHE_MAX:
-            _GIT_INFO_CACHE.clear()
-        _GIT_INFO_CACHE[path] = (sig[0], sig[1], branch, git_ts, cached_side_dirty)
+        return _git_info_from_cache(cached, repo_path, include_dirty)
+    branch = _read_branch_name(repo_path)
+    dirty, cached_side_dirty = _compute_dirty(repo_path, include_dirty)
+    git_ts = _read_last_commit_ts(repo_path)
+    _maybe_cache_git_info(
+        path, sig, branch, git_ts, cached_side_dirty, include_dirty
+    )
     return branch, dirty, git_ts
 
 

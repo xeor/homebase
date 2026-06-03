@@ -159,58 +159,67 @@ def load_keys(base_dir: Path, *, actions) -> dict[str, object]:
     return workspace_settings.load_keys(load_global_config_dict(base_dir), actions=actions)
 
 
+def _serialize_style_rule(raw_rule: object) -> dict[str, str] | None:
+    if not isinstance(raw_rule, dict):
+        return None
+    bg_color = str(raw_rule.get("bg_color", "")).strip()
+    fg_color = str(raw_rule.get("fg_color", "")).strip()
+    when = str(raw_rule.get("when", "")).strip()
+    bold = bool(raw_rule.get("bold", False))
+    underline = bool(raw_rule.get("underline", False))
+    italic = bool(raw_rule.get("italic", False))
+    if not when:
+        return None
+    if not bg_color and not fg_color and not (bold or underline or italic):
+        return None
+    rule: dict[str, str] = {"when": when}
+    if bg_color:
+        rule["bg_color"] = bg_color
+    if fg_color:
+        rule["fg_color"] = fg_color
+    if bold:
+        rule["bold"] = "1"
+    if underline:
+        rule["underline"] = "1"
+    if italic:
+        rule["italic"] = "1"
+    return rule
+
+
+def _serialize_hotbar_item(item: object) -> object | None:
+    if isinstance(item, str):
+        value = item.strip()
+        return value or None
+    if not isinstance(item, dict):
+        return None
+    action_id = str(item.get("action", "")).strip()
+    if not action_id:
+        return None
+    label = str(item.get("label", "")).strip()
+    style = item.get("style", [])
+    style_out: list[dict[str, str]] = []
+    if isinstance(style, list):
+        for raw_rule in style:
+            rule = _serialize_style_rule(raw_rule)
+            if rule is not None:
+                style_out.append(rule)
+    if not (label or style_out):
+        return action_id
+    payload: dict[str, object] = {"action": action_id}
+    if label:
+        payload["label"] = label
+    if style_out:
+        payload["style"] = style_out
+    return payload
+
+
 def save_hotbar(base_dir: Path, hotbar: list[dict[str, object] | object]) -> None:
     data = load_global_config_dict(base_dir)
     out: list[object] = []
     for item in hotbar:
-        if isinstance(item, str):
-            value = item.strip()
-            if value:
-                out.append(value)
-            continue
-        if not isinstance(item, dict):
-            continue
-        action_id = str(item.get("action", "")).strip()
-        if not action_id:
-            continue
-        label = str(item.get("label", "")).strip()
-        style = item.get("style", [])
-        style_out: list[dict[str, str]] = []
-        if isinstance(style, list):
-            for raw_rule in style:
-                if not isinstance(raw_rule, dict):
-                    continue
-                bg_color = str(raw_rule.get("bg_color", "")).strip()
-                fg_color = str(raw_rule.get("fg_color", "")).strip()
-                when = str(raw_rule.get("when", "")).strip()
-                bold = bool(raw_rule.get("bold", False))
-                underline = bool(raw_rule.get("underline", False))
-                italic = bool(raw_rule.get("italic", False))
-                if not when:
-                    continue
-                if not bg_color and not fg_color and not (bold or underline or italic):
-                    continue
-                rule: dict[str, str] = {"when": when}
-                if bg_color:
-                    rule["bg_color"] = bg_color
-                if fg_color:
-                    rule["fg_color"] = fg_color
-                if bold:
-                    rule["bold"] = "1"
-                if underline:
-                    rule["underline"] = "1"
-                if italic:
-                    rule["italic"] = "1"
-                style_out.append(rule)
-        if label or style_out:
-            payload: dict[str, object] = {"action": action_id}
-            if label:
-                payload["label"] = label
-            if style_out:
-                payload["style"] = style_out
-            out.append(payload)
-        else:
-            out.append(action_id)
+        serialized = _serialize_hotbar_item(item)
+        if serialized is not None:
+            out.append(serialized)
     data["hotbar"] = out
     save_global_config_dict(base_dir, data)
 
@@ -550,82 +559,104 @@ def save_archive_timezone_name(base_dir: Path, name: str) -> None:
     save_global_config_dict(base_dir, data)
 
 
+_HEX_COLOR_PATTERN = re.compile(r"#[0-9A-Fa-f]{6}")
+
+
+def _extract_date_ranges_raw(table_raw: dict) -> object:
+    columns_style_raw = table_raw.get("columns_style", {})
+    if isinstance(columns_style_raw, dict):
+        return columns_style_raw.get(
+            "date",
+            table_raw.get("date_columns", table_raw.get("date_color_ranges", {})),
+        )
+    return table_raw.get("date_columns", table_raw.get("date_color_ranges", {}))
+
+
+def _parse_numeric_scale(row: dict) -> list[dict[str, object]] | None:
+    stops: list[dict[str, object]] = []
+    for key, value in row.items():
+        try:
+            days = max(0.0, float(key))
+        except (TypeError, ValueError):
+            return None
+        color = str(value).strip()
+        if not _HEX_COLOR_PATTERN.fullmatch(color):
+            return None
+        stops.append({"days": days, "color": color})
+    if not stops:
+        return None
+    return sorted(stops, key=lambda item: float(item.get("days", 0.0)))
+
+
+def _parse_scale_dict(scale_raw: object) -> list[dict[str, object]]:
+    if not isinstance(scale_raw, dict):
+        return []
+    stops: list[dict[str, object]] = []
+    for key, value in scale_raw.items():
+        try:
+            days = max(0.0, float(key))
+        except (TypeError, ValueError):
+            continue
+        color = str(value).strip()
+        if not _HEX_COLOR_PATTERN.fullmatch(color):
+            continue
+        stops.append({"days": days, "color": color})
+    return sorted(stops, key=lambda item: float(item.get("days", 0.0)))
+
+
+def _parse_from_to_color(row: dict) -> list[dict[str, object]] | None:
+    from_color = str(
+        row.get("from_color", row.get("newer_color", row.get("new_color", "")))
+    ).strip()
+    to_color = str(
+        row.get("to_color", row.get("older_color", row.get("old_color", "")))
+    ).strip()
+    try:
+        range_days = max(1.0, float(row.get("range_days", 365)))
+    except (TypeError, ValueError):
+        return None
+    if not _HEX_COLOR_PATTERN.fullmatch(from_color):
+        return None
+    if not _HEX_COLOR_PATTERN.fullmatch(to_color):
+        return None
+    return [
+        {"days": 0.0, "color": from_color},
+        {"days": range_days, "color": to_color},
+    ]
+
+
+def _parse_column_stops(row: object) -> list[dict[str, object]] | None:
+    if not isinstance(row, dict):
+        return None
+    stops = _parse_numeric_scale(row)
+    if stops:
+        return stops
+    stops = _parse_scale_dict(row.get("scale"))
+    if stops:
+        return stops
+    return _parse_from_to_color(row)
+
+
 def load_table_date_column_styles(base_dir: Path) -> dict[str, dict[str, dict[str, object]]]:
     data = load_global_config_dict(base_dir)
     raw = data.get("table", {}) if isinstance(data, dict) else {}
     table_raw = raw if isinstance(raw, dict) else {}
-    columns_style_raw = table_raw.get("columns_style", {})
-    if isinstance(columns_style_raw, dict):
-        ranges_raw = columns_style_raw.get(
-            "date",
-            table_raw.get("date_columns", table_raw.get("date_color_ranges", {})),
-        )
-    else:
-        ranges_raw = table_raw.get("date_columns", table_raw.get("date_color_ranges", {}))
+    ranges_raw = _extract_date_ranges_raw(table_raw)
     if not isinstance(ranges_raw, dict):
         return {"all": {}, "active": {}, "archive": {}}
-
-    out: dict[str, dict[str, dict[str, object]]] = {"all": {}, "active": {}, "archive": {}}
+    out: dict[str, dict[str, dict[str, object]]] = {
+        "all": {},
+        "active": {},
+        "archive": {},
+    }
     for view in ("all", "active", "archive"):
         view_raw = ranges_raw.get(view, {})
         if not isinstance(view_raw, dict):
             continue
         for cid in TABLE_DATE_COLOR_COLUMNS:
-            row = view_raw.get(cid, {})
-            if not isinstance(row, dict):
-                continue
-            numeric_scale = True
-            stops: list[dict[str, object]] = []
-            for key, value in row.items():
-                try:
-                    days = max(0.0, float(key))
-                except (TypeError, ValueError):
-                    numeric_scale = False
-                    break
-                color = str(value).strip()
-                if not re.fullmatch(r"#[0-9A-Fa-f]{6}", color):
-                    numeric_scale = False
-                    break
-                stops.append({"days": days, "color": color})
-            if numeric_scale and stops:
-                out[view][cid] = {"stops": sorted(stops, key=lambda item: float(item.get("days", 0.0)))}
-                continue
-            scale_raw = row.get("scale")
-            if isinstance(scale_raw, dict):
-                stops = []
-                for key, value in scale_raw.items():
-                    try:
-                        days = max(0.0, float(key))
-                    except (TypeError, ValueError):
-                        continue
-                    color = str(value).strip()
-                    if not re.fullmatch(r"#[0-9A-Fa-f]{6}", color):
-                        continue
-                    stops.append({"days": days, "color": color})
-                stops = sorted(stops, key=lambda item: float(item.get("days", 0.0)))
-                if stops:
-                    out[view][cid] = {"stops": stops}
-                    continue
-            from_color = str(
-                row.get("from_color", row.get("newer_color", row.get("new_color", "")))
-            ).strip()
-            to_color = str(
-                row.get("to_color", row.get("older_color", row.get("old_color", "")))
-            ).strip()
-            try:
-                range_days = max(1.0, float(row.get("range_days", 365)))
-            except (TypeError, ValueError):
-                continue
-            if not re.fullmatch(r"#[0-9A-Fa-f]{6}", from_color):
-                continue
-            if not re.fullmatch(r"#[0-9A-Fa-f]{6}", to_color):
-                continue
-            out[view][cid] = {
-                "stops": [
-                    {"days": 0.0, "color": from_color},
-                    {"days": range_days, "color": to_color},
-                ],
-            }
+            stops = _parse_column_stops(view_raw.get(cid, {}))
+            if stops:
+                out[view][cid] = {"stops": stops}
     return out
 
 

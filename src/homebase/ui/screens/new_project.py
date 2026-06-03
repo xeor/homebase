@@ -750,6 +750,100 @@ class NewProjectScreen(ModalScreen[dict[str, object] | None]):
             return []
         return [r for r in rewrites if isinstance(r, dict)]
 
+    def _steps_for_git(self, raw: str, raw_display: str, target: Path) -> list[str]:
+        hosts = self._git_hosts_map()
+        clone_url = detect_git_url(raw, hosts) if raw else None
+        adapter = self._url_adapter_name(raw) if raw else None
+        steps = [f"mkdir {target}"]
+        if clone_url and raw and clone_url != raw:
+            steps.append(
+                f"git clone {clone_url} {target}/repo "
+                f"[dim](rewritten by {adapter or 'rule'})[/]"
+            )
+            steps.append(f"[dim]   raw input: {raw}[/]")
+        elif clone_url:
+            steps.append(f"git clone {clone_url} {target}/repo")
+        else:
+            steps.append(f"git clone {raw_display} {target}/repo")
+            if raw:
+                steps.append(
+                    "[dim red]   (no adapter rule matched — clones raw URL as-is)[/]"
+                )
+        steps.append(f"write {target.name}/.base.yaml")
+        return steps
+
+    def _steps_for_download(
+        self, raw: str, raw_display: str, target: Path, eff_source: str
+    ) -> list[str]:
+        hosts = self._git_hosts_map()
+        rewrites = self._download_rewrites(eff_source)
+        fetch_url = resolve_download_url(raw, hosts, rewrites) if raw else None
+        adapter = self._url_adapter_name(raw) if raw else None
+        steps = [f"mkdir {target}"]
+        if fetch_url and raw and fetch_url != raw:
+            steps.append(
+                f"fetch {fetch_url} [dim](rewritten by {adapter or 'rule'})[/]"
+            )
+            steps.append(f"[dim]   raw input: {raw}[/]")
+        else:
+            steps.append(f"fetch {fetch_url or raw_display}")
+        steps.append(f"write {target.name}/.base.yaml")
+        return steps
+
+    def _steps_for_downloaded(self, target: Path, eff_source: str) -> list[str]:
+        cfg = self._resolved_source_config(eff_source)
+        folder = cfg.get("folder", "~/Downloads")
+        return [
+            f"mkdir {target}",
+            f"move newest file from {folder} → {target}/",
+            f"write {target.name}/.base.yaml",
+        ]
+
+    def _steps_for_worktree(self, target: Path) -> list[str]:
+        branch = self._name_value().strip()
+        parent = self._derived_worktree_parent_name() or "?"
+        return [
+            f"mkdir {target}",
+            f"git -C <{parent}/repo> worktree add -b {branch} {target}/repo",
+            f"write {target.name}/.base.yaml (worktree block + repo_dir)",
+        ]
+
+    def _base_plan_steps(
+        self, base: str, raw: str, raw_display: str, target: Path, eff_source: str
+    ) -> list[str]:
+        if base == "empty":
+            return [f"mkdir {target}", f"write {target.name}/.base.yaml"]
+        if base == "local":
+            return [
+                f"move {raw_display} → {target}",
+                f"write {target.name}/.base.yaml",
+            ]
+        if base == "git":
+            return self._steps_for_git(raw, raw_display, target)
+        if base == "download":
+            return self._steps_for_download(raw, raw_display, target, eff_source)
+        if base == "downloaded":
+            return self._steps_for_downloaded(target, eff_source)
+        if base == "worktree":
+            return self._steps_for_worktree(target)
+        return [f"create {target} via [bold]{eff_source}[/]"]
+
+    def _modifier_step_lines(self) -> list[str]:
+        out: list[str] = []
+        if self.selected_tags:
+            out.append(f"set tags {sorted(self.selected_tags)}")
+        tmpl = self._current_template()
+        if tmpl:
+            out.append(f"apply template {tmpl}")
+        if self.toggle_values.get("archive"):
+            out.append(
+                f"[dim](archive rewrite → lands under "
+                f"{self.base_dir_ref / ARCHIVE_DIR_NAME}/<year>/<date>_<name>)[/]"
+            )
+        if self.toggle_values.get("cd"):
+            out.append("spawn shell in project")
+        return out
+
     def _plan_steps_lines(self, eff_source: str, target: Path) -> list[str]:
         """Plan preview of what the source will do. URL adapters are
         consulted live (`detect_git_url` / `resolve_download_url`) so
@@ -759,77 +853,9 @@ class NewProjectScreen(ModalScreen[dict[str, object] | None]):
         description)."""
         raw = self._input_value()
         raw_display = raw or "<input>"
-        steps: list[str] = []
         base = self._resolve_base_key(eff_source) or eff_source
-        if base == "empty":
-            steps.append(f"mkdir {target}")
-            steps.append(f"write {target.name}/.base.yaml")
-        elif base == "local":
-            steps.append(f"move {raw_display} → {target}")
-            steps.append(f"write {target.name}/.base.yaml")
-        elif base == "git":
-            hosts = self._git_hosts_map()
-            clone_url = detect_git_url(raw, hosts) if raw else None
-            adapter = self._url_adapter_name(raw) if raw else None
-            steps.append(f"mkdir {target}")
-            if clone_url and raw and clone_url != raw:
-                steps.append(
-                    f"git clone {clone_url} {target}/repo "
-                    f"[dim](rewritten by {adapter or 'rule'})[/]"
-                )
-                steps.append(f"[dim]   raw input: {raw}[/]")
-            elif clone_url:
-                steps.append(f"git clone {clone_url} {target}/repo")
-            else:
-                steps.append(f"git clone {raw_display} {target}/repo")
-                if raw:
-                    steps.append("[dim red]   (no adapter rule matched — clones raw URL as-is)[/]")
-            steps.append(f"write {target.name}/.base.yaml")
-        elif base == "download":
-            hosts = self._git_hosts_map()
-            rewrites = self._download_rewrites(eff_source)
-            fetch_url = (
-                resolve_download_url(raw, hosts, rewrites) if raw else None
-            )
-            adapter = self._url_adapter_name(raw) if raw else None
-            steps.append(f"mkdir {target}")
-            if fetch_url and raw and fetch_url != raw:
-                steps.append(
-                    f"fetch {fetch_url} "
-                    f"[dim](rewritten by {adapter or 'rule'})[/]"
-                )
-                steps.append(f"[dim]   raw input: {raw}[/]")
-            else:
-                steps.append(f"fetch {fetch_url or raw_display}")
-            steps.append(f"write {target.name}/.base.yaml")
-        elif base == "downloaded":
-            cfg = self._resolved_source_config(eff_source)
-            folder = cfg.get("folder", "~/Downloads")
-            steps.append(f"mkdir {target}")
-            steps.append(f"move newest file from {folder} → {target}/")
-            steps.append(f"write {target.name}/.base.yaml")
-        elif base == "worktree":
-            branch = self._name_value().strip()
-            parent = self._derived_worktree_parent_name() or "?"
-            steps.append(f"mkdir {target}")
-            steps.append(
-                f"git -C <{parent}/repo> worktree add -b {branch} {target}/repo"
-            )
-            steps.append(f"write {target.name}/.base.yaml (worktree block + repo_dir)")
-        else:
-            steps.append(f"create {target} via [bold]{eff_source}[/]")
-        if self.selected_tags:
-            steps.append(f"set tags {sorted(self.selected_tags)}")
-        tmpl = self._current_template()
-        if tmpl:
-            steps.append(f"apply template {tmpl}")
-        if self.toggle_values.get("archive"):
-            steps.append(
-                f"[dim](archive rewrite → lands under "
-                f"{self.base_dir_ref / ARCHIVE_DIR_NAME}/<year>/<date>_<name>)[/]"
-            )
-        if self.toggle_values.get("cd"):
-            steps.append("spawn shell in project")
+        steps = self._base_plan_steps(base, raw, raw_display, target, eff_source)
+        steps.extend(self._modifier_step_lines())
         return steps
 
     def _template_details_text(self, key: str | None) -> str:
@@ -960,34 +986,30 @@ class NewProjectScreen(ModalScreen[dict[str, object] | None]):
 
     # ---------- refresh ----------
 
-    def _refresh(self) -> None:
-        # Keep the input lock + placeholder in sync with the currently
-        # selected source. Picking 'worktree' from the source row
-        # (without a prefill) toggles the chrome on; picking another
-        # source toggles it back.
-        self._sync_worktree_mode_chrome()
-        # Name field — when the user hasn't typed an override we
-        # display the auto-inferred name as an orange placeholder so
-        # it's obvious which name will actually be used and that they
-        # can override it.
+    def _refresh_name_field(self) -> None:
         name_input = self.query_one("#new_name", Input)
         if self._is_worktree_mode():
-            of = self.prefill_from_project or self._derived_worktree_parent_name() or "?"
+            of = (
+                self.prefill_from_project
+                or self._derived_worktree_parent_name()
+                or "?"
+            )
             name_input.placeholder = f"branch name (required) — worktree of {of}"
             name_input.remove_class("auto-name")
-        elif self._name_value():
+            return
+        if self._name_value():
             name_input.placeholder = "name (optional)"
             name_input.remove_class("auto-name")
+            return
+        inferred = self._infer_name_for_preview(self._input_value())
+        if inferred:
+            name_input.placeholder = f"auto: {inferred}"
+            name_input.add_class("auto-name")
         else:
-            inferred = self._infer_name_for_preview(self._input_value())
-            if inferred:
-                name_input.placeholder = f"auto: {inferred}"
-                name_input.add_class("auto-name")
-            else:
-                name_input.placeholder = "name (optional)"
-                name_input.remove_class("auto-name")
+            name_input.placeholder = "name (optional)"
+            name_input.remove_class("auto-name")
 
-        # Source row (now at the very top of the dialog).
+    def _refresh_source_row(self) -> None:
         detected = self._detected_source()
         cursor = ">" if self.focus_section == SECTION_SOURCE else " "
         sel = self._current_source()
@@ -999,13 +1021,7 @@ class NewProjectScreen(ModalScreen[dict[str, object] | None]):
             f"{cursor} source (auto detected: [cyan]{detected}[/]):  {choices_str}"
         )
 
-        # Toggles — split column-major across N Static columns so the
-        # block has a bounded height. Brackets are escaped because Rich
-        # would otherwise eat them as markup tags. ``ts_name`` /
-        # ``alpha_name`` are auto-name generators that only kick in
-        # when no name candidate is present; they're dimmed when a
-        # name is already determined so the user can see they're
-        # currently inert.
+    def _refresh_toggles(self) -> None:
         has_name = self._has_name_candidate()
         for col_idx in range(_TOGGLE_COL_COUNT):
             start = col_idx * _MAX_TOGGLE_ROWS
@@ -1020,26 +1036,27 @@ class NewProjectScreen(ModalScreen[dict[str, object] | None]):
                     else " "
                 )
                 mark = r"\[x]" if self.toggle_values[spec.key] else r"\[ ]"
-                inert = spec.key in {"ts_name", "alpha_name"} and has_name
                 row = f"{cur} {mark} {spec.label}"
-                if inert:
+                if spec.key in {"ts_name", "alpha_name"} and has_name:
                     row = f"[dim]{row}[/]"
                 col_lines.append(row)
-            self.query_one(
-                f"#new_toggles_col_{col_idx}", Static
-            ).update("\n".join(col_lines))
+            self.query_one(f"#new_toggles_col_{col_idx}", Static).update(
+                "\n".join(col_lines)
+            )
 
-        # Tags row.
+    def _refresh_tags_row(self) -> None:
         tag_cursor = ">" if self.focus_section == SECTION_TAGS else " "
         tag_summary = ", ".join(sorted(self.selected_tags)) or "-"
         tag_hint = (
-            " [dim](space/enter to edit)[/]" if self.focus_section == SECTION_TAGS else ""
+            " [dim](space/enter to edit)[/]"
+            if self.focus_section == SECTION_TAGS
+            else ""
         )
         self.query_one("#new_tags_line", Static).update(
             f"{tag_cursor} tags:  {tag_summary}{tag_hint}"
         )
 
-        # Template row.
+    def _refresh_template_row(self) -> None:
         opts = self._template_options()
         opts_labels = []
         for idx, item in enumerate(opts):
@@ -1053,30 +1070,29 @@ class NewProjectScreen(ModalScreen[dict[str, object] | None]):
             f"{tcursor} template: {' '.join(opts_labels)}"
         )
 
-        # Status panels (left = key:value info, right = similar matches).
-        # Worktree mode short-circuits to its own renderer because the
-        # generic resolved-name preview returns just the branch name —
-        # the actual dir is <parent>-<sanitised-branch>.
+    def _status_info_header_lines(self) -> tuple[list[str], str, Path | None]:
         if self._is_worktree_mode():
-            info_lines, resolved, target = self._worktree_status_lines()
-        else:
-            info_lines = []
-            resolved, marker = self._resolved_name_preview()
-            target = self._target_path(resolved) if resolved else None
-            if marker:
-                info_lines.append(f"[dim]{marker}[/]")
-            elif target is not None:
-                exists_marker = (
-                    "[bold red]YES[/]" if target.exists() else "[bold green]no[/]"
-                )
-                info_lines.extend(
-                    [
-                        f"[bold green]name[/]: {resolved}",
-                        f"[bold green]path[/]: [dim]{target}[/]",
-                        f"[bold green]exists[/]: {exists_marker}",
-                    ]
-                )
-        eff_source = self._effective_source()
+            return self._worktree_status_lines()
+        info_lines: list[str] = []
+        resolved, marker = self._resolved_name_preview()
+        target = self._target_path(resolved) if resolved else None
+        if marker:
+            info_lines.append(f"[dim]{marker}[/]")
+        elif target is not None:
+            exists_marker = (
+                "[bold red]YES[/]" if target.exists() else "[bold green]no[/]"
+            )
+            info_lines.extend(
+                [
+                    f"[bold green]name[/]: {resolved}",
+                    f"[bold green]path[/]: [dim]{target}[/]",
+                    f"[bold green]exists[/]: {exists_marker}",
+                ]
+            )
+        return info_lines, resolved, target
+
+    def _status_info_lines(self, eff_source: str) -> tuple[list[str], str, Path | None]:
+        info_lines, resolved, target = self._status_info_header_lines()
         info_lines.append(f"[bold green]source[/]: {eff_source}")
         tags = self._tag_list()
         info_lines.append(
@@ -1093,50 +1109,69 @@ class NewProjectScreen(ModalScreen[dict[str, object] | None]):
             if steps:
                 info_lines.append("")
                 info_lines.append("[bold green]plan[/]:")
-                for step in steps:
-                    info_lines.append(f"  - {step}")
-        self.query_one("#new_status_info", Static).update("\n".join(info_lines))
+                info_lines.extend(f"  - {step}" for step in steps)
+        return info_lines, resolved, target
 
-        # Similar-name suggestions.
+    def _similar_matches_text(self, resolved: str) -> str:
         suggestions = self._similar_matches(resolved) if resolved else []
         if suggestions:
             match_lines: list[str] = []
             for item, pct in suggestions:
-                bucket = max(0, min(len(COLLISION_RED_RAMP) - 1, (100 - pct) // 10))
+                bucket = max(
+                    0, min(len(COLLISION_RED_RAMP) - 1, (100 - pct) // 10)
+                )
                 style = COLLISION_RED_RAMP[bucket]
                 match_lines.append(f"[{style}]- {item} ({pct}%)[/]")
-            match_text = "\n".join(match_lines)
-        elif not resolved:
-            match_text = "[dim](type a name to see collisions)[/]"
-        else:
-            match_text = "[dim](no similar names in workspace)[/]"
-        self.query_one("#new_status_matches", Static).update(match_text)
+            return "\n".join(match_lines)
+        if not resolved:
+            return "[dim](type a name to see collisions)[/]"
+        return "[dim](no similar names in workspace)[/]"
 
-        # Help panel (context-sensitive — follows the keyboard cursor).
-        self.query_one("#new_help", Static).update(self._help_text())
-
-        # Plan line — status only, not a tab stop.
+    def _plan_text(
+        self, resolved: str, target: Path | None, eff_source: str
+    ) -> str:
         if self._is_worktree_mode():
             dir_name, err = self._worktree_validation()
             if err:
-                plan_text = f"[bold red]worktree invalid:[/] {err}"
-            else:
-                branch = self._name_value().strip()
-                parent = self._derived_worktree_parent_name() or "?"
-                plan_text = (
-                    f"Will create worktree [bold green]{dir_name}[/] of "
-                    f"[bold cyan]{parent}[/] on branch [bold cyan]{branch}[/]"
-                )
-        elif not resolved or target is None:
-            plan_text = "Waiting for name…"
-        elif target.exists():
-            plan_text = f"[bold yellow]Will open existing[/] {resolved}"
-        else:
-            plan_text = (
-                f"Will create [bold green]{resolved}[/] using "
-                f"[bold cyan]{eff_source}[/]"
+                return f"[bold red]worktree invalid:[/] {err}"
+            branch = self._name_value().strip()
+            parent = self._derived_worktree_parent_name() or "?"
+            return (
+                f"Will create worktree [bold green]{dir_name}[/] of "
+                f"[bold cyan]{parent}[/] on branch [bold cyan]{branch}[/]"
             )
-        self.query_one("#new_plan", Static).update(plan_text)
+        if not resolved or target is None:
+            return "Waiting for name…"
+        if target.exists():
+            return f"[bold yellow]Will open existing[/] {resolved}"
+        return (
+            f"Will create [bold green]{resolved}[/] using "
+            f"[bold cyan]{eff_source}[/]"
+        )
+
+    def _refresh(self) -> None:
+        # Keep the input lock + placeholder in sync with the currently
+        # selected source. Picking 'worktree' from the source row
+        # (without a prefill) toggles the chrome on; picking another
+        # source toggles it back.
+        self._sync_worktree_mode_chrome()
+        self._refresh_name_field()
+        self._refresh_source_row()
+        self._refresh_toggles()
+        self._refresh_tags_row()
+        self._refresh_template_row()
+
+        eff_source = self._effective_source()
+        info_lines, resolved, target = self._status_info_lines(eff_source)
+        self.query_one("#new_status_info", Static).update("\n".join(info_lines))
+
+        self.query_one("#new_status_matches", Static).update(
+            self._similar_matches_text(resolved)
+        )
+        self.query_one("#new_help", Static).update(self._help_text())
+        self.query_one("#new_plan", Static).update(
+            self._plan_text(resolved, target, eff_source)
+        )
 
     # ---------- input events ----------
 

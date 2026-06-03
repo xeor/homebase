@@ -190,6 +190,105 @@ def tmux_active_window_in_session(
     return windows[0]
 
 
+def _session_by_id(sessions: list[dict[str, str]], sid: str) -> dict[str, str] | None:
+    return next((s for s in sessions if s.get("session_id", "") == sid), None)
+
+
+def _resolve_by_pane_hint(
+    pane_id_hint: str,
+    sessions: list[dict[str, str]],
+    tmux_find_window_by_pane_id: Callable[[str], tuple[str, str] | None],
+    tmux_list_windows: Callable[[str], list[dict[str, str]]],
+) -> tuple[dict[str, str], dict[str, str]] | None:
+    pane_id = (
+        str(pane_id_hint).strip() or os.environ.get("TMUX_PANE", "").strip()
+    )
+    if not pane_id:
+        return None
+    located = tmux_find_window_by_pane_id(pane_id)
+    if located is None:
+        return None
+    sid, wid = located
+    session = _session_by_id(sessions, sid)
+    if session is None:
+        return None
+    window = next(
+        (w for w in tmux_list_windows(sid) if w.get("window_id", "") == wid),
+        None,
+    )
+    if window is None:
+        return None
+    return session, window
+
+
+def _resolve_by_session_hint(
+    session_id_hint: str,
+    sessions: list[dict[str, str]],
+    tmux_active_window_in_session: Callable[[str], dict[str, str]],
+) -> tuple[dict[str, str], dict[str, str]] | None:
+    hinted_sid = str(session_id_hint).strip()
+    if not hinted_sid:
+        return None
+    session = _session_by_id(sessions, hinted_sid)
+    if session is None:
+        return None
+    return session, tmux_active_window_in_session(hinted_sid)
+
+
+def _resolve_by_current(
+    sessions: list[dict[str, str]],
+    tmux_display: Callable[[str, str], str],
+    tmux_list_windows: Callable[[str], list[dict[str, str]]],
+) -> tuple[dict[str, str], dict[str, str]] | None:
+    current_sid = tmux_display("#{session_id}", "")
+    current_wid = tmux_display("#{window_id}", "")
+    if not (current_sid and current_wid):
+        return None
+    session = _session_by_id(sessions, current_sid)
+    if session is None:
+        return None
+    window = next(
+        (
+            w
+            for w in tmux_list_windows(current_sid)
+            if w.get("window_id", "") == current_wid
+        ),
+        None,
+    )
+    if window is None:
+        return None
+    return session, window
+
+
+def _resolve_fallback(
+    sessions: list[dict[str, str]],
+    tmux_active_window_in_session: Callable[[str], dict[str, str]],
+) -> tuple[dict[str, str], dict[str, str]] | None:
+    if len(sessions) == 1:
+        session = sessions[0]
+        return session, tmux_active_window_in_session(
+            session.get("session_id", "")
+        )
+    ranked = sorted(
+        sessions,
+        key=lambda s: (tmux_session_activity(s), str(s.get("session_name", ""))),
+        reverse=True,
+    )
+    if ranked and tmux_session_activity(ranked[0]) > 0:
+        session = ranked[0]
+        return session, tmux_active_window_in_session(
+            session.get("session_id", "")
+        )
+    main_session = next(
+        (s for s in sessions if s.get("session_name", "") == "main"), None
+    )
+    if main_session is not None:
+        return main_session, tmux_active_window_in_session(
+            main_session.get("session_id", "")
+        )
+    return None
+
+
 def tmux_resolve_session_window(
     *,
     pane_id_hint: str,
@@ -203,53 +302,25 @@ def tmux_resolve_session_window(
     sessions = tmux_list_sessions()
     if not sessions:
         raise RuntimeError("no tmux sessions found")
-
-    pane_id = str(pane_id_hint).strip() or os.environ.get("TMUX_PANE", "").strip()
-    if pane_id:
-        located = tmux_find_window_by_pane_id(pane_id)
-        if located is not None:
-            sid, wid = located
-            session = next((s for s in sessions if s.get("session_id", "") == sid), None)
-            if session is not None:
-                window = next((w for w in tmux_list_windows(sid) if w.get("window_id", "") == wid), None)
-                if window is not None:
-                    return session, window
-
-    hinted_sid = str(session_id_hint).strip()
-    if hinted_sid:
-        session = next((s for s in sessions if s.get("session_id", "") == hinted_sid), None)
-        if session is not None:
-            return session, tmux_active_window_in_session(hinted_sid)
-
-    current_sid = tmux_display("#{session_id}", "")
-    current_wid = tmux_display("#{window_id}", "")
-    if current_sid and current_wid:
-        session = next((s for s in sessions if s.get("session_id", "") == current_sid), None)
-        if session is not None:
-            window = next((w for w in tmux_list_windows(current_sid) if w.get("window_id", "") == current_wid), None)
-            if window is not None:
-                return session, window
-
-    if len(sessions) == 1:
-        session = sessions[0]
-        return session, tmux_active_window_in_session(session.get("session_id", ""))
-
-    ranked = sorted(
-        sessions,
-        key=lambda s: (tmux_session_activity(s), str(s.get("session_name", ""))),
-        reverse=True,
+    resolution = _resolve_by_pane_hint(
+        pane_id_hint, sessions, tmux_find_window_by_pane_id, tmux_list_windows
     )
-    if ranked and tmux_session_activity(ranked[0]) > 0:
-        session = ranked[0]
-        return session, tmux_active_window_in_session(session.get("session_id", ""))
-
-    main_session = next((s for s in sessions if s.get("session_name", "") == "main"), None)
-    if main_session is not None:
-        return main_session, tmux_active_window_in_session(main_session.get("session_id", ""))
-
+    if resolution is None:
+        resolution = _resolve_by_session_hint(
+            session_id_hint, sessions, tmux_active_window_in_session
+        )
+    if resolution is None:
+        resolution = _resolve_by_current(
+            sessions, tmux_display, tmux_list_windows
+        )
+    if resolution is None:
+        resolution = _resolve_fallback(sessions, tmux_active_window_in_session)
+    if resolution is not None:
+        return resolution
     names = ", ".join(str(s.get("session_name", "")) for s in sessions)
     raise RuntimeError(
-        f"unable to resolve tmux session/window; no active session signal and no 'main' session; sessions={names}"
+        f"unable to resolve tmux session/window; no active session signal "
+        f"and no 'main' session; sessions={names}"
     )
 
 

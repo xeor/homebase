@@ -137,24 +137,40 @@ def discovery_should_skip_active_walk_path(
     )
 
 
-def collect_projects(
-    base_dir: Path,
-    *,
-    include_git_dirty: bool,
-    include_nested: bool | None,
+def _size_cache_lookup(
+    size_cache: dict[Path, tuple[int, int]] | None, path: Path
+) -> tuple[int | None, int]:
+    entry = (size_cache or {}).get(path)
+    if entry is None:
+        return None, 0
+    return int(entry[0]), int(entry[1])
+
+
+def _safe_project_row_for(
+    project_row: Callable[..., object],
+    path: Path,
     size_cache: dict[Path, tuple[int, int]] | None,
-    archive_dir_name: str,
-    base_marker_file: str,
-    resolve_include_nested_fn: Callable[[Path, bool | None], bool],
-    skip_active_walk_path: Callable[[Path, Path, Path], bool],
-    prune_walk_dirnames: Callable[[list[str]], None],
+    include_git_dirty: bool,
+) -> object | None:
+    prev_size, prev_count = _size_cache_lookup(size_cache, path)
+    return _safe_project_row(
+        project_row,
+        path,
+        include_git_dirty=include_git_dirty,
+        prev_size_bytes=prev_size,
+        prev_size_refresh_count=prev_count,
+    )
+
+
+def _collect_top_level_projects(
+    base_dir: Path,
+    base_res: Path,
+    seen: set[Path],
+    size_cache: dict[Path, tuple[int, int]] | None,
+    include_git_dirty: bool,
     project_row: Callable[..., object],
 ) -> list[object]:
     rows: list[object] = []
-    seen: set[Path] = set()
-    archive_root = (base_dir / archive_dir_name).resolve()
-    base_res = base_dir.resolve()
-
     for p in sorted(base_dir.iterdir()):
         try:
             if not p.is_dir():
@@ -168,50 +184,84 @@ def collect_projects(
         if project_dir == base_res or project_dir in seen:
             continue
         seen.add(project_dir)
-        size_prev = (size_cache or {}).get(project_dir)
-        prev_size = int(size_prev[0]) if size_prev is not None else None
-        prev_count = int(size_prev[1]) if size_prev is not None else 0
-        row = _safe_project_row(
-            project_row,
-            project_dir,
-            include_git_dirty=include_git_dirty,
-            prev_size_bytes=prev_size,
-            prev_size_refresh_count=prev_count,
+        row = _safe_project_row_for(
+            project_row, project_dir, size_cache, include_git_dirty
         )
         if row is not None:
             rows.append(row)
+    return rows
 
-    nested = resolve_include_nested_fn(base_dir, include_nested)
-    if not nested:
-        return rows
 
+def _collect_nested_projects(
+    base_dir: Path,
+    base_res: Path,
+    archive_root: Path,
+    seen: set[Path],
+    size_cache: dict[Path, tuple[int, int]] | None,
+    *,
+    include_git_dirty: bool,
+    base_marker_file: str,
+    skip_active_walk_path: Callable[[Path, Path, Path], bool],
+    prune_walk_dirnames: Callable[[list[str]], None],
+    project_row: Callable[..., object],
+) -> list[object]:
+    rows: list[object] = []
     for dirpath, dirnames, filenames in os.walk(base_dir, topdown=True):
         cur = Path(dirpath).resolve()
         if skip_active_walk_path(base_dir, archive_root, cur):
             dirnames[:] = []
             continue
         prune_walk_dirnames(dirnames)
-        if base_marker_file not in filenames:
-            continue
-        if cur == base_res:
+        if base_marker_file not in filenames or cur == base_res:
             continue
         if cur in seen:
             dirnames[:] = []
             continue
         seen.add(cur)
-        size_prev = (size_cache or {}).get(cur)
-        prev_size = int(size_prev[0]) if size_prev is not None else None
-        prev_count = int(size_prev[1]) if size_prev is not None else 0
-        row = _safe_project_row(
-            project_row,
-            cur,
-            include_git_dirty=include_git_dirty,
-            prev_size_bytes=prev_size,
-            prev_size_refresh_count=prev_count,
+        row = _safe_project_row_for(
+            project_row, cur, size_cache, include_git_dirty
         )
         if row is not None:
             rows.append(row)
         dirnames[:] = []
+    return rows
+
+
+def collect_projects(
+    base_dir: Path,
+    *,
+    include_git_dirty: bool,
+    include_nested: bool | None,
+    size_cache: dict[Path, tuple[int, int]] | None,
+    archive_dir_name: str,
+    base_marker_file: str,
+    resolve_include_nested_fn: Callable[[Path, bool | None], bool],
+    skip_active_walk_path: Callable[[Path, Path, Path], bool],
+    prune_walk_dirnames: Callable[[list[str]], None],
+    project_row: Callable[..., object],
+) -> list[object]:
+    seen: set[Path] = set()
+    archive_root = (base_dir / archive_dir_name).resolve()
+    base_res = base_dir.resolve()
+    rows = _collect_top_level_projects(
+        base_dir, base_res, seen, size_cache, include_git_dirty, project_row
+    )
+    if not resolve_include_nested_fn(base_dir, include_nested):
+        return rows
+    rows.extend(
+        _collect_nested_projects(
+            base_dir,
+            base_res,
+            archive_root,
+            seen,
+            size_cache,
+            include_git_dirty=include_git_dirty,
+            base_marker_file=base_marker_file,
+            skip_active_walk_path=skip_active_walk_path,
+            prune_walk_dirnames=prune_walk_dirnames,
+            project_row=project_row,
+        )
+    )
     return rows
 
 

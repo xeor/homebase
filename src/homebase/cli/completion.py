@@ -234,6 +234,80 @@ def completion_candidates(
     return sorted(set(out))
 
 
+_LS_FLAGS = [
+    "-l", "--long", "--git", "--archived", "--created", "--active", "--wip",
+    "--worktree-of", "--src", "--path", "--description", "--props",
+]
+_FIX_FLAGS = [
+    "--all", "--yes", "--marker", "--no-marker", "--archive-entry",
+    "--no-archive-entry",
+]
+_SIMPLE_SUB_CANDIDATES = {
+    "ls": _LS_FLAGS,
+    "json": ["--archived", "--archived-only"],
+    "setup": ["--yes", "--no-tmux-binding"],
+    "cache": ["warm"],
+    "tags": ["sync-_tags", "ls", "--debug"],
+    "utils": ["opt-in-nested-discovery"],
+    "archive": ["mv", "ls", "undo", "restore", "--yes"],
+    "completion": ["bash", "zsh", "fish"],
+}
+_BARE_VALUE_PREVS = frozenset(
+    {
+        "--filter", "--name", "--comment", "--output", "--pane-id",
+        "--session-id", "--ignore-featureset",
+    }
+)
+
+
+def _new_candidates(prev: str, base_dir: Path) -> list[str]:
+    if prev == "--as":
+        return _new_child_source_keys(base_dir)
+    if prev == "--template":
+        return _new_template_keys(base_dir)
+    return [*_NEW_MODE_FLAGS, *_NEW_COMMON_FLAGS]
+
+
+def _tmux_candidates(words: list[str], cword: int) -> list[str]:
+    if cword == 2:
+        return ["load", "save"]
+    if len(words) >= 2 and words[1] == "save":
+        return ["--output", "--stdout", "--debug", "--pane-id", "--session-id"]
+    return []
+
+
+def _benchmark_candidates(words: list[str], cword: int) -> list[str]:
+    if cword == 2:
+        return ["run", "results"]
+    if len(words) >= 2 and words[1] == "run":
+        return ["--comment", "--keep-basefolder"]
+    if len(words) >= 2 and words[1] == "results":
+        return ["--ignore-featureset"]
+    return []
+
+
+def _test_candidates(words: list[str], cword: int, prev: str) -> list[str]:
+    if cword == 2:
+        return ["regression", "--comment", "--keep-basefolder"]
+    if len(words) >= 2 and words[1] == "regression":
+        if prev == "--case":
+            return _regression_case_names()
+        return ["--list", "--case"]
+    return ["--comment", "--keep-basefolder"]
+
+
+def _example_candidates(
+    words: list[str], cword: int, prev: str, *, cwd: Path, token: str
+) -> list[str]:
+    if prev == "--path":
+        return _dir_candidates(token, cwd)
+    if cword == 2:
+        return ["generate"]
+    if len(words) >= 2 and words[1] == "generate":
+        return ["--path", "--count", "--seed"]
+    return []
+
+
 def _subcommand_candidates(
     cmd: str,
     words: list[str],
@@ -244,89 +318,26 @@ def _subcommand_candidates(
     cwd: Path,
     token: str,
 ) -> list[str]:
-    if prev in {"--base-folder"}:
-        return []
-    if prev in {"--filter", "--name", "--comment", "--output", "--pane-id", "--session-id", "--ignore-featureset"}:
+    if prev == "--base-folder" or prev in _BARE_VALUE_PREVS:
         return []
     if cmd in {"new", "n"}:
-        if prev == "--as":
-            return _new_child_source_keys(base_dir)
-        if prev == "--template":
-            return _new_template_keys(base_dir)
-        return [*_NEW_MODE_FLAGS, *_NEW_COMMON_FLAGS]
-    if cmd == "ls":
-        return [
-            "-l",
-            "--long",
-            "--git",
-            "--archived",
-            "--created",
-            "--active",
-            "--wip",
-            "--worktree-of",
-            "--src",
-            "--path",
-            "--description",
-            "--props",
-        ]
-    if cmd == "json":
-        return ["--archived", "--archived-only"]
+        return _new_candidates(prev, base_dir)
+    if cmd in _SIMPLE_SUB_CANDIDATES:
+        return list(_SIMPLE_SUB_CANDIDATES[cmd])
     if cmd == "cd":
         return _cd_candidates(words, cword, base_dir=base_dir)
     if cmd == "rm":
         return [*_active_project_names(base_dir), "--force", "--force-outside-base"]
     if cmd == "fix":
-        flags = [
-            "--all",
-            "--yes",
-            "--marker",
-            "--no-marker",
-            "--archive-entry",
-            "--no-archive-entry",
-        ]
-        return [*_dir_candidates(token, cwd), *flags]
-    if cmd == "setup":
-        return ["--yes", "--no-tmux-binding"]
-    if cmd == "cache":
-        return ["warm"]
-    if cmd == "tags":
-        return ["sync-_tags", "ls", "--debug"]
-    if cmd == "utils":
-        return ["opt-in-nested-discovery"]
-    if cmd == "archive":
-        return ["mv", "ls", "undo", "restore", "--yes"]
+        return [*_dir_candidates(token, cwd), *_FIX_FLAGS]
     if cmd == "tmux":
-        if cword == 2:
-            return ["load", "save"]
-        if len(words) >= 2 and words[1] == "save":
-            return ["--output", "--stdout", "--debug", "--pane-id", "--session-id"]
-        return []
+        return _tmux_candidates(words, cword)
     if cmd == "benchmark":
-        if cword == 2:
-            return ["run", "results"]
-        if len(words) >= 2 and words[1] == "run":
-            return ["--comment", "--keep-basefolder"]
-        if len(words) >= 2 and words[1] == "results":
-            return ["--ignore-featureset"]
-        return []
+        return _benchmark_candidates(words, cword)
     if cmd == "test":
-        if cword == 2:
-            return ["regression", "--comment", "--keep-basefolder"]
-        if len(words) >= 2 and words[1] == "regression":
-            if prev == "--case":
-                return _regression_case_names()
-            return ["--list", "--case"]
-        return ["--comment", "--keep-basefolder"]
+        return _test_candidates(words, cword, prev)
     if cmd == "example":
-        if prev == "--path":
-            return _dir_candidates(token, cwd)
-        if cword == 2:
-            return ["generate"]
-        if len(words) >= 2 and words[1] == "generate":
-            return ["--path", "--count", "--seed"]
-        return []
-    if cmd == "completion":
-        return ["bash", "zsh", "fish"]
+        return _example_candidates(words, cword, prev, cwd=cwd, token=token)
     return []
 
 

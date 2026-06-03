@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any
 
 from textual.widgets import Tab
@@ -39,6 +40,133 @@ def on_tabs_tab_activated(
     app._refresh_side()
 
 
+@dataclass
+class _TabActiveFlags:
+    settings_table: bool
+    settings_config: bool
+    settings_global: bool
+    selected_readme: bool
+    selected_notes: bool
+
+    @property
+    def settings(self) -> bool:
+        return self.settings_table or self.settings_config
+
+
+def _compute_active_flags(app: Any) -> _TabActiveFlags:
+    return _TabActiveFlags(
+        settings_table=(
+            app.side_main_tab == "settings"
+            and app.side_settings_tab in {"table", "open"}
+        ),
+        settings_config=(
+            app.side_main_tab == "settings"
+            and app.side_settings_tab == "table_config"
+        ),
+        settings_global=(
+            app.side_main_tab == "settings" and app.side_settings_tab == "global"
+        ),
+        selected_readme=(
+            app.side_main_tab == "selected" and app.side_selected_tab == "readme"
+        ),
+        selected_notes=(
+            app.side_main_tab == "selected" and app.side_selected_tab == "notes"
+        ),
+    )
+
+
+def _apply_side_widths(
+    app: Any, projects: Any, side: Any, left: Any, right: Any
+) -> None:
+    try:
+        side_pct = app._table_side_width_pct()
+        projects_pct = max(10, 100 - side_pct)
+        projects.styles.width = f"{projects_pct}%"
+        side.styles.width = f"{side_pct}%"
+        left.styles.width = f"{projects_pct}%"
+        right.styles.width = f"{side_pct}%"
+    except WIDGET_API_ERRORS:
+        pass
+
+
+def _apply_visibility(
+    app: Any,
+    flags: _TabActiveFlags,
+    *,
+    side_scroll: Any,
+    side_body: Any,
+    side_readme_panel: Any,
+    side_notes_panel: Any,
+    side_global_panel: Any,
+    settings_table: Any,
+    settings_notes: Any,
+    settings_config_panel: Any,
+) -> None:
+    side_scroll.display = not flags.settings
+    side_body.display = (
+        not flags.settings
+        and not flags.selected_readme
+        and not flags.selected_notes
+        and not flags.settings_global
+    )
+    side_readme_panel.display = not flags.settings and flags.selected_readme
+    side_notes_panel.display = not flags.settings and flags.selected_notes
+    side_global_panel.display = flags.settings_global
+    settings_table.display = flags.settings_table
+    settings_config_panel.display = flags.settings_config
+    settings_notes.display = (
+        app.side_main_tab == "settings"
+        and app.side_settings_tab in {"table", "open"}
+    )
+
+
+def _try_set(widget: Any, attr: str, value: object) -> None:
+    try:
+        setattr(widget, attr, value)
+    except WIDGET_API_ERRORS:
+        pass
+
+
+def _try_focus(widget: Any) -> None:
+    try:
+        widget.focus()
+    except WIDGET_API_ERRORS:
+        pass
+
+
+def _apply_focus_rules(
+    app: Any,
+    projects: Any,
+    side: Any,
+    settings_table: Any,
+    flags: _TabActiveFlags,
+    projects_locked: bool,
+) -> None:
+    _try_set(projects, "can_focus", not projects_locked)
+    _try_set(projects, "disabled", projects_locked)
+    _try_set(settings_table, "can_focus", flags.settings_table)
+    _try_set(side, "can_focus", False)
+    if (
+        flags.settings_table
+        and not settings_table.has_focus
+        and not app._modal_active()
+    ):
+        _try_focus(settings_table)
+    if flags.settings_config and not app._modal_active():
+        try:
+            first_cfg = app.query_one("#cfg_pin_wip")
+            if not first_cfg.has_focus:
+                first_cfg.focus()
+        except WIDGET_API_ERRORS:
+            pass
+    if (
+        app._main_table_was_locked
+        and not projects_locked
+        and not app._modal_active()
+    ):
+        _try_focus(projects)
+
+
 def sync_side_tab_visibility(app: Any, *, widget_projects: str) -> None:
     side = app.query_one("#side")
     projects = app.query_one(widget_projects)
@@ -59,87 +187,24 @@ def sync_side_tab_visibility(app: Any, *, widget_projects: str) -> None:
     selected_tabs.display = app.side_main_tab == "selected"
     info_tabs.display = app.side_main_tab == "info"
     settings_tabs.display = app.side_main_tab == "settings"
-
-    settings_table_active = (
-        app.side_main_tab == "settings"
-        and app.side_settings_tab in {"table", "open"}
+    flags = _compute_active_flags(app)
+    _apply_side_widths(app, projects, side, global_meta_left, global_meta_right)
+    _apply_visibility(
+        app,
+        flags,
+        side_scroll=side_scroll,
+        side_body=side_body,
+        side_readme_panel=side_readme_panel,
+        side_notes_panel=side_notes_panel,
+        side_global_panel=side_global_panel,
+        settings_table=settings_table,
+        settings_notes=settings_notes,
+        settings_config_panel=settings_config_panel,
     )
-    settings_config_active = (
-        app.side_main_tab == "settings" and app.side_settings_tab == "table_config"
-    )
-    settings_active = settings_table_active or settings_config_active
-    selected_readme_active = (
-        app.side_main_tab == "selected" and app.side_selected_tab == "readme"
-    )
-    selected_notes_active = (
-        app.side_main_tab == "selected" and app.side_selected_tab == "notes"
-    )
-    settings_global_active = (
-        app.side_main_tab == "settings" and app.side_settings_tab == "global"
-    )
-
-    try:
-        side_pct = app._table_side_width_pct()
-        projects_pct = max(10, 100 - side_pct)
-        projects.styles.width = f"{projects_pct}%"
-        side.styles.width = f"{side_pct}%"
-        global_meta_left.styles.width = f"{projects_pct}%"
-        global_meta_right.styles.width = f"{side_pct}%"
-    except WIDGET_API_ERRORS:
-        pass
-
-    side_scroll.display = not settings_active
-    side_body.display = (
-        not settings_active
-        and not selected_readme_active
-        and not selected_notes_active
-        and not settings_global_active
-    )
-    side_readme_panel.display = not settings_active and selected_readme_active
-    side_notes_panel.display = not settings_active and selected_notes_active
-    side_global_panel.display = settings_global_active
-    settings_table.display = settings_table_active
-    settings_config_panel.display = settings_config_active
-    settings_notes.display = app.side_main_tab == "settings" and app.side_settings_tab in {
-        "table",
-        "open",
-    }
-
     projects_locked = main_table_interaction_locked(app)
-
-    try:
-        projects.can_focus = not projects_locked
-    except WIDGET_API_ERRORS:
-        pass
-    try:
-        projects.disabled = projects_locked
-    except WIDGET_API_ERRORS:
-        pass
-    try:
-        settings_table.can_focus = settings_table_active
-    except WIDGET_API_ERRORS:
-        pass
-    try:
-        side.can_focus = False
-    except WIDGET_API_ERRORS:
-        pass
-    if settings_table_active and not settings_table.has_focus and not app._modal_active():
-        try:
-            settings_table.focus()
-        except WIDGET_API_ERRORS:
-            pass
-    if settings_config_active and not app._modal_active():
-        try:
-            first_cfg = app.query_one("#cfg_pin_wip")
-            if not first_cfg.has_focus:
-                first_cfg.focus()
-        except WIDGET_API_ERRORS:
-            pass
-    if app._main_table_was_locked and not projects_locked and not app._modal_active():
-        try:
-            projects.focus()
-        except WIDGET_API_ERRORS:
-            pass
+    _apply_focus_rules(
+        app, projects, side, settings_table, flags, projects_locked
+    )
     app._main_table_was_locked = projects_locked
 
 

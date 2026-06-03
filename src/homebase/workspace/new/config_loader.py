@@ -11,49 +11,50 @@ class NewConfigError(ValueError):
     """Raised when `.homebase/config.yaml` 'new.sources' section is invalid."""
 
 
-def load_new_sources(base_dir: Path) -> dict[str, dict[str, Any]]:
-    """Return the resolved `new.sources` config, with parent inheritance
-    expanded for every child. Each entry maps source key → its resolved
-    option/config dict. Built-in keys without a config entry get an
-    empty dict.
-    """
+def _read_raw_sources(base_dir: Path) -> dict[str, dict[str, Any]]:
     cfg = load_global_config_dict(base_dir)
     new_section = cfg.get("new") if isinstance(cfg, dict) else None
     sources_section = (
         new_section.get("sources") if isinstance(new_section, dict) else None
     )
     raw: dict[str, dict[str, Any]] = {}
-    if isinstance(sources_section, dict):
-        for key, value in sources_section.items():
-            if not isinstance(key, str):
-                raise NewConfigError(f"new.sources key must be a string, got {key!r}")
-            if not isinstance(value, dict):
-                raise NewConfigError(
-                    f"new.sources.{key} must be a mapping, got {type(value).__name__}"
-                )
-            raw[key] = dict(value)
+    if not isinstance(sources_section, dict):
+        return raw
+    for key, value in sources_section.items():
+        if not isinstance(key, str):
+            raise NewConfigError(
+                f"new.sources key must be a string, got {key!r}"
+            )
+        if not isinstance(value, dict):
+            raise NewConfigError(
+                f"new.sources.{key} must be a mapping, got {type(value).__name__}"
+            )
+        raw[key] = dict(value)
+    return raw
 
-    builtins = set(builtin_keys())
 
-    # Validate parents + detect cycles.
+def _validate_parents(raw: dict[str, dict[str, Any]], builtins: set[str]) -> None:
     for key, entry in raw.items():
         if key in builtins:
             if "parent" in entry:
                 raise NewConfigError(
                     f"new.sources.{key} is a built-in source — must not declare parent"
                 )
-        else:
-            parent = entry.get("parent")
-            if not parent:
-                raise NewConfigError(
-                    f"new.sources.{key} is unknown — needs a 'parent: <key>'"
-                )
-            if not isinstance(parent, str):
-                raise NewConfigError(
-                    f"new.sources.{key}.parent must be a string"
-                )
+            continue
+        parent = entry.get("parent")
+        if not parent:
+            raise NewConfigError(
+                f"new.sources.{key} is unknown — needs a 'parent: <key>'"
+            )
+        if not isinstance(parent, str):
+            raise NewConfigError(
+                f"new.sources.{key}.parent must be a string"
+            )
 
-    # Cycle detection via DFS.
+
+def _topological_order(
+    raw: dict[str, dict[str, Any]], builtins: set[str]
+) -> list[str]:
     visiting: set[str] = set()
     resolved_order: list[str] = []
     seen: set[str] = set()
@@ -79,40 +80,50 @@ def load_new_sources(base_dir: Path) -> dict[str, dict[str, Any]]:
 
     for key in list(raw.keys()):
         visit(key)
+    return resolved_order
 
-    # Expand: child inherits from parent (shallow-merge options,
-    # deep-merge `config:`).
+
+def _merge_parent_into_child(
+    entry: dict[str, Any], parent_resolved: dict[str, Any]
+) -> dict[str, Any]:
+    merged: dict[str, Any] = {}
+    for k, v in parent_resolved.items():
+        if k == "parent":
+            continue  # parent is per-entry, not inherited
+        if k == "config":
+            merged["config"] = dict(v)
+        else:
+            merged[k] = v
+    for k, v in entry.items():
+        if k == "config":
+            base_cfg = merged.get("config", {})
+            if isinstance(base_cfg, dict) and isinstance(v, dict):
+                out = dict(base_cfg)
+                out.update(v)
+                merged["config"] = out
+            else:
+                merged["config"] = v
+        else:
+            merged[k] = v
+    return merged
+
+
+def load_new_sources(base_dir: Path) -> dict[str, dict[str, Any]]:
+    """Return the resolved `new.sources` config, with parent inheritance
+    expanded for every child. Each entry maps source key → its resolved
+    option/config dict. Built-in keys without a config entry get an
+    empty dict.
+    """
+    raw = _read_raw_sources(base_dir)
+    builtins = set(builtin_keys())
+    _validate_parents(raw, builtins)
+    resolved_order = _topological_order(raw, builtins)
     resolved: dict[str, dict[str, Any]] = {}
     for key in resolved_order:
         entry = dict(raw[key])
         parent = entry.get("parent")
-        parent_resolved: dict[str, Any] = {}
-        if parent:
-            if parent in resolved:
-                parent_resolved = resolved[parent]
-            # else parent is a built-in key without config — empty defaults
-        merged: dict[str, Any] = {}
-        for k, v in parent_resolved.items():
-            if k == "parent":
-                continue  # parent is per-entry, not inherited
-            if k == "config":
-                merged["config"] = dict(v)
-            else:
-                merged[k] = v
-        for k, v in entry.items():
-            if k == "config":
-                base_cfg = merged.get("config", {})
-                if isinstance(base_cfg, dict) and isinstance(v, dict):
-                    out = dict(base_cfg)
-                    out.update(v)
-                    merged["config"] = out
-                else:
-                    merged["config"] = v
-            else:
-                merged[k] = v
-        resolved[key] = merged
-
-    # Built-ins without a config entry → empty.
+        parent_resolved = resolved.get(parent, {}) if parent else {}
+        resolved[key] = _merge_parent_into_child(entry, parent_resolved)
     for key in builtins:
         resolved.setdefault(key, {})
     return resolved

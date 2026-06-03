@@ -72,6 +72,52 @@ def normalize_base_data(data: Mapping[str, object]) -> tuple[dict[str, object], 
     return out, notes
 
 
+def _check_tags(raw: Mapping, warns: list[str]) -> None:
+    tags = raw.get("tags", [])
+    if not (isinstance(tags, list) or isinstance(tags, str) or tags is None):
+        warns.append("tags has non-standard type")
+
+
+def _check_simple_field_types(raw: Mapping, warns: list[str]) -> None:
+    if "description" in raw and not isinstance(raw.get("description"), str):
+        warns.append("description should be string")
+    if "wip" in raw and not isinstance(raw.get("wip"), bool):
+        warns.append("wip should be boolean")
+
+
+def _check_log_block(raw: Mapping, warns: list[str]) -> None:
+    log_val = raw.get("log", {})
+    if "log" in raw and not isinstance(log_val, Mapping):
+        warns.append("log should be mapping")
+        return
+    if isinstance(log_val, Mapping):
+        events = log_val.get("events", [])
+        if "events" in log_val and not isinstance(events, list):
+            warns.append("log.events should be list")
+
+
+def _check_repo_dir(raw: Mapping, warns: list[str]) -> None:
+    if "repo_dir" not in raw:
+        return
+    value = raw.get("repo_dir")
+    if not isinstance(value, str) or not value.strip():
+        warns.append("repo_dir must be a non-empty string")
+    elif Path(value).is_absolute():
+        warns.append("repo_dir must be a relative path (e.g. '.' or 'repo')")
+
+
+def _check_extra_keys(
+    raw: Mapping, allowed_keys: set[str], warns: list[str]
+) -> None:
+    extra_keys = sorted(key for key in raw.keys() if str(key) not in allowed_keys)
+    if not extra_keys:
+        return
+    preview = ", ".join(str(key) for key in extra_keys[:4])
+    if len(extra_keys) > 4:
+        preview += f" (+{len(extra_keys) - 4} more)"
+    warns.append(f"unknown key(s): {preview}")
+
+
 def base_meta_schema_issues(
     raw: object,
     *,
@@ -82,44 +128,15 @@ def base_meta_schema_issues(
         raw = {}
     if not isinstance(raw, Mapping):
         return [(warning_level, "invalid_root", "root must be a mapping")]
-
     warns: list[str] = []
     errors: list[tuple[str, str, str]] = []
-    tags = raw.get("tags", [])
-    if not (isinstance(tags, list) or isinstance(tags, str) or tags is None):
-        warns.append("tags has non-standard type")
-
-    if "description" in raw and not isinstance(raw.get("description"), str):
-        warns.append("description should be string")
-
-    if "wip" in raw and not isinstance(raw.get("wip"), bool):
-        warns.append("wip should be boolean")
-
-    log_val = raw.get("log", {})
-    if "log" in raw and not isinstance(log_val, Mapping):
-        warns.append("log should be mapping")
-    elif isinstance(log_val, Mapping):
-        events = log_val.get("events", [])
-        if "events" in log_val and not isinstance(events, list):
-            warns.append("log.events should be list")
-
-    if "repo_dir" in raw:
-        value = raw.get("repo_dir")
-        if not isinstance(value, str) or not value.strip():
-            warns.append("repo_dir must be a non-empty string")
-        elif Path(value).is_absolute():
-            warns.append("repo_dir must be a relative path (e.g. '.' or 'repo')")
-
+    _check_tags(raw, warns)
+    _check_simple_field_types(raw, warns)
+    _check_log_block(raw, warns)
+    _check_repo_dir(raw, warns)
     if "worktree" in raw:
         errors.extend(_worktree_schema_issues(raw.get("worktree"), warns))
-
-    extra_keys = sorted(key for key in raw.keys() if str(key) not in allowed_keys)
-    if extra_keys:
-        preview = ", ".join(str(key) for key in extra_keys[:4])
-        if len(extra_keys) > 4:
-            preview += f" (+{len(extra_keys) - 4} more)"
-        warns.append(f"unknown key(s): {preview}")
-
+    _check_extra_keys(raw, allowed_keys, warns)
     issues: list[tuple[str, str, str]] = list(errors)
     if warns:
         issues.append((warning_level, "schema_warn", "; ".join(warns[:3])))

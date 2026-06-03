@@ -204,6 +204,167 @@ def _print_plan(plan: NewPlan) -> None:
             print(f"  $ {cmd}")
 
 
+def _initial_source_key(
+    ns: Namespace,
+    raw_input: str | None,
+    sources_cfg: dict[str, dict],
+    ctx: NewContext,
+) -> tuple[str, bool]:
+    mode = getattr(ns, "mode", None)
+    child_key = getattr(ns, "child_key", None)
+    if mode == "auto":
+        mode = None
+    if child_key == "auto":
+        child_key = None
+    forced = bool(mode) or bool(child_key)
+    if child_key:
+        return str(child_key), forced
+    if mode:
+        return str(mode), forced
+    detected = autodetect_source_key(
+        raw_input, sources_cfg, cwd=ctx.cwd, base_dir=ctx.base_dir
+    )
+    return detected or "", forced
+
+
+def _maybe_ask_source(
+    ns: Namespace,
+    source_key: str,
+    sources_cfg: dict[str, dict],
+    forced: bool,
+) -> tuple[str, int]:
+    if not getattr(ns, "ask_source", False) or forced:
+        return source_key, 0
+    try:
+        available = sorted(set(_BUILTIN_KEYS) | set(sources_cfg.keys()))
+        return ask_source(available, default=source_key or None), 0
+    except PromptError as exc:
+        print(f"b new: {exc}", file=sys.stderr)
+        return source_key, 2
+
+
+def _resolve_source_key(
+    ns: Namespace,
+    raw_input: str | None,
+    sources_cfg: dict[str, dict],
+    ctx: NewContext,
+) -> tuple[str, int]:
+    """Return (source_key, rc). rc != 0 means an error was printed."""
+    source_key, forced = _initial_source_key(ns, raw_input, sources_cfg, ctx)
+    source_key, err = _maybe_ask_source(ns, source_key, sources_cfg, forced)
+    if err:
+        return "", err
+    if not source_key:
+        print(
+            f"b new: cannot determine source for input: {raw_input!r}",
+            file=sys.stderr,
+        )
+        return "", 2
+    return source_key, 0
+
+
+def _build_source_config(
+    source_key: str, base_key: str, sources_cfg: dict[str, dict]
+) -> tuple[dict, dict]:
+    """Return (source_config, child_cfg)."""
+    child_cfg = (
+        sources_cfg.get(source_key, {})
+        if source_key != base_key
+        else sources_cfg.get(base_key, {})
+    )
+    source_config = (
+        dict(child_cfg.get("config") or {}) if isinstance(child_cfg, dict) else {}
+    )
+    if base_key == "download":
+        git_hosts = sources_cfg.get("git", {}).get("config", {}).get("hosts") or {}
+        source_config.setdefault("hosts", git_hosts)
+    return source_config, child_cfg
+
+
+def _build_source_and_options(
+    ns: Namespace,
+    base_key: str,
+    sources_cfg: dict[str, dict],
+    source_key: str,
+    ctx: NewContext,
+) -> tuple[object, object]:
+    source_config, child_cfg = _build_source_config(source_key, base_key, sources_cfg)
+    source = construct_source(base_key, source_config)
+    options = resolve_options(base_key, ns, source_cfg=child_cfg)
+    if base_key == "worktree" and not options.from_project:
+        enclosing = enclosing_base_project(ctx.cwd, ctx.base_dir)
+        if enclosing is not None:
+            options = replace(options, from_project=enclosing.name)
+    return source, options
+
+
+def _normalize_inputs_for_source(
+    source: object,
+    base_key: str,
+    raw_input: str | None,
+    explicit_name: str | None,
+) -> tuple[str | None, str | None, int]:
+    if not source.accepts_input:
+        if raw_input is not None and explicit_name is not None:
+            print(
+                f"b new: source '{base_key}' takes no <input> positional",
+                file=sys.stderr,
+            )
+            return raw_input, explicit_name, 2
+        explicit_name = explicit_name if explicit_name is not None else raw_input
+        raw_input = None
+    if base_key == "empty" and raw_input and classify_input(raw_input) == "path":
+        explicit_name = explicit_name or Path(str(raw_input).rstrip("/\\")).name
+        raw_input = None
+    return raw_input, explicit_name, 0
+
+
+def _maybe_ask_name(
+    options: object,
+    source: object,
+    base_key: str,
+    raw_input: str | None,
+    explicit_name: str | None,
+    ctx: NewContext,
+) -> tuple[str | None, int]:
+    if not options.ask_name:
+        return explicit_name, 0
+    if explicit_name is not None:
+        print(
+            "b new: --ask-name conflicts with <name> positional",
+            file=sys.stderr,
+        )
+        return explicit_name, 2
+    suggested = source.infer_name(raw_input, ctx)
+    if raw_input:
+        print(f"\nitem: {raw_input}  (source: {base_key})")
+    else:
+        print(f"\nitem: (source: {base_key})")
+    try:
+        return ask_name(default=suggested), 0
+    except PromptError as exc:
+        print(f"b new: {exc}", file=sys.stderr)
+        return explicit_name, 2
+
+
+def _maybe_confirm(
+    plan: NewPlan, options: object
+) -> tuple[bool, int]:
+    """Return (proceed, rc). rc != 0 only when an error was reported."""
+    if not (options.confirm and not options.yes):
+        return True, 0
+    _print_plan(plan)
+    try:
+        ok = confirm()
+    except PromptError as exc:
+        print(f"b new: {exc}", file=sys.stderr)
+        return False, 2
+    if not ok:
+        print("aborted")
+        return False, 1
+    return True, 0
+
+
 def plan_and_apply_one(
     ns: Namespace,
     raw_input: str | None,
@@ -220,40 +381,10 @@ def plan_and_apply_one(
     """
     started = time.time()
     _debug_log(f"start raw_input={raw_input!r} explicit_name={explicit_name!r}")
-    mode = getattr(ns, "mode", None)
-    child_key = getattr(ns, "child_key", None)
-    if mode == "auto":
-        mode = None
-    if child_key == "auto":
-        child_key = None
-    forced = bool(mode) or bool(child_key)
 
-    if child_key:
-        source_key = str(child_key)
-    elif mode:
-        source_key = str(mode)
-    else:
-        source_key = (
-            autodetect_source_key(
-                raw_input, sources_cfg, cwd=ctx.cwd, base_dir=ctx.base_dir
-            )
-            or ""
-        )
-
-    if getattr(ns, "ask_source", False) and not forced:
-        try:
-            available = sorted(set(_BUILTIN_KEYS) | set(sources_cfg.keys()))
-            source_key = ask_source(available, default=source_key or None)
-        except PromptError as exc:
-            print(f"b new: {exc}", file=sys.stderr)
-            return 2, None, None
-
-    if not source_key:
-        print(
-            f"b new: cannot determine source for input: {raw_input!r}",
-            file=sys.stderr,
-        )
-        return 2, None, None
+    source_key, err = _resolve_source_key(ns, raw_input, sources_cfg, ctx)
+    if err:
+        return err, None, None
 
     base_key = _resolve_base_key(source_key, sources_cfg)
     _debug_log(f"resolved source source_key={source_key!r} base_key={base_key!r}")
@@ -267,21 +398,9 @@ def plan_and_apply_one(
         print(f"b new: {exc}", file=sys.stderr)
         return 2, None, None
 
-    child_cfg = sources_cfg.get(source_key, {}) if source_key != base_key else (
-        sources_cfg.get(base_key, {})
+    source, options = _build_source_and_options(
+        ns, base_key, sources_cfg, source_key, ctx
     )
-    source_config = dict(child_cfg.get("config") or {}) if isinstance(child_cfg, dict) else {}
-    if base_key == "download":
-        git_hosts = (
-            sources_cfg.get("git", {}).get("config", {}).get("hosts") or {}
-        )
-        source_config.setdefault("hosts", git_hosts)
-    source = construct_source(base_key, source_config)
-    options = resolve_options(base_key, ns, source_cfg=child_cfg)
-    if base_key == "worktree" and not options.from_project:
-        enclosing = enclosing_base_project(ctx.cwd, ctx.base_dir)
-        if enclosing is not None:
-            options = replace(options, from_project=enclosing.name)
 
     # Interactive setup hook (DownloadedSource uses this to prompt
     # for which recent file to use). Most sources are no-ops.
@@ -291,37 +410,17 @@ def plan_and_apply_one(
         print(f"b new: {exc}", file=sys.stderr)
         return 2, None, None
 
-    if not source.accepts_input:
-        if raw_input is not None and explicit_name is not None:
-            print(
-                f"b new: source '{base_key}' takes no <input> positional",
-                file=sys.stderr,
-            )
-            return 2, None, None
-        explicit_name = explicit_name if explicit_name is not None else raw_input
-        raw_input = None
+    raw_input, explicit_name, err = _normalize_inputs_for_source(
+        source, base_key, raw_input, explicit_name
+    )
+    if err:
+        return err, None, None
 
-    if base_key == "empty" and raw_input and classify_input(raw_input) == "path":
-        explicit_name = explicit_name or Path(str(raw_input).rstrip("/\\")).name
-        raw_input = None
-
-    if options.ask_name:
-        if explicit_name is not None:
-            print(
-                "b new: --ask-name conflicts with <name> positional",
-                file=sys.stderr,
-            )
-            return 2, None, None
-        suggested = source.infer_name(raw_input, ctx)
-        if raw_input:
-            print(f"\nitem: {raw_input}  (source: {base_key})")
-        else:
-            print(f"\nitem: (source: {base_key})")
-        try:
-            explicit_name = ask_name(default=suggested)
-        except PromptError as exc:
-            print(f"b new: {exc}", file=sys.stderr)
-            return 2, None, None
+    explicit_name, err = _maybe_ask_name(
+        options, source, base_key, raw_input, explicit_name, ctx
+    )
+    if err:
+        return err, None, None
 
     name = explicit_name or source.infer_name(raw_input, ctx) or ""
     if not name and not (options.ts_name or options.alpha_name):
@@ -343,16 +442,9 @@ def plan_and_apply_one(
         _print_plan(plan)
         return 0, None, plan
 
-    if options.confirm and not options.yes:
-        _print_plan(plan)
-        try:
-            ok = confirm()
-        except PromptError as exc:
-            print(f"b new: {exc}", file=sys.stderr)
-            return 2, None, plan
-        if not ok:
-            print("aborted")
-            return 1, None, plan
+    proceed, err = _maybe_confirm(plan, options)
+    if not proceed:
+        return err, None, plan
 
     try:
         _debug_log(f"apply start source={base_key} target={plan.target}")

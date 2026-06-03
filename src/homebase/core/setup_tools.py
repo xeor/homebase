@@ -714,134 +714,126 @@ def _shell_init_check(ctx: SetupContext) -> SetupCheck:
     )
 
 
-def _build_checks(ctx: SetupContext) -> list[SetupCheck]:
-    checks: list[SetupCheck] = []
+def _binary_check(
+    check_id: str,
+    name: str,
+    bin_path: str | None,
+    install_hint: str,
+    *,
+    required: bool = True,
+    status_fail: str = STATUS_FAIL,
+) -> SetupCheck:
+    status = STATUS_PASS if bin_path else status_fail
+    return SetupCheck(
+        id=check_id,
+        name=name,
+        status=status,
+        detail=f"{_state_text(status)}: {bin_path or install_hint}",
+        required=required,
+    )
 
-    uv_status = STATUS_PASS if ctx.uv_bin else STATUS_FAIL
-    checks.append(
-        SetupCheck(
-            id="uv",
-            name="uv",
-            status=uv_status,
-            detail=f"{_state_text(uv_status)}: {ctx.uv_bin or 'install uv and add to PATH'}",
-            required=True,
-        )
-    )
-    git_status = STATUS_PASS if ctx.git_bin else STATUS_FAIL
-    checks.append(
-        SetupCheck(
-            id="git",
-            name="git",
-            status=git_status,
-            detail=f"{_state_text(git_status)}: {ctx.git_bin or 'install git and add to PATH'}",
-            required=True,
-        )
-    )
-    tmux_status = STATUS_PASS if ctx.tmux_bin else STATUS_FAIL
-    checks.append(
-        SetupCheck(
-            id="tmux",
-            name="tmux",
-            status=tmux_status,
-            detail=f"{_state_text(tmux_status)}: {ctx.tmux_bin or 'install tmux and add to PATH'}",
-            required=True,
-        )
-    )
-    tmuxp_status = STATUS_PASS if ctx.tmuxp_bin else STATUS_WARN
-    checks.append(
-        SetupCheck(
-            id="tmuxp",
-            name="tmuxp",
-            status=tmuxp_status,
-            detail=f"{_state_text(tmuxp_status)}: {ctx.tmuxp_bin or 'optional; install if using b tmux load'}",
-        )
-    )
-    runtime_status = STATUS_PASS if ctx.runtime_ok else STATUS_FAIL
-    runtime_detail = f"{_state_text(runtime_status)}: {ctx.runtime_detail}"
+
+def _runtime_check(ctx: SetupContext) -> SetupCheck:
+    status = STATUS_PASS if ctx.runtime_ok else STATUS_FAIL
+    detail = f"{_state_text(status)}: {ctx.runtime_detail}"
     if not ctx.runtime_ok:
-        runtime_detail += " (run: uv sync)"
-    checks.append(
-        SetupCheck(
-            id="python_runtime",
-            name="python runtime",
-            status=runtime_status,
-            detail=runtime_detail,
-            required=True,
-        )
-    )
-    checks.append(_self_update_check(ctx))
-
-    path_status = STATUS_PASS if ctx.in_path else STATUS_WARN
-    path_target = ctx.dest_dir if ctx.in_path else f"add {ctx.dest_dir} to shell profile"
-    checks.append(
-        SetupCheck(
-            id="path",
-            name="PATH",
-            status=path_status,
-            detail=f"{_state_text(path_status)}: {path_target}",
-        )
+        detail += " (run: uv sync)"
+    return SetupCheck(
+        id="python_runtime",
+        name="python runtime",
+        status=status,
+        detail=detail,
+        required=True,
     )
 
-    checks.append(_b_launcher_check(ctx.dest, ctx.target))
 
+def _path_check(ctx: SetupContext) -> SetupCheck:
+    status = STATUS_PASS if ctx.in_path else STATUS_WARN
+    target = ctx.dest_dir if ctx.in_path else f"add {ctx.dest_dir} to shell profile"
+    return SetupCheck(
+        id="path",
+        name="PATH",
+        status=status,
+        detail=f"{_state_text(status)}: {target}",
+    )
+
+
+def _homebase_dir_checks(ctx: SetupContext) -> list[SetupCheck]:
     homebase_status = STATUS_PASS if ctx.homebase_dir.is_dir() else STATUS_FAIL
-    checks.append(
+    writable = ctx.homebase_dir.is_dir() and os.access(ctx.homebase_dir, os.W_OK)
+    writable_status = STATUS_PASS if writable else STATUS_FAIL
+    return [
         SetupCheck(
             id="homebase_dir",
             name=HOMEBASE_DIR_NAME,
             status=homebase_status,
             detail=f"{_state_text(homebase_status)}: {ctx.homebase_dir}",
             required=True,
-        )
-    )
-    writable = ctx.homebase_dir.is_dir() and os.access(ctx.homebase_dir, os.W_OK)
-    writable_status = STATUS_PASS if writable else STATUS_FAIL
-    checks.append(
+        ),
         SetupCheck(
             id="homebase_writable",
             name=".homebase writable",
             status=writable_status,
             detail=f"{_state_text(writable_status)}: {ctx.homebase_dir}",
             required=True,
+        ),
+    ]
+
+
+def _config_check(ctx: SetupContext) -> SetupCheck:
+    if not ctx.config_exists:
+        return SetupCheck(
+            id="config",
+            name="config",
+            status=STATUS_WARN,
+            detail=f"needs change: optional; create {ctx.config_path} if you need global config",
         )
+    cfg_status = STATUS_PASS if ctx.config_valid else STATUS_FAIL
+    return SetupCheck(
+        id="config",
+        name="config",
+        status=cfg_status,
+        detail=f"{_state_text(cfg_status)}: {ctx.config_path}",
+        required=True,
     )
 
-    if ctx.config_exists:
-        cfg_status = STATUS_PASS if ctx.config_valid else STATUS_FAIL
-        checks.append(
-            SetupCheck(
-                id="config",
-                name="config",
-                status=cfg_status,
-                detail=f"{_state_text(cfg_status)}: {ctx.config_path}",
-                required=True,
-            )
-        )
-    else:
-        checks.append(
-            SetupCheck(
-                id="config",
-                name="config",
-                status=STATUS_WARN,
-                detail=f"needs change: optional; create {ctx.config_path} if you need global config",
-            )
-        )
 
-    gitignore_ok = _gitignore_has_cache_rule(ctx.homebase_gitignore)
-    checks.append(
-        SetupCheck(
-            id="gitignore",
-            name=".homebase/.gitignore",
-            status=STATUS_PASS if gitignore_ok else STATUS_WARN,
-            detail=f"{_state_text(STATUS_PASS if gitignore_ok else STATUS_WARN)}: "
-            + ("contains cache.sqlite3" if gitignore_ok else "add cache.sqlite3 rule"),
-        )
+def _gitignore_check(ctx: SetupContext) -> SetupCheck:
+    ok = _gitignore_has_cache_rule(ctx.homebase_gitignore)
+    status = STATUS_PASS if ok else STATUS_WARN
+    detail_text = "contains cache.sqlite3" if ok else "add cache.sqlite3 rule"
+    return SetupCheck(
+        id="gitignore",
+        name=".homebase/.gitignore",
+        status=status,
+        detail=f"{_state_text(status)}: {detail_text}",
     )
 
-    checks.append(_tmux_binding_check(ctx))
-    checks.append(_completion_check(ctx))
-    checks.append(_shell_init_check(ctx))
-    return checks
+
+def _build_checks(ctx: SetupContext) -> list[SetupCheck]:
+    return [
+        _binary_check("uv", "uv", ctx.uv_bin, "install uv and add to PATH"),
+        _binary_check("git", "git", ctx.git_bin, "install git and add to PATH"),
+        _binary_check("tmux", "tmux", ctx.tmux_bin, "install tmux and add to PATH"),
+        _binary_check(
+            "tmuxp",
+            "tmuxp",
+            ctx.tmuxp_bin,
+            "optional; install if using b tmux load",
+            required=False,
+            status_fail=STATUS_WARN,
+        ),
+        _runtime_check(ctx),
+        _self_update_check(ctx),
+        _path_check(ctx),
+        _b_launcher_check(ctx.dest, ctx.target),
+        *_homebase_dir_checks(ctx),
+        _config_check(ctx),
+        _gitignore_check(ctx),
+        _tmux_binding_check(ctx),
+        _completion_check(ctx),
+        _shell_init_check(ctx),
+    ]
 
 
 # --- fix building ----------------------------------------------------
@@ -994,107 +986,80 @@ def _read_text_lines(path: Path) -> list[str]:
         return []
 
 
-def _build_fixes(ctx: SetupContext) -> list[SetupFix]:
-    """Always emit the full set of setup items.
-
-    Each fix encodes its current state (`currently_present` /
-    `currently_correct`) plus optional `apply_create` / `apply_remove`
-    transitions. The UI uses the current state to compute default
-    selection, and translates the user's selection-vs-current diff
-    into create / remove / keep / absent intents at apply time.
-    """
-    fixes: list[SetupFix] = []
-
-    # --- base folder (the workspace root that holds .homebase) ----
+def _base_folder_fix(ctx: SetupContext) -> SetupFix:
     base_present = ctx.base_dir.is_dir()
     base_dir_local = ctx.base_dir
-    fixes.append(
-        SetupFix(
-            id="base_folder",
-            title=f"base workspace folder ({ctx.base_dir})",
-            description="Top-level folder that holds homebase state and project subdirs.",
-            currently_present=base_present,
-            currently_correct=base_present,
-            required=True,
-            recommended=True,
-            apply_create=(lambda p=base_dir_local: p.mkdir(parents=True, exist_ok=True)),
-            apply_remove=None,  # NEVER auto-remove the user's workspace
-            preview_create=(
-                f"current: {ctx.base_dir} (missing)",
-                f"desired: mkdir -p {ctx.base_dir}",
-            ),
-            preview_remove=(
-                "uninstall not supported: remove the workspace folder by hand if you really want to.",
-            ),
-            current_state_text=(
-                f"present: {ctx.base_dir}"
-                if base_present
-                else f"missing: {ctx.base_dir}"
-            ),
-        )
+    return SetupFix(
+        id="base_folder",
+        title=f"base workspace folder ({ctx.base_dir})",
+        description="Top-level folder that holds homebase state and project subdirs.",
+        currently_present=base_present,
+        currently_correct=base_present,
+        required=True,
+        recommended=True,
+        apply_create=(
+            lambda p=base_dir_local: p.mkdir(parents=True, exist_ok=True)
+        ),
+        apply_remove=None,  # NEVER auto-remove the user's workspace
+        preview_create=(
+            f"current: {ctx.base_dir} (missing)",
+            f"desired: mkdir -p {ctx.base_dir}",
+        ),
+        preview_remove=(
+            "uninstall not supported: remove the workspace folder by hand if you really want to.",
+        ),
+        current_state_text=(
+            f"present: {ctx.base_dir}"
+            if base_present
+            else f"missing: {ctx.base_dir}"
+        ),
     )
 
-    # --- .homebase directory --------------------------------------
+
+def _homebase_dir_fix(ctx: SetupContext) -> SetupFix:
     hb_present = ctx.homebase_dir.is_dir()
     hb_dir_local = ctx.homebase_dir
-    fixes.append(
-        SetupFix(
-            id="homebase_dir",
-            title=f"homebase state directory ({ctx.homebase_dir})",
-            description="Holds the cache database, global config, and per-run report.",
-            currently_present=hb_present,
-            currently_correct=hb_present,
-            required=True,
-            recommended=True,
-            apply_create=(lambda p=hb_dir_local: p.mkdir(parents=True, exist_ok=True)),
-            apply_remove=(lambda p=hb_dir_local: _remove_dir_if_exists(p)),
-            requires=("base_folder",),
-            preview_create=(
-                f"current: {ctx.homebase_dir} (missing)",
-                f"desired: mkdir -p {ctx.homebase_dir}",
-            ),
-            preview_remove=(
-                f"current: {ctx.homebase_dir} (present)",
-                f"removing wipes cache.sqlite3 and {ctx.config_path}",
-            ),
-            current_state_text=(
-                f"present: {ctx.homebase_dir}"
-                if hb_present
-                else f"missing: {ctx.homebase_dir}"
-            ),
-        )
+    return SetupFix(
+        id="homebase_dir",
+        title=f"homebase state directory ({ctx.homebase_dir})",
+        description="Holds the cache database, global config, and per-run report.",
+        currently_present=hb_present,
+        currently_correct=hb_present,
+        required=True,
+        recommended=True,
+        apply_create=(
+            lambda p=hb_dir_local: p.mkdir(parents=True, exist_ok=True)
+        ),
+        apply_remove=(lambda p=hb_dir_local: _remove_dir_if_exists(p)),
+        requires=("base_folder",),
+        preview_create=(
+            f"current: {ctx.homebase_dir} (missing)",
+            f"desired: mkdir -p {ctx.homebase_dir}",
+        ),
+        preview_remove=(
+            f"current: {ctx.homebase_dir} (present)",
+            f"removing wipes cache.sqlite3 and {ctx.config_path}",
+        ),
+        current_state_text=(
+            f"present: {ctx.homebase_dir}"
+            if hb_present
+            else f"missing: {ctx.homebase_dir}"
+        ),
     )
 
-    # --- ~/.local/bin (launcher dir) ------------------------------
-    bin_present = ctx.dest_dir.is_dir()
-    dest_dir_local = ctx.dest_dir
-    fixes.append(
-        SetupFix(
-            id="local_bin",
-            title=f"launcher dir on PATH ({ctx.dest_dir})",
-            description="Directory in PATH where the `b` launcher symlink lives.",
-            currently_present=bin_present,
-            currently_correct=bin_present,
-            required=True,
-            recommended=True,
-            apply_create=(lambda p=dest_dir_local: p.mkdir(parents=True, exist_ok=True)),
-            apply_remove=None,  # Shared with many tools; never auto-remove.
-            preview_create=(
-                f"current: {ctx.dest_dir} (missing)",
-                f"desired: mkdir -p {ctx.dest_dir}",
-            ),
-            preview_remove=(
-                "uninstall not supported: this directory is shared with other tools.",
-            ),
-            current_state_text=(
-                f"present: {ctx.dest_dir}"
-                if bin_present
-                else f"missing: {ctx.dest_dir}"
-            ),
-        )
-    )
 
-    # --- b launcher symlink ---------------------------------------
+def _launcher_state_text(dest: Path) -> str:
+    if dest.is_symlink():
+        try:
+            return f"symlink -> {dest.resolve()}"
+        except OSError:
+            return "broken symlink"
+    if dest.exists():
+        return "exists, not a symlink"
+    return "missing"
+
+
+def _launcher_symlink_fix(ctx: SetupContext) -> SetupFix:
     launcher_dest = ctx.dest
     launcher_target = ctx.target
     launcher_present = ctx.dest.exists() or ctx.dest.is_symlink()
@@ -1104,22 +1069,14 @@ def _build_fixes(ctx: SetupContext) -> list[SetupFix]:
             launcher_correct = ctx.dest.resolve() == ctx.target
         except OSError:
             launcher_correct = False
-    if ctx.dest.is_symlink():
-        try:
-            launcher_state = f"symlink -> {ctx.dest.resolve()}"
-        except OSError:
-            launcher_state = "broken symlink"
-    elif ctx.dest.exists():
-        launcher_state = "exists, not a symlink"
-    else:
-        launcher_state = "missing"
+    launcher_state = _launcher_state_text(ctx.dest)
 
     def _fix_launcher(
         dest: Path = launcher_dest, target: Path = launcher_target
     ) -> None:
-        # Refuse to create a symlink pointing at something that
-        # doesn't exist or isn't executable — that's the bug that
-        # bricked the user's `b` command when bin_dir was wrong.
+        # Refuse to create a symlink pointing at something that doesn't
+        # exist or isn't executable — that's the bug that bricked the
+        # user's `b` command when bin_dir was wrong.
         if not target.exists():
             raise OSError(
                 f"refusing to symlink {dest} → {target}: target does not exist"
@@ -1138,36 +1095,66 @@ def _build_fixes(ctx: SetupContext) -> list[SetupFix]:
         dest.symlink_to(target)
 
     def _remove_launcher(dest: Path = launcher_dest) -> None:
-        if dest.is_symlink():
-            dest.unlink()
-        elif dest.exists():
+        if dest.is_symlink() or dest.exists():
             dest.unlink()
 
-    fixes.append(
-        SetupFix(
-            id="launcher_symlink",
-            title=f"`b` launcher symlink ({ctx.dest})",
-            description=f"Symlink that exposes the `b` command on PATH ({ctx.dest} → {ctx.target}).",
-            currently_present=launcher_present,
-            currently_correct=launcher_correct,
-            required=True,
-            recommended=True,
-            apply_create=_fix_launcher,
-            apply_remove=_remove_launcher,
-            requires=("local_bin",),
-            preview_create=(
-                f"current: {ctx.dest} ({launcher_state})",
-                f"desired: {ctx.dest} -> {ctx.target}",
-            ),
-            preview_remove=(
-                f"current: {ctx.dest} ({launcher_state})",
-                f"unlink: {ctx.dest} (uninstalls `b` from PATH)",
-            ),
-            current_state_text=f"{ctx.dest}: {launcher_state}",
-        )
+    return SetupFix(
+        id="launcher_symlink",
+        title=f"`b` launcher symlink ({ctx.dest})",
+        description=(
+            f"Symlink that exposes the `b` command on PATH "
+            f"({ctx.dest} → {ctx.target})."
+        ),
+        currently_present=launcher_present,
+        currently_correct=launcher_correct,
+        required=True,
+        recommended=True,
+        apply_create=_fix_launcher,
+        apply_remove=_remove_launcher,
+        requires=("local_bin",),
+        preview_create=(
+            f"current: {ctx.dest} ({launcher_state})",
+            f"desired: {ctx.dest} -> {ctx.target}",
+        ),
+        preview_remove=(
+            f"current: {ctx.dest} ({launcher_state})",
+            f"unlink: {ctx.dest} (uninstalls `b` from PATH)",
+        ),
+        current_state_text=f"{ctx.dest}: {launcher_state}",
     )
 
-    # --- .homebase/.gitignore cache rule ---------------------------
+
+def _local_bin_fix(ctx: SetupContext) -> SetupFix:
+    bin_present = ctx.dest_dir.is_dir()
+    dest_dir_local = ctx.dest_dir
+    return SetupFix(
+        id="local_bin",
+        title=f"launcher dir on PATH ({ctx.dest_dir})",
+        description="Directory in PATH where the `b` launcher symlink lives.",
+        currently_present=bin_present,
+        currently_correct=bin_present,
+        required=True,
+        recommended=True,
+        apply_create=(
+            lambda p=dest_dir_local: p.mkdir(parents=True, exist_ok=True)
+        ),
+        apply_remove=None,  # Shared with many tools; never auto-remove.
+        preview_create=(
+            f"current: {ctx.dest_dir} (missing)",
+            f"desired: mkdir -p {ctx.dest_dir}",
+        ),
+        preview_remove=(
+            "uninstall not supported: this directory is shared with other tools.",
+        ),
+        current_state_text=(
+            f"present: {ctx.dest_dir}"
+            if bin_present
+            else f"missing: {ctx.dest_dir}"
+        ),
+    )
+
+
+def _gitignore_fix(ctx: SetupContext) -> SetupFix:
     gi_present = ctx.homebase_gitignore.is_file()
     gi_correct = _gitignore_has_cache_rule(ctx.homebase_gitignore)
     gi_path = ctx.homebase_gitignore
@@ -1179,28 +1166,30 @@ def _build_fixes(ctx: SetupContext) -> list[SetupFix]:
     def _remove_gitignore(path: Path = gi_path) -> None:
         _remove_homebase_gitignore_rule(path)
 
-    fixes.append(
-        SetupFix(
-            id="gitignore_cache",
-            title="`.homebase/.gitignore` ignores cache.sqlite3",
-            description="Keeps the cache database out of VCS status.",
-            currently_present=gi_present,
-            currently_correct=gi_correct,
-            required=False,
-            recommended=True,
-            apply_create=_fix_gitignore,
-            apply_remove=_remove_gitignore,
-            requires=("homebase_dir",),
-            preview_create=_gitignore_preview_create(ctx.homebase_gitignore),
-            preview_remove=_gitignore_preview_remove(ctx.homebase_gitignore),
-            current_state_text=(
-                "rule present" if gi_correct
-                else ("file exists but rule missing" if gi_present else "file does not exist")
-            ),
-        )
+    if gi_correct:
+        state_text = "rule present"
+    elif gi_present:
+        state_text = "file exists but rule missing"
+    else:
+        state_text = "file does not exist"
+    return SetupFix(
+        id="gitignore_cache",
+        title="`.homebase/.gitignore` ignores cache.sqlite3",
+        description="Keeps the cache database out of VCS status.",
+        currently_present=gi_present,
+        currently_correct=gi_correct,
+        required=False,
+        recommended=True,
+        apply_create=_fix_gitignore,
+        apply_remove=_remove_gitignore,
+        requires=("homebase_dir",),
+        preview_create=_gitignore_preview_create(ctx.homebase_gitignore),
+        preview_remove=_gitignore_preview_remove(ctx.homebase_gitignore),
+        current_state_text=state_text,
     )
 
-    # --- tmux save binding ----------------------------------------
+
+def _tmux_binding_fix(ctx: SetupContext) -> SetupFix:
     tmux_present = bool(ctx.existing_tmux_binding_lines)
     tmux_correct = has_recommended_tmux_binding(
         ctx.tmux_conf_text, ctx.expected_tmux_binding
@@ -1208,34 +1197,55 @@ def _build_fixes(ctx: SetupContext) -> list[SetupFix]:
     tmux_path_local = ctx.tmux_conf_path
     tmux_expected = ctx.expected_tmux_binding
 
-    def _fix_tmux(
-        path: Path = tmux_path_local, line: str = tmux_expected
-    ) -> None:
+    def _fix_tmux(path: Path = tmux_path_local, line: str = tmux_expected) -> None:
         write_tmux_binding(path, line)
 
     def _remove_tmux(path: Path = tmux_path_local) -> None:
         _remove_tmux_binding(path)
 
-    fixes.append(
-        SetupFix(
-            id="tmux_binding",
-            title="tmux `prefix t` save binding",
-            description="Hotkey in tmux that saves the current pane layout via `b tmux save`.",
-            currently_present=tmux_present,
-            currently_correct=tmux_correct,
-            required=False,
-            recommended=True,
-            apply_create=_fix_tmux,
-            apply_remove=_remove_tmux,
-            preview_create=_tmux_preview_create(ctx.existing_tmux_binding_lines, ctx.expected_tmux_binding),
-            preview_remove=_tmux_preview_remove(ctx.existing_tmux_binding_lines),
-            current_state_text=(
-                "recommended binding present" if tmux_correct
-                else (f"stale binding: {ctx.existing_tmux_binding_lines[0]}" if ctx.existing_tmux_binding_lines
-                      else "no binding")
-            ),
-        )
+    if tmux_correct:
+        state_text = "recommended binding present"
+    elif ctx.existing_tmux_binding_lines:
+        state_text = f"stale binding: {ctx.existing_tmux_binding_lines[0]}"
+    else:
+        state_text = "no binding"
+    return SetupFix(
+        id="tmux_binding",
+        title="tmux `prefix t` save binding",
+        description="Hotkey in tmux that saves the current pane layout via `b tmux save`.",
+        currently_present=tmux_present,
+        currently_correct=tmux_correct,
+        required=False,
+        recommended=True,
+        apply_create=_fix_tmux,
+        apply_remove=_remove_tmux,
+        preview_create=_tmux_preview_create(
+            ctx.existing_tmux_binding_lines, ctx.expected_tmux_binding
+        ),
+        preview_remove=_tmux_preview_remove(ctx.existing_tmux_binding_lines),
+        current_state_text=state_text,
     )
+
+
+def _build_fixes(ctx: SetupContext) -> list[SetupFix]:
+    """Always emit the full set of setup items.
+
+    Each fix encodes its current state (`currently_present` /
+    `currently_correct`) plus optional `apply_create` / `apply_remove`
+    transitions. The UI uses the current state to compute default
+    selection, and translates the user's selection-vs-current diff
+    into create / remove / keep / absent intents at apply time.
+    """
+    fixes: list[SetupFix] = [
+        _base_folder_fix(ctx),
+        _homebase_dir_fix(ctx),
+        _local_bin_fix(ctx),
+    ]
+
+    # --- b launcher symlink ---------------------------------------
+    fixes.append(_launcher_symlink_fix(ctx))
+    fixes.append(_gitignore_fix(ctx))
+    fixes.append(_tmux_binding_fix(ctx))
 
     # --- shell completion file ------------------------------------
     if ctx.completion_shell and ctx.completion_target is not None and ctx.expected_completion:
@@ -1585,38 +1595,53 @@ def _run_fix_loop(
 # --- summary ---------------------------------------------------------
 
 
+def _count_check_statuses(checks: list[SetupCheck]) -> tuple[int, int, int, bool]:
+    pass_count = sum(1 for c in checks if c.status == STATUS_PASS)
+    warn_count = sum(1 for c in checks if c.status == STATUS_WARN)
+    fail_count = sum(1 for c in checks if c.status == STATUS_FAIL)
+    required_fail = any(c.required and c.status == STATUS_FAIL for c in checks)
+    return pass_count, warn_count, fail_count, required_fail
+
+
+def _count_result_intents(results: list[FixResult]) -> tuple[int, int, int]:
+    from .setup_model import INTENT_CREATE, INTENT_KEEP, INTENT_REMOVE
+
+    create_done = sum(1 for r in results if r.success and r.intent == INTENT_CREATE)
+    remove_done = sum(1 for r in results if r.success and r.intent == INTENT_REMOVE)
+    keep_count = sum(1 for r in results if r.intent == INTENT_KEEP)
+    return create_done, remove_done, keep_count
+
+
 def _compute_summary(
     checks: list[SetupCheck],
     results: list[FixResult],
     *,
     dry_run: bool,
 ) -> SetupSummary:
-    from .setup_model import INTENT_CREATE, INTENT_KEEP, INTENT_REMOVE
-
-    pass_count = sum(1 for c in checks if c.status == STATUS_PASS)
-    warn_count = sum(1 for c in checks if c.status == STATUS_WARN)
-    fail_count = sum(1 for c in checks if c.status == STATUS_FAIL)
-    required_fail = any(c.required and c.status == STATUS_FAIL for c in checks)
-    create_done = sum(1 for r in results if r.success and r.intent == INTENT_CREATE)
-    remove_done = sum(1 for r in results if r.success and r.intent == INTENT_REMOVE)
-    keep_count = sum(1 for r in results if r.intent == INTENT_KEEP)
+    pass_count, warn_count, fail_count, required_fail = _count_check_statuses(checks)
+    create_done, remove_done, keep_count = _count_result_intents(results)
     failures = [r for r in results if not r.success]
     failed_count = 0 if dry_run else len(failures)
-    hard_fail = required_fail or failed_count > 0
-    succeeded_titles = [r.title for r in results if r.success and not r.skipped]
-    failed_titles = [r.title for r in failures]
     return SetupSummary(
         pass_count=pass_count,
         warn_count=warn_count,
         fail_count=fail_count,
-        hard_fail=hard_fail,
+        hard_fail=required_fail or failed_count > 0,
         create_count=create_done,
         remove_count=remove_done,
         keep_count=keep_count,
         failed_count=failed_count,
-        succeeded_titles=succeeded_titles,
-        failed_titles=failed_titles,
+        succeeded_titles=[r.title for r in results if r.success and not r.skipped],
+        failed_titles=[r.title for r in failures],
     )
+
+
+def _print_results_section(label: str, items: list[FixResult]) -> None:
+    if not items:
+        return
+    print(f"- {label}:")
+    for r in items:
+        print(f"  - {r.title}{' [FAILED]' if not r.success else ''}")
 
 
 def _print_fix_execution_summary(
@@ -1638,17 +1663,12 @@ def _print_fix_execution_summary(
     if dry_run:
         return
     print(
-        f"- results: succeeded={sum(1 for r in results if r.success and not r.skipped)} "
+        f"- results: "
+        f"succeeded={sum(1 for r in results if r.success and not r.skipped)} "
         f"failed={len(failures)}"
     )
-    if creates:
-        print("- created:")
-        for r in creates:
-            print(f"  - {r.title}{' [FAILED]' if not r.success else ''}")
-    if removes:
-        print("- removed:")
-        for r in removes:
-            print(f"  - {r.title}{' [FAILED]' if not r.success else ''}")
+    _print_results_section("created", creates)
+    _print_results_section("removed", removes)
     if failures:
         print("- failures:")
         for r in failures:

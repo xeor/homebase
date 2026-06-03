@@ -209,6 +209,112 @@ def action_pick_tags(app: Any, *, tag_plan_screen: Any) -> None:
     )
 
 
+def _apply_plan(tags: set[str], plan: dict[str, str]) -> set[str]:
+    result = set(tags)
+    for tag, op in plan.items():
+        if op == "add":
+            result.add(tag)
+        elif op == "remove":
+            result.discard(tag)
+    return result
+
+
+def _build_pre_targets(app: Any, paths: list[Path]) -> list[HookTarget]:
+    out: list[HookTarget] = []
+    for path in paths:
+        hit = app._find_row(path)
+        if hit is None:
+            continue
+        rows, idx = hit
+        out.append(snapshot_target(rows[idx], load_base_data(path)))
+    return out
+
+
+def _apply_tag_writes(
+    app: Any,
+    paths: list[Path],
+    plan: dict[str, str],
+    base_dir: Path,
+    is_packed_archive_path: Callable[[Path], bool],
+    load_base_meta: Callable[[Path], tuple[list[str], str, bool, int]],
+    save_base_tags: Callable[[Path, Path, list[str]], None],
+) -> tuple[int, int, set[Path]]:
+    success = 0
+    failed = 0
+    successful_paths: set[Path] = set()
+    for path in paths:
+        app._busy_tick()
+        if not path.exists() or (
+            not path.is_dir() and not is_packed_archive_path(path)
+        ):
+            failed += 1
+            app._log(f"tag update failed for {path.name}: not found", "error")
+            continue
+        existing_tags, _desc, _wip = load_base_meta(path)
+        tags = _apply_plan(set(existing_tags), plan)
+        try:
+            save_base_tags(base_dir, path, sorted(tags))
+            success += 1
+            successful_paths.add(path)
+        except (
+            OSError,
+            yaml.YAMLError,
+            json.JSONDecodeError,
+            TypeError,
+            ValueError,
+        ) as exc:
+            failed += 1
+            app._log(f"tag update failed for {path.name}: {exc}", "error")
+    return success, failed, successful_paths
+
+
+def _build_changed_rows(
+    app: Any, successful_paths: set[Path], plan: dict[str, str]
+) -> tuple[list[ProjectRow], dict[Path, list[str]]]:
+    changed_rows: list[ProjectRow] = []
+    before_by_path: dict[Path, list[str]] = {}
+    for path in successful_paths:
+        hit = app._find_row(path)
+        if hit is None:
+            continue
+        rows, idx = hit
+        row = rows[idx]
+        before_by_path[path] = list(row.tags)
+        row.tags = sorted(_apply_plan(set(row.tags), plan))
+        refresh_row_caches(row)
+        row.stale = False
+        row.cache_age_s = 0
+        changed_rows.append(row)
+    return changed_rows, before_by_path
+
+
+def _dispatch_post_tag_hook(
+    app: Any,
+    plan: dict[str, str],
+    changed_rows: list[ProjectRow],
+    before_by_path: dict[Path, list[str]],
+) -> None:
+    per_target: dict[Path, dict[str, list[str]]] = {}
+    targets: list[HookTarget] = []
+    for row in changed_rows:
+        before = before_by_path.get(row.path, [])
+        after = list(row.tags)
+        per_target[row.path] = {
+            "before": before,
+            "after": after,
+            "added": sorted(set(after) - set(before)),
+            "removed": sorted(set(before) - set(after)),
+        }
+        targets.append(snapshot_target(row, load_base_data(row.path)))
+    hooks_runtime.dispatch_post(
+        app,
+        event="tag_change",
+        targets=targets,
+        change={"plan": dict(plan), "per_target": per_target},
+        view=app.view_mode,
+    )
+
+
 def on_pick_tags(
     app: Any,
     plan: dict[str, str] | None,
@@ -223,19 +329,10 @@ def on_pick_tags(
         app._log("tag update cancelled", "warn")
         app._refresh_side()
         return
-
-    pre_targets: list[HookTarget] = []
-    for path in paths:
-        hit = app._find_row(path)
-        if hit is None:
-            continue
-        rows, idx = hit
-        row = rows[idx]
-        pre_targets.append(snapshot_target(row, load_base_data(path)))
     pre_outcome = hooks_runtime.dispatch_pre(
         app,
         event="tag_change",
-        targets=pre_targets,
+        targets=_build_pre_targets(app, paths),
         change={"plan": dict(plan)},
         view=app.view_mode,
     )
@@ -246,83 +343,29 @@ def on_pick_tags(
     plan_change = pre_outcome.change.get("plan")
     if isinstance(plan_change, dict):
         plan = {str(tag): str(op) for tag, op in plan_change.items()}
-
-    success = 0
-    failed = 0
-    successful_paths: set[Path] = set()
     app.pending_tag_updates = set(paths)
     app._refresh_table()
     app._busy_start("updating tags")
     try:
-        for path in paths:
-            app._busy_tick()
-            if not path.exists() or (not path.is_dir() and not is_packed_archive_path(path)):
-                failed += 1
-                app._log(f"tag update failed for {path.name}: not found", "error")
-                continue
-            existing_tags, _desc, _wip = load_base_meta(path)
-            tags = set(existing_tags)
-            for tag, op in plan.items():
-                if op == "add":
-                    tags.add(tag)
-                elif op == "remove":
-                    tags.discard(tag)
-            try:
-                save_base_tags(base_dir, path, sorted(tags))
-                success += 1
-                successful_paths.add(path)
-            except (OSError, yaml.YAMLError, json.JSONDecodeError, TypeError, ValueError) as exc:
-                failed += 1
-                app._log(f"tag update failed for {path.name}: {exc}", "error")
+        success, failed, successful_paths = _apply_tag_writes(
+            app,
+            paths,
+            plan,
+            base_dir,
+            is_packed_archive_path,
+            load_base_meta,
+            save_base_tags,
+        )
     finally:
         app._busy_stop()
         app.pending_tag_updates.clear()
-
-    changed_rows: list[ProjectRow] = []
-    before_by_path: dict[Path, list[str]] = {}
-    for path in successful_paths:
-        hit = app._find_row(path)
-        if hit is None:
-            continue
-        rows, idx = hit
-        row = rows[idx]
-        before_by_path[path] = list(row.tags)
-        tags = set(row.tags)
-        for tag, op in plan.items():
-            if op == "add":
-                tags.add(tag)
-            elif op == "remove":
-                tags.discard(tag)
-        row.tags = sorted(tags)
-        refresh_row_caches(row)
-        row.stale = False
-        row.cache_age_s = 0
-        changed_rows.append(row)
+    changed_rows, before_by_path = _build_changed_rows(
+        app, successful_paths, plan
+    )
     if changed_rows:
         app._touch_rows_cache(changed_rows)
         app._start_cache_refresh("tag update", force=False)
-        per_target: dict[Path, dict[str, list[str]]] = {}
-        targets = []
-        for row in changed_rows:
-            before = before_by_path.get(row.path, [])
-            after = list(row.tags)
-            per_target[row.path] = {
-                "before": before,
-                "after": after,
-                "added": sorted(set(after) - set(before)),
-                "removed": sorted(set(before) - set(after)),
-            }
-            targets.append(snapshot_target(row, load_base_data(row.path)))
-        hooks_runtime.dispatch_post(
-            app,
-            event="tag_change",
-            targets=targets,
-            change={
-                "plan": dict(plan),
-                "per_target": per_target,
-            },
-            view=app.view_mode,
-        )
+        _dispatch_post_tag_hook(app, plan, changed_rows, before_by_path)
     else:
         app._refresh_data()
     app._refresh_table()

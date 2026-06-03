@@ -30,6 +30,43 @@ def _coerce_bool(value: Any) -> bool | None:
     raise ValueError(f"expected bool, got {type(value).__name__}: {value!r}")
 
 
+def _merge_source_cfg(merged: dict[str, Any], source_cfg: dict[str, Any]) -> None:
+    for key, value in source_cfg.items():
+        if key in ("parent", "config"):
+            continue
+        # YAML convention is kebab-case; map to the snake_case option name
+        # used by argparse + the resolver.
+        normalised = key.replace("-", "_")
+        merged[normalised] = value
+
+
+def _apply_cli_bool_overrides(merged: dict[str, Any], cli_ns: Namespace) -> None:
+    for opt in _BOOL_OPTS:
+        coerced = _coerce_bool(getattr(cli_ns, opt, None))
+        if coerced is not None:
+            merged[opt] = coerced
+    cd_value = _coerce_bool(getattr(cli_ns, "cd", None))
+    if cd_value is not None:
+        merged["open"] = cd_value
+
+
+def _apply_cli_scalar_overrides(merged: dict[str, Any], cli_ns: Namespace) -> None:
+    if getattr(cli_ns, "template", "") != "":
+        merged["template"] = str(cli_ns.template)
+    cli_from = getattr(cli_ns, "from_project", "") or ""
+    if cli_from:
+        merged["from_project"] = str(cli_from)
+
+
+def _apply_cli_list_overrides(merged: dict[str, Any], cli_ns: Namespace) -> None:
+    cli_tags = getattr(cli_ns, "tag", None) or []
+    if cli_tags:
+        merged["tags"] = list(merged.get("tags") or []) + [str(t) for t in cli_tags]
+    cli_post = getattr(cli_ns, "post", None) or []
+    if cli_post:
+        merged["post"] = list(merged.get("post") or []) + [str(c) for c in cli_post]
+
+
 def resolve_options(
     source_key: str,
     cli_ns: Namespace,
@@ -41,42 +78,12 @@ def resolve_options(
     .homebase/config.yaml (already inherited from any parent).
     """
     cls = get_source_class(source_key)
-    merged: dict[str, Any] = {}
-    for key, default in cls.default_options.items():
-        merged[key] = default
+    merged: dict[str, Any] = dict(cls.default_options)
     if source_cfg:
-        for key, value in source_cfg.items():
-            if key in ("parent", "config"):
-                continue
-            # YAML convention is kebab-case; map to the snake_case
-            # option name used by argparse + the resolver.
-            normalised = key.replace("-", "_")
-            merged[normalised] = value
-
-    # CLI overrides (None = "not set" / fall through)
-    for opt in _BOOL_OPTS:
-        cli_value = getattr(cli_ns, opt, None)
-        coerced = _coerce_bool(cli_value)
-        if coerced is not None:
-            merged[opt] = coerced
-    # --cd is an alias for --open
-    cd_value = _coerce_bool(getattr(cli_ns, "cd", None))
-    if cd_value is not None:
-        merged["open"] = cd_value
-    if getattr(cli_ns, "template", "") != "":
-        merged["template"] = str(cli_ns.template)
-    cli_from = getattr(cli_ns, "from_project", "") or ""
-    if cli_from:
-        merged["from_project"] = str(cli_from)
-    cli_tags = getattr(cli_ns, "tag", None) or []
-    if cli_tags:
-        existing = merged.get("tags") or []
-        merged["tags"] = list(existing) + [str(t) for t in cli_tags]
-    cli_post = getattr(cli_ns, "post", None) or []
-    if cli_post:
-        existing = merged.get("post") or []
-        merged["post"] = list(existing) + [str(c) for c in cli_post]
-
+        _merge_source_cfg(merged, source_cfg)
+    _apply_cli_bool_overrides(merged, cli_ns)
+    _apply_cli_scalar_overrides(merged, cli_ns)
+    _apply_cli_list_overrides(merged, cli_ns)
     return NewOptions(
         tmp=bool(merged.get("tmp", False)),
         timestamp=bool(merged.get("timestamp", False)),

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterator
 
@@ -142,6 +143,129 @@ def _format_summary(items: list[str]) -> str:
     return ", ".join(items[:_REPORT_LIMIT]) + f", +{len(items) - _REPORT_LIMIT} more"
 
 
+@dataclass
+class _LinkClassification:
+    linked: list[str] = field(default_factory=list)
+    existing_file: list[str] = field(default_factory=list)
+    other_symlink: list[str] = field(default_factory=list)
+    conflict: list[str] = field(default_factory=list)
+    unsafe: list[str] = field(default_factory=list)
+
+
+def _link_dir_entry(
+    ctx: HookContext,
+    tag: str,
+    rel: Path,
+    dest: Path,
+    res: _LinkClassification,
+    *,
+    dry_run: bool,
+) -> None:
+    if dest.is_symlink() or (dest.exists() and not dest.is_dir()):
+        res.conflict.append(str(rel))
+        return
+    if dest.exists():
+        return
+    if dry_run:
+        return
+    try:
+        dest.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        ctx.notify(
+            f"tag-files [{tag}]: mkdir failed for {rel}: {exc}", "warn"
+        )
+
+
+def _link_file_entry(
+    ctx: HookContext,
+    project: Path,
+    tag: str,
+    src_root: Path,
+    rel: Path,
+    dest: Path,
+    res: _LinkClassification,
+    *,
+    dry_run: bool,
+) -> None:
+    expected = _expected_target(src_root, rel)
+    if dest.is_symlink():
+        if _symlink_target(dest) == expected:
+            return
+        res.other_symlink.append(str(rel))
+        return
+    if dest.exists():
+        res.existing_file.append(str(rel))
+        return
+    if dry_run:
+        res.linked.append(str(rel))
+        return
+    try:
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        os.symlink(expected, dest)
+        res.linked.append(str(rel))
+        ctx.add_event(
+            project,
+            "tag_files_linked",
+            {"tag": tag, "rel": str(rel), "target": expected},
+        )
+    except OSError as exc:
+        ctx.notify(
+            f"tag-files [{tag}]: symlink failed for {rel}: {exc}", "warn"
+        )
+
+
+def _classify_and_link(
+    ctx: HookContext,
+    project: Path,
+    tag: str,
+    src_root: Path,
+    *,
+    dry_run: bool,
+) -> _LinkClassification:
+    res = _LinkClassification()
+    for rel, kind in _iter_entries(src_root):
+        dest = _safe_dest(project, rel)
+        if dest is None:
+            res.unsafe.append(str(rel))
+            continue
+        if kind == "dir":
+            _link_dir_entry(ctx, tag, rel, dest, res, dry_run=dry_run)
+        else:
+            _link_file_entry(
+                ctx, project, tag, src_root, rel, dest, res, dry_run=dry_run
+            )
+    return res
+
+
+def _notify_link_skips(
+    ctx: HookContext, tag: str, res: _LinkClassification
+) -> None:
+    if res.existing_file:
+        ctx.notify(
+            f"tag-files [{tag}]: real file in the way, kept user's: "
+            f"{_format_summary(res.existing_file)}",
+            "warn",
+        )
+    if res.other_symlink:
+        ctx.notify(
+            f"tag-files [{tag}]: existing symlink points elsewhere, kept: "
+            f"{_format_summary(res.other_symlink)}",
+            "warn",
+        )
+    if res.conflict:
+        ctx.notify(
+            f"tag-files [{tag}]: type conflict, skipped: "
+            f"{_format_summary(res.conflict)}",
+            "warn",
+        )
+    if res.unsafe:
+        ctx.notify(
+            f"tag-files [{tag}]: unsafe path, skipped: "
+            f"{_format_summary(res.unsafe)}",
+            "error",
+        )
+
+
 def _link_tag_files(
     ctx: HookContext,
     project: Path,
@@ -153,99 +277,21 @@ def _link_tag_files(
     if not project.is_dir() or project.is_symlink():
         ctx.notify(f"tag-files [{tag}]: project missing, skipped", "warn")
         return
-
-    linked: list[str] = []
-    skipped_existing_file: list[str] = []
-    skipped_other_symlink: list[str] = []
-    skipped_conflict: list[str] = []
-    skipped_unsafe: list[str] = []
-
-    for rel, kind in _iter_entries(src_root):
-        dest = _safe_dest(project, rel)
-        if dest is None:
-            skipped_unsafe.append(str(rel))
-            continue
-
-        if kind == "dir":
-            if dest.is_symlink() or (dest.exists() and not dest.is_dir()):
-                skipped_conflict.append(str(rel))
-                continue
-            if dest.exists():
-                continue
-            if not dry_run:
-                try:
-                    dest.mkdir(parents=True, exist_ok=True)
-                except OSError as exc:
-                    ctx.notify(f"tag-files [{tag}]: mkdir failed for {rel}: {exc}", "warn")
-            continue
-
-        expected = _expected_target(src_root, rel)
-        if dest.is_symlink():
-            if _symlink_target(dest) == expected:
-                continue
-            skipped_other_symlink.append(str(rel))
-            continue
-        if dest.exists():
-            skipped_existing_file.append(str(rel))
-            continue
-
-        if dry_run:
-            linked.append(str(rel))
-            continue
-
-        try:
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            os.symlink(expected, dest)
-            linked.append(str(rel))
-            ctx.add_event(
-                project,
-                "tag_files_linked",
-                {"tag": tag, "rel": str(rel), "target": expected},
-            )
-        except OSError as exc:
-            ctx.notify(f"tag-files [{tag}]: symlink failed for {rel}: {exc}", "warn")
-
-    if skipped_existing_file:
-        ctx.notify(
-            f"tag-files [{tag}]: real file in the way, kept user's: "
-            f"{_format_summary(skipped_existing_file)}",
-            "warn",
-        )
-    if skipped_other_symlink:
-        ctx.notify(
-            f"tag-files [{tag}]: existing symlink points elsewhere, kept: "
-            f"{_format_summary(skipped_other_symlink)}",
-            "warn",
-        )
-    if skipped_conflict:
-        ctx.notify(
-            f"tag-files [{tag}]: type conflict, skipped: "
-            f"{_format_summary(skipped_conflict)}",
-            "warn",
-        )
-    if skipped_unsafe:
-        ctx.notify(
-            f"tag-files [{tag}]: unsafe path, skipped: "
-            f"{_format_summary(skipped_unsafe)}",
-            "error",
-        )
-    if linked:
+    res = _classify_and_link(ctx, project, tag, src_root, dry_run=dry_run)
+    _notify_link_skips(ctx, tag, res)
+    if res.linked:
         prefix = "would link" if dry_run else "linked"
-        ctx.status_update(f"tag-files [{tag}]: {prefix} {len(linked)} file(s)", "info")
+        ctx.status_update(
+            f"tag-files [{tag}]: {prefix} {len(res.linked)} file(s)", "info"
+        )
 
 
-def _unlink_tag_files(
-    ctx: HookContext,
+def _build_unlink_candidates(
+    src_root: Path | None,
     project: Path,
     tag: str,
     root_dir: Path,
-    src_root: Path | None,
-    *,
-    dry_run: bool,
-) -> None:
-    if not project.is_dir() or project.is_symlink():
-        return
-
+) -> tuple[dict[str, str], list[Path]]:
     candidates: dict[str, str] = {}
     dirs_from_source: list[Path] = []
     if src_root is not None:
@@ -254,45 +300,65 @@ def _unlink_tag_files(
                 candidates[str(rel)] = _expected_target(src_root, rel)
             elif kind == "dir":
                 dirs_from_source.append(rel)
-
     known = _last_known_links(project, root_dir)
     for rel_str, info in known.items():
         if info.get("tag") != tag:
             continue
         candidates.setdefault(rel_str, info["target"])
+    return candidates, dirs_from_source
 
-    removed: list[str] = []
-    skipped_not_link: list[str] = []
-    skipped_other_target: list[str] = []
-    skipped_unsafe: list[str] = []
 
+@dataclass
+class _UnlinkClassification:
+    removed: list[str] = field(default_factory=list)
+    not_link: list[str] = field(default_factory=list)
+    other_target: list[str] = field(default_factory=list)
+    unsafe: list[str] = field(default_factory=list)
+
+
+def _classify_and_unlink(
+    ctx: HookContext,
+    project: Path,
+    tag: str,
+    candidates: dict[str, str],
+    *,
+    dry_run: bool,
+) -> _UnlinkClassification:
+    res = _UnlinkClassification()
     for rel_str, expected in sorted(candidates.items()):
         rel = Path(rel_str)
         dest = _safe_dest(project, rel)
         if dest is None:
-            skipped_unsafe.append(rel_str)
+            res.unsafe.append(rel_str)
             continue
         if not dest.is_symlink():
             if dest.exists():
-                skipped_not_link.append(rel_str)
+                res.not_link.append(rel_str)
             continue
         if _symlink_target(dest) != expected:
-            skipped_other_target.append(rel_str)
+            res.other_target.append(rel_str)
             continue
         if dry_run:
-            removed.append(rel_str)
+            res.removed.append(rel_str)
             continue
         try:
             dest.unlink()
-            removed.append(rel_str)
+            res.removed.append(rel_str)
             ctx.add_event(
                 project,
                 "tag_files_unlinked",
                 {"tag": tag, "rel": rel_str, "target": expected},
             )
         except OSError as exc:
-            ctx.notify(f"tag-files [{tag}]: unlink failed for {rel_str}: {exc}", "warn")
+            ctx.notify(
+                f"tag-files [{tag}]: unlink failed for {rel_str}: {exc}", "warn"
+            )
+    return res
 
+
+def _prune_source_dirs(
+    project: Path, dirs_from_source: list[Path], *, dry_run: bool
+) -> None:
     for rel in sorted(dirs_from_source, key=lambda p: len(p.parts), reverse=True):
         dest = _safe_dest(project, rel)
         if dest is None:
@@ -313,30 +379,54 @@ def _unlink_tag_files(
         except OSError:
             pass
 
-    if not dry_run and removed:
-        _prune_empty_dirs(project, removed)
 
-    if skipped_not_link:
+def _notify_unlink_skips(
+    ctx: HookContext, tag: str, res: _UnlinkClassification
+) -> None:
+    if res.not_link:
         ctx.notify(
             f"tag-files [{tag}]: replaced by real file, kept: "
-            f"{_format_summary(skipped_not_link)}",
+            f"{_format_summary(res.not_link)}",
             "warn",
         )
-    if skipped_other_target:
+    if res.other_target:
         ctx.notify(
             f"tag-files [{tag}]: symlink points elsewhere, kept: "
-            f"{_format_summary(skipped_other_target)}",
+            f"{_format_summary(res.other_target)}",
             "warn",
         )
-    if skipped_unsafe:
+    if res.unsafe:
         ctx.notify(
             f"tag-files [{tag}]: unsafe path, skipped: "
-            f"{_format_summary(skipped_unsafe)}",
+            f"{_format_summary(res.unsafe)}",
             "error",
         )
-    if removed:
+
+
+def _unlink_tag_files(
+    ctx: HookContext,
+    project: Path,
+    tag: str,
+    root_dir: Path,
+    src_root: Path | None,
+    *,
+    dry_run: bool,
+) -> None:
+    if not project.is_dir() or project.is_symlink():
+        return
+    candidates, dirs_from_source = _build_unlink_candidates(
+        src_root, project, tag, root_dir
+    )
+    res = _classify_and_unlink(ctx, project, tag, candidates, dry_run=dry_run)
+    _prune_source_dirs(project, dirs_from_source, dry_run=dry_run)
+    if not dry_run and res.removed:
+        _prune_empty_dirs(project, res.removed)
+    _notify_unlink_skips(ctx, tag, res)
+    if res.removed:
         prefix = "would unlink" if dry_run else "unlinked"
-        ctx.status_update(f"tag-files [{tag}]: {prefix} {len(removed)} file(s)", "info")
+        ctx.status_update(
+            f"tag-files [{tag}]: {prefix} {len(res.removed)} file(s)", "info"
+        )
 
 
 def refresh(ctx: HookContext) -> None:

@@ -188,6 +188,106 @@ def resolve_named_filters_for_display(
     return " ".join(parts)
 
 
+def _as_nonneg_int(value: object, default: int = 0) -> int:
+    try:
+        n = int(value)
+    except (TypeError, ValueError):
+        return default
+    return n if n >= 0 else default
+
+
+def _str_or_default(state: dict, key: str, default: str) -> str:
+    return str(state.get(key, default)).strip() or default
+
+
+def _build_initial_ui_state(
+    state: dict,
+    *,
+    state_key_side_main: str,
+    state_key_side_selected: str,
+    state_key_side_info: str,
+    state_key_side_settings: str,
+    state_key_hotbar_selected_index: str,
+    side_tab_selected_default: str,
+    side_tab_overview_default: str,
+    side_tab_events_default: str,
+    side_tab_table_default: str,
+) -> dict[str, object]:
+    return {
+        "view": str(state.get("view", "active")).strip() or "active",
+        "sort": str(state.get("sort", "last")).strip() or "last",
+        "query": str(state.get("query", "")).strip(),
+        state_key_side_main: _str_or_default(
+            state, state_key_side_main, side_tab_selected_default
+        ),
+        state_key_side_selected: _str_or_default(
+            state, state_key_side_selected, side_tab_overview_default
+        ),
+        state_key_side_info: _str_or_default(
+            state, state_key_side_info, side_tab_events_default
+        ),
+        state_key_side_settings: _str_or_default(
+            state, state_key_side_settings, side_tab_table_default
+        ),
+        "selected_path": str(state.get("selected_path", "")).strip(),
+        "cursor_row": _as_nonneg_int(state.get("cursor_row", 0)),
+        "scroll_y": _as_nonneg_int(state.get("scroll_y", 0)),
+        "selected_path_active": str(
+            state.get("selected_path_active", "")
+        ).strip(),
+        "selected_path_archive": str(
+            state.get("selected_path_archive", "")
+        ).strip(),
+        "cursor_row_active": _as_nonneg_int(state.get("cursor_row_active", 0)),
+        "cursor_row_archive": _as_nonneg_int(state.get("cursor_row_archive", 0)),
+        "scroll_y_active": _as_nonneg_int(state.get("scroll_y_active", 0)),
+        "scroll_y_archive": _as_nonneg_int(state.get("scroll_y_archive", 0)),
+        "row_offset_active": _as_nonneg_int(state.get("row_offset_active", 0)),
+        "row_offset_archive": _as_nonneg_int(
+            state.get("row_offset_archive", 0)
+        ),
+        state_key_hotbar_selected_index: _as_nonneg_int(
+            state.get(state_key_hotbar_selected_index, 0)
+        ),
+    }
+
+
+def _clamp_tab_keys(
+    out: dict[str, object],
+    *,
+    state_key_side_main: str,
+    state_key_side_selected: str,
+    state_key_side_info: str,
+    state_key_side_settings: str,
+    side_tab_selected_default: str,
+    side_tab_overview_default: str,
+    side_tab_events_default: str,
+    side_tab_table_default: str,
+    side_top_tabs: list[tuple[str, str]],
+    side_child_tabs: dict[str, list[tuple[str, str]]],
+) -> None:
+    top_keys = [key for key, _label in side_top_tabs]
+    selected_keys = [key for key, _label in side_child_tabs.get("selected", [])]
+    info_keys = [key for key, _label in side_child_tabs.get("info", [])]
+    settings_keys = [key for key, _label in side_child_tabs.get("settings", [])]
+    if out[state_key_side_main] not in set(top_keys):
+        out[state_key_side_main] = (
+            top_keys[0] if top_keys else side_tab_selected_default
+        )
+    if out[state_key_side_selected] not in set(selected_keys):
+        out[state_key_side_selected] = (
+            selected_keys[0] if selected_keys else side_tab_overview_default
+        )
+    if out[state_key_side_info] not in set(info_keys):
+        out[state_key_side_info] = (
+            info_keys[0] if info_keys else side_tab_events_default
+        )
+    if out[state_key_side_settings] not in set(settings_keys):
+        out[state_key_side_settings] = (
+            settings_keys[0] if settings_keys else side_tab_table_default
+        )
+
+
 def load_ui_state_from_data(
     data: object,
     *,
@@ -207,67 +307,35 @@ def load_ui_state_from_data(
     state = data.get("state", {}) if isinstance(data, dict) else {}
     if not isinstance(state, dict):
         state = {}
-
-    def as_nonneg_int(value: object, default: int = 0) -> int:
-        try:
-            n = int(value)
-        except (TypeError, ValueError):
-            return default
-        return n if n >= 0 else default
-
-    out: dict[str, object] = {
-        "view": str(state.get("view", "active")).strip() or "active",
-        "sort": str(state.get("sort", "last")).strip() or "last",
-        "query": str(state.get("query", "")).strip(),
-        state_key_side_main: str(state.get(state_key_side_main, side_tab_selected_default)).strip()
-        or side_tab_selected_default,
-        state_key_side_selected: str(
-            state.get(state_key_side_selected, side_tab_overview_default)
-        ).strip()
-        or side_tab_overview_default,
-        state_key_side_info: str(state.get(state_key_side_info, side_tab_events_default)).strip()
-        or side_tab_events_default,
-        state_key_side_settings: str(
-            state.get(state_key_side_settings, side_tab_table_default)
-        ).strip()
-        or side_tab_table_default,
-        "selected_path": str(state.get("selected_path", "")).strip(),
-        "cursor_row": as_nonneg_int(state.get("cursor_row", 0), 0),
-        "scroll_y": as_nonneg_int(state.get("scroll_y", 0), 0),
-        "selected_path_active": str(state.get("selected_path_active", "")).strip(),
-        "selected_path_archive": str(state.get("selected_path_archive", "")).strip(),
-        "cursor_row_active": as_nonneg_int(state.get("cursor_row_active", 0), 0),
-        "cursor_row_archive": as_nonneg_int(state.get("cursor_row_archive", 0), 0),
-        "scroll_y_active": as_nonneg_int(state.get("scroll_y_active", 0), 0),
-        "scroll_y_archive": as_nonneg_int(state.get("scroll_y_archive", 0), 0),
-        "row_offset_active": as_nonneg_int(state.get("row_offset_active", 0), 0),
-        "row_offset_archive": as_nonneg_int(state.get("row_offset_archive", 0), 0),
-        state_key_hotbar_selected_index: as_nonneg_int(
-            state.get(state_key_hotbar_selected_index, 0),
-            0,
-        ),
-    }
+    out = _build_initial_ui_state(
+        state,
+        state_key_side_main=state_key_side_main,
+        state_key_side_selected=state_key_side_selected,
+        state_key_side_info=state_key_side_info,
+        state_key_side_settings=state_key_side_settings,
+        state_key_hotbar_selected_index=state_key_hotbar_selected_index,
+        side_tab_selected_default=side_tab_selected_default,
+        side_tab_overview_default=side_tab_overview_default,
+        side_tab_events_default=side_tab_events_default,
+        side_tab_table_default=side_tab_table_default,
+    )
     if out["view"] not in {"active", "archive"}:
         out["view"] = "active"
     if out["sort"] not in sort_mode_ids:
         out["sort"] = "last"
-
-    top_keys = [key for key, _label in side_top_tabs]
-    selected_keys = [key for key, _label in side_child_tabs.get("selected", [])]
-    info_keys = [key for key, _label in side_child_tabs.get("info", [])]
-    settings_keys = [key for key, _label in side_child_tabs.get("settings", [])]
-
-    if out[state_key_side_main] not in set(top_keys):
-        out[state_key_side_main] = top_keys[0] if top_keys else side_tab_selected_default
-    if out[state_key_side_selected] not in set(selected_keys):
-        out[state_key_side_selected] = (
-            selected_keys[0] if selected_keys else side_tab_overview_default
-        )
-    if out[state_key_side_info] not in set(info_keys):
-        out[state_key_side_info] = info_keys[0] if info_keys else side_tab_events_default
-    if out[state_key_side_settings] not in set(settings_keys):
-        out[state_key_side_settings] = settings_keys[0] if settings_keys else side_tab_table_default
-
+    _clamp_tab_keys(
+        out,
+        state_key_side_main=state_key_side_main,
+        state_key_side_selected=state_key_side_selected,
+        state_key_side_info=state_key_side_info,
+        state_key_side_settings=state_key_side_settings,
+        side_tab_selected_default=side_tab_selected_default,
+        side_tab_overview_default=side_tab_overview_default,
+        side_tab_events_default=side_tab_events_default,
+        side_tab_table_default=side_tab_table_default,
+        side_top_tabs=side_top_tabs,
+        side_child_tabs=side_child_tabs,
+    )
     if not out["selected_path_active"] and out["view"] == "active":
         out["selected_path_active"] = out["selected_path"]
     if not out["selected_path_archive"] and out["view"] == "archive":

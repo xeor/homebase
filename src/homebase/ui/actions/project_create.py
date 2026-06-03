@@ -105,6 +105,125 @@ def _payload_to_namespace(payload: dict[str, object]) -> Namespace:
     )
 
 
+def _cancel_new_project(app: Any, reason: str) -> None:
+    app._log(reason, "warn")
+    if app.start_new_mode:
+        app.exit(("quit", None, []))
+    app._refresh_side()
+
+
+def _pre_hook_change(
+    payload: dict[str, object],
+    ns: Namespace,
+    raw_input: str | None,
+    explicit_name: str | None,
+    after_create: str,
+) -> dict[str, object]:
+    return {
+        "source": str(ns.mode or ns.child_key or "auto"),
+        "template": (
+            str(ns.template).strip() if str(ns.template).strip() else None
+        ),
+        "initial_tags": [
+            str(tag) for tag in (payload.get("tags") or []) if str(tag).strip()
+        ],
+        "post_commands": [
+            str(cmd)
+            for cmd in (payload.get("post_commands") or [])
+            if str(cmd).strip()
+        ],
+        "after_create": after_create,
+        "inputs": {
+            "raw_input": raw_input,
+            "explicit_name": explicit_name,
+            "mode": ns.mode,
+            "child_key": ns.child_key,
+            "tmp": ns.tmp,
+            "timestamp": ns.timestamp,
+            "ts_name": ns.ts_name,
+            "alpha_name": ns.alpha_name,
+            "ask_name": ns.ask_name,
+            "ask_source": ns.ask_source,
+            "archive": ns.archive,
+            "multi": ns.multi,
+        },
+    }
+
+
+def _run_plan_and_apply(
+    app: Any,
+    ns: Namespace,
+    raw_input: str | None,
+    explicit_name: str | None,
+    sources_cfg,
+    ctx: NewContext,
+) -> tuple[int, object | None, object | None, str]:
+    """Returns (rc, result, plan_obj, captured_err_text)."""
+    captured_err = io.StringIO()
+    app._busy_start("creating project")
+    plan_obj = None
+    rc = 1
+    result = None
+    try:
+        with contextlib.redirect_stderr(captured_err):
+            rc, result, plan_obj = plan_and_apply_one(
+                ns, raw_input, explicit_name, sources_cfg, ctx,
+            )
+    except (OSError, ValueError, subprocess.SubprocessError) as exc:
+        app._show_runtime_error("new project", exc)
+        rc, result = 1, None
+    finally:
+        if app._busy_depth > 0:
+            app._busy_stop()
+    return rc, result, plan_obj, captured_err.getvalue().strip()
+
+
+def _handle_create_open(
+    app: Any,
+    *,
+    base_dir: Path,
+    created: Path,
+    payload: dict[str, object],
+    after_create: str,
+    ns: Namespace,
+    raw_input: str | None,
+    explicit_name: str | None,
+    plan_obj: object | None,
+) -> None:
+    cache_upsert_project_fast(base_dir, created)
+    _dispatch_new_project_hook(
+        app,
+        base_dir=base_dir,
+        created=created,
+        payload=payload,
+        after_create=after_create,
+        ns=ns,
+        raw_input=raw_input,
+        explicit_name=explicit_name,
+        plan_obj=plan_obj,
+    )
+    app._log(f"new project created: {created.name}", "info")
+    app.exit(("open", created, []))
+
+
+def _refresh_after_create(app: Any, created: Path) -> None:
+    try:
+        new_row = project_row(created, archived=False)
+        app._upsert_row_local(new_row)
+        app._touch_rows_cache([new_row])
+    except (
+        OSError,
+        ValueError,
+        TypeError,
+        subprocess.SubprocessError,
+        sqlite3.Error,
+    ):
+        app._refresh_data()
+    app.selected_path = created
+    app.multi_selected.clear()
+    app._refresh_table()
+
+
 def on_new_project_submit(
     app: Any,
     payload: dict[str, object] | None,
@@ -112,10 +231,7 @@ def on_new_project_submit(
     base_dir: Path,
 ) -> None:
     if payload is None:
-        app._log("new project cancelled", "warn")
-        if app.start_new_mode:
-            app.exit(("quit", None, []))
-        app._refresh_side()
+        _cancel_new_project(app, "new project cancelled")
         return
 
     try:
@@ -132,71 +248,40 @@ def on_new_project_submit(
     raw_input = ns.inputs[0] if ns.inputs else None
     explicit_name = ns.inputs[1] if len(ns.inputs) > 1 else None
 
-    after_create = str(payload.get("after_create", "open") or "open").strip() or "open"
+    after_create = (
+        str(payload.get("after_create", "open") or "open").strip() or "open"
+    )
     pre_outcome = hooks_runtime.dispatch_pre(
         app,
         event="new_project",
         targets=[],
-        change={
-            "source": str(ns.mode or ns.child_key or "auto"),
-            "template": (str(ns.template).strip() if str(ns.template).strip() else None),
-            "initial_tags": [str(tag) for tag in (payload.get("tags") or []) if str(tag).strip()],
-            "post_commands": [str(cmd) for cmd in (payload.get("post_commands") or []) if str(cmd).strip()],
-            "after_create": after_create,
-            "inputs": {
-                "raw_input": raw_input,
-                "explicit_name": explicit_name,
-                "mode": ns.mode,
-                "child_key": ns.child_key,
-                "tmp": ns.tmp,
-                "timestamp": ns.timestamp,
-                "ts_name": ns.ts_name,
-                "alpha_name": ns.alpha_name,
-                "ask_name": ns.ask_name,
-                "ask_source": ns.ask_source,
-                "archive": ns.archive,
-                "multi": ns.multi,
-            },
-        },
+        change=_pre_hook_change(payload, ns, raw_input, explicit_name, after_create),
         view=app.view_mode,
     )
     if pre_outcome.cancelled:
-        app._log(f"new project cancelled by hook: {pre_outcome.reason}", "warn")
-        if app.start_new_mode:
-            app.exit(("quit", None, []))
-        app._refresh_side()
+        _cancel_new_project(
+            app, f"new project cancelled by hook: {pre_outcome.reason}"
+        )
         return
     _apply_pre_new_project_mutations(
-        payload=payload,
-        ns=ns,
-        change=pre_outcome.change,
+        payload=payload, ns=ns, change=pre_outcome.change
     )
     raw_input = ns.inputs[0] if ns.inputs else None
     explicit_name = ns.inputs[1] if len(ns.inputs) > 1 else None
-    after_create = str(pre_outcome.change.get("after_create", after_create) or after_create)
+    after_create = str(
+        pre_outcome.change.get("after_create", after_create) or after_create
+    )
 
     # ``plan_and_apply_one`` writes the actual failure reason to
     # stderr via ``print(..., file=sys.stderr)``. Inside the TUI that
     # goes to the void — we capture it so we can surface it to the
     # user after the modal closes (see the ``last_new_*`` attributes
     # below + ``run_textual_ui`` in ui/app.py which prints them).
-    captured_err = io.StringIO()
-    app._busy_start("creating project")
-    plan_obj = None
-    try:
-        with contextlib.redirect_stderr(captured_err):
-            rc, result, plan_obj = plan_and_apply_one(
-                ns, raw_input, explicit_name, sources_cfg, ctx,
-            )
-    except (OSError, ValueError, subprocess.SubprocessError) as exc:
-        app._show_runtime_error("new project", exc)
-        rc, result = 1, None
-    finally:
-        if app._busy_depth > 0:
-            app._busy_stop()
+    rc, result, plan_obj, err_text = _run_plan_and_apply(
+        app, ns, raw_input, explicit_name, sources_cfg, ctx
+    )
 
     if rc != 0 or result is None:
-        err_text = captured_err.getvalue().strip()
         app.last_new_error = err_text or "new project: unknown failure"
         app._log(f"new project failed: {err_text or 'see terminal'}", "error")
         if app.start_new_mode:
@@ -205,14 +290,12 @@ def on_new_project_submit(
         return
 
     created = result.target
-    if plan_obj is not None:
-        app.last_new_summary = format_summary(plan_obj)
-    else:
-        app.last_new_summary = f"created: {created}"
+    app.last_new_summary = (
+        format_summary(plan_obj) if plan_obj is not None else f"created: {created}"
+    )
 
     if after_create == "open" or app.start_new_mode:
-        cache_upsert_project_fast(base_dir, created)
-        _dispatch_new_project_hook(
+        _handle_create_open(
             app,
             base_dir=base_dir,
             created=created,
@@ -223,20 +306,9 @@ def on_new_project_submit(
             explicit_name=explicit_name,
             plan_obj=plan_obj,
         )
-        app._log(f"new project created: {created.name}", "info")
-        app.exit(("open", created, []))
         return
 
-    try:
-        new_row = project_row(created, archived=False)
-        app._upsert_row_local(new_row)
-        app._touch_rows_cache([new_row])
-    except (OSError, ValueError, TypeError, subprocess.SubprocessError, sqlite3.Error):
-        app._refresh_data()
-
-    app.selected_path = created
-    app.multi_selected.clear()
-    app._refresh_table()
+    _refresh_after_create(app, created)
     _dispatch_new_project_hook(
         app,
         base_dir=base_dir,

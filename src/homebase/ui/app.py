@@ -273,6 +273,73 @@ def _build_view_config_default() -> dict[str, dict[str, list[tuple[str, str]]]]:
 _VIEW_CONFIG_DEFAULT: dict[str, dict[str, list[tuple[str, str]]]] = _build_view_config_default()
 
 
+def _collect_hook_refresh_candidates(
+    rows: list,
+    now: float,
+    hook_specs: dict,
+    view_mode: str,
+    hook_refresh_last: dict,
+) -> list[tuple[object, object]]:
+    candidates: list[tuple[object, object]] = []
+    for (timing, _event), specs in hook_specs.items():
+        if timing != "post":
+            continue
+        for spec in specs:
+            if not getattr(spec, "enabled", False):
+                continue
+            if not getattr(spec, "refresh_enabled", False):
+                continue
+            if spec.views and view_mode not in spec.views:
+                continue
+            min_interval = float(getattr(spec, "refresh_min_interval_s", 60.0))
+            for row in rows:
+                if spec.event == "tag_change" and not row.tags:
+                    continue
+                last = hook_refresh_last.get((row.path, spec.name), 0.0)
+                if last + min_interval > now:
+                    continue
+                candidates.append((row, spec))
+    return candidates
+
+
+def _parse_style_rule(raw_rule: object) -> dict[str, object] | None:
+    if not isinstance(raw_rule, dict):
+        return None
+    bg_color = str(raw_rule.get("bg_color", "")).strip()
+    fg_color = str(raw_rule.get("fg_color", "")).strip()
+    when = str(raw_rule.get("when", "")).strip()
+    bold = bool(raw_rule.get("bold", False))
+    underline = bool(raw_rule.get("underline", False))
+    italic = bool(raw_rule.get("italic", False))
+    if not when:
+        return None
+    if not bg_color and not fg_color and not (bold or underline or italic):
+        return None
+    rule: dict[str, object] = {"when": when}
+    if bg_color:
+        rule["bg_color"] = bg_color
+    if fg_color:
+        rule["fg_color"] = fg_color
+    if bold:
+        rule["bold"] = True
+    if underline:
+        rule["underline"] = True
+    if italic:
+        rule["italic"] = True
+    return rule
+
+
+def _parse_style_rules(raw_style: object) -> list[dict[str, object]]:
+    if not isinstance(raw_style, list) or not raw_style:
+        return []
+    out: list[dict[str, object]] = []
+    for raw_rule in raw_style:
+        rule = _parse_style_rule(raw_rule)
+        if rule is not None:
+            out.append(rule)
+    return out
+
+
 class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path | None, list[str]]]):
     COMMANDS = {get_homebase_system_commands_provider}
     CSS = """
@@ -1058,9 +1125,7 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
             side_child_tabs=SIDE_CHILD_TABS,
         )
 
-    def get_system_commands(self, screen) -> Iterable[SystemCommand]:
-        # Command palette includes tab navigation and currently valid actions.
-
+    def _yield_tab_commands(self) -> Iterable[SystemCommand]:
         for top_key, top_label in SIDE_TOP_TABS:
             command_id = f"tab:{top_key}"
             is_top_active = self.side_main_tab == top_key
@@ -1075,7 +1140,6 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
                 f"Go to main tab: {top_label} (id={command_id})",
                 lambda top=top_key: self._jump_to_side_tab(top),
             )
-
             for child_key, child_label in SIDE_CHILD_TABS.get(top_key, []):
                 command_id = f"tab:{top_key}/{child_key}"
                 is_active = (
@@ -1096,6 +1160,9 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
                     ),
                 )
 
+    def _collect_palette_actions(
+        self,
+    ) -> tuple[dict[str, list[tuple[str, str]]], set[str]]:
         grouped: dict[str, list[tuple[str, str]]] = {
             textual_ui_action_catalog.CATEGORY_NOTIFICATIONS: [],
             textual_ui_action_catalog.CATEGORY_TARGET: [],
@@ -1105,13 +1172,28 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
             grouped[textual_ui_action_catalog.CATEGORY_TARGET].append(
                 ("open_selected", "[white]Open selected (default)[/]")
             )
+        custom_list_action_ids: set[str] = {
+            action.id
+            for action in self.ctx.actions.values()
+            if action.source != "builtin" and action.kind == "filepicker"
+        }
+        for nid, nlabel in textual_ui_action_catalog.notification_actions(self):
+            grouped[textual_ui_action_catalog.CATEGORY_NOTIFICATIONS].append(
+                (nid, nlabel)
+            )
+        for action_id, label in self._valid_action_items():
+            cat = textual_ui_action_catalog.scope_for_action(self, action_id)
+            grouped[cat].append((action_id, label))
+        for action_id, label, cat in textual_ui_action_catalog.palette_only_extras(
+            self
+        ):
+            grouped[cat].append((action_id, label))
+        return grouped, custom_list_action_ids
 
-        custom_list_action_ids: set[str] = set()
-        for action in self.ctx.actions.values():
-            if action.source == "builtin":
-                continue
-            if action.kind == "filepicker":
-                custom_list_action_ids.add(action.id)
+    def get_system_commands(self, screen) -> Iterable[SystemCommand]:
+        # Command palette includes tab navigation and currently valid actions.
+        yield from self._yield_tab_commands()
+        grouped, custom_list_action_ids = self._collect_palette_actions()
 
         def _natural_key(text: str) -> tuple[object, ...]:
             parts = re.split(r"(\d+)", text.lower())
@@ -1122,14 +1204,6 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
                 else:
                     out.append(part)
             return tuple(out)
-
-        for nid, nlabel in textual_ui_action_catalog.notification_actions(self):
-            grouped[textual_ui_action_catalog.CATEGORY_NOTIFICATIONS].append((nid, nlabel))
-        for action_id, label in self._valid_action_items():
-            cat = textual_ui_action_catalog.scope_for_action(self, action_id)
-            grouped[cat].append((action_id, label))
-        for action_id, label, cat in textual_ui_action_catalog.palette_only_extras(self):
-            grouped[cat].append((action_id, label))
 
         scope_prefix_by_cat = {
             textual_ui_action_catalog.CATEGORY_NOTIFICATIONS: "[#FFD166]Action > Notifications[/]",
@@ -1149,16 +1223,21 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
                 ),
             ):
                 plain = self._label_plain(label)
-                if action_id in custom_list_action_ids and plain.endswith(" (filepicker)"):
+                if action_id in custom_list_action_ids and plain.endswith(
+                    " (filepicker)"
+                ):
                     plain = plain[: -len(" (filepicker)")]
                 scope_prefix = scope_prefix_by_cat[scope]
                 if action_id in custom_list_action_ids:
-                    scope_prefix = scope_prefix.replace("[/]", " (filepicker)[/]")
+                    scope_prefix = scope_prefix.replace(
+                        "[/]", " (filepicker)[/]"
+                    )
                 title = f"{scope_prefix}: {plain}"
                 starred = self._target_is_hotbar(f"action:{action_id}")
                 yield SystemCommand(
                     title + (_HOTBAR_PALETTE_TAG if starred else ""),
-                    f"{self._action_help_text(action_id, label)} (id=action:{action_id})",
+                    f"{self._action_help_text(action_id, label)} "
+                    f"(id=action:{action_id})",
                     (
                         self.action_open_selected
                         if action_id == "open_selected"
@@ -1192,36 +1271,9 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
             label = str(item.get("label", "")).strip()
             if label:
                 row["label"] = label
-            raw_style = item.get("style", [])
-            if isinstance(raw_style, list) and raw_style:
-                style_rows: list[dict[str, str]] = []
-                for raw_rule in raw_style:
-                    if not isinstance(raw_rule, dict):
-                        continue
-                    bg_color = str(raw_rule.get("bg_color", "")).strip()
-                    fg_color = str(raw_rule.get("fg_color", "")).strip()
-                    when = str(raw_rule.get("when", "")).strip()
-                    bold = bool(raw_rule.get("bold", False))
-                    underline = bool(raw_rule.get("underline", False))
-                    italic = bool(raw_rule.get("italic", False))
-                    if not when:
-                        continue
-                    if not bg_color and not fg_color and not (bold or underline or italic):
-                        continue
-                    style_rule: dict[str, object] = {"when": when}
-                    if bg_color:
-                        style_rule["bg_color"] = bg_color
-                    if fg_color:
-                        style_rule["fg_color"] = fg_color
-                    if bold:
-                        style_rule["bold"] = True
-                    if underline:
-                        style_rule["underline"] = True
-                    if italic:
-                        style_rule["italic"] = True
-                    style_rows.append(style_rule)
-                if style_rows:
-                    row["style"] = style_rows
+            style_rows = _parse_style_rules(item.get("style", []))
+            if style_rows:
+                row["style"] = style_rows
             bindings.append(row)
         for idx, (hotkey, entry) in enumerate(self.ctx.keys.items(), start=1):
             action_id = str(entry.get("action", "")).strip()
@@ -1251,40 +1303,16 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
                     "action": target,
                     **({"label": label} if label else {}),
                 }
-                raw_style = row.get("style", [])
-                if isinstance(raw_style, list) and raw_style:
-                    style_rows: list[dict[str, str]] = []
-                    for raw_rule in raw_style:
-                        if not isinstance(raw_rule, dict):
-                            continue
-                        bg_color = str(raw_rule.get("bg_color", "")).strip()
-                        fg_color = str(raw_rule.get("fg_color", "")).strip()
-                        when = str(raw_rule.get("when", "")).strip()
-                        bold = bool(raw_rule.get("bold", False))
-                        underline = bool(raw_rule.get("underline", False))
-                        italic = bool(raw_rule.get("italic", False))
-                        if not when:
-                            continue
-                        if not bg_color and not fg_color and not (bold or underline or italic):
-                            continue
-                        style_rule: dict[str, object] = {"when": when}
-                        if bg_color:
-                            style_rule["bg_color"] = bg_color
-                        if fg_color:
-                            style_rule["fg_color"] = fg_color
-                        if bold:
-                            style_rule["bold"] = True
-                        if underline:
-                            style_rule["underline"] = True
-                        if italic:
-                            style_rule["italic"] = True
-                        style_rows.append(style_rule)
-                    if style_rows:
-                        payload["style"] = style_rows
+                style_rows = _parse_style_rules(row.get("style", []))
+                if style_rows:
+                    payload["style"] = style_rows
                 hotbar_payload.append(payload)
             hotkey = str(row.get("hotkey", "")).strip().lower()
             if hotkey:
-                keys_payload[hotkey] = {"action": target, **({"label": label} if label else {})}
+                keys_payload[hotkey] = {
+                    "action": target,
+                    **({"label": label} if label else {}),
+                }
         save_hotbar(self.base_dir, hotbar_payload)
         save_keys(self.base_dir, keys_payload)
 
@@ -1934,39 +1962,33 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
         from ..hooks.refresh import dispatch_refresh_tui
         from ..hooks.snapshot import snapshot_target
 
-        rows = self.active_rows if self.view_mode == MODE_ACTIVE else self.archived_rows
+        rows = (
+            self.active_rows
+            if self.view_mode == MODE_ACTIVE
+            else self.archived_rows
+        )
         if not rows:
             return
         now = time.time()
-        candidates: list[tuple[object, object]] = []
-        for (timing, _event), specs in self.ctx.hook_specs.items():
-            if timing != "post":
-                continue
-            for spec in specs:
-                if not getattr(spec, "enabled", False):
-                    continue
-                if not getattr(spec, "refresh_enabled", False):
-                    continue
-                if spec.views and self.view_mode not in spec.views:
-                    continue
-                min_interval = float(getattr(spec, "refresh_min_interval_s", 60.0))
-                for row in rows:
-                    if spec.event == "tag_change" and not row.tags:
-                        continue
-                    last = self.hook_refresh_last.get((row.path, spec.name), 0.0)
-                    if last + min_interval > now:
-                        continue
-                    candidates.append((row, spec))
+        candidates = _collect_hook_refresh_candidates(
+            rows, now, self.ctx.hook_specs, self.view_mode, self.hook_refresh_last
+        )
         if not candidates:
             return
         batch_size = max(1, int(getattr(worker, "batch_size", 4)))
-        candidates.sort(key=lambda rs: self.hook_refresh_last.get((rs[0].path, rs[1].name), 0.0))
-        batch = candidates[:batch_size]
+        candidates.sort(
+            key=lambda rs: self.hook_refresh_last.get(
+                (rs[0].path, rs[1].name), 0.0
+            )
+        )
         grouped: dict[tuple[str, str], list[object]] = {}
-        for row, spec in batch:
+        for row, spec in candidates[:batch_size]:
             key = (spec.name, spec.event)
             grouped.setdefault(key, []).append(
-                snapshot_target(row, dict(row.base_meta if hasattr(row, "base_meta") else {}))
+                snapshot_target(
+                    row,
+                    dict(row.base_meta if hasattr(row, "base_meta") else {}),
+                )
             )
             self.hook_refresh_last[(row.path, spec.name)] = now
         for (spec_name, spec_event), targets in grouped.items():

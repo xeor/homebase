@@ -231,6 +231,73 @@ def run_filtered_metric_counts(run: dict[str, object], ignore_featuresets: set[s
     return total, kept
 
 
+def _positive_float(value: object) -> float | None:
+    if isinstance(value, (int, float)) and float(value) > 0:
+        return float(value)
+    return None
+
+
+def _compute_elapsed_vals(
+    runs: list[dict[str, object]],
+    totals: list[float | None],
+    filtered_totals: list[float | None],
+    *,
+    ignored: bool,
+) -> list[float | None]:
+    elapsed_vals: list[float | None] = []
+    for i, run in enumerate(runs):
+        if ignored:
+            elapsed_vals.append(_positive_float(filtered_totals[i]))
+            continue
+        positive = _positive_float(run.get("elapsed_s"))
+        elapsed_vals.append(positive if positive is not None else totals[i])
+    return elapsed_vals
+
+
+def _compute_cold_scores(
+    runs: list[dict[str, object]],
+    *,
+    score_ref_seconds: float,
+    score_ref_day_value: float,
+) -> list[float | None]:
+    out: list[float | None] = []
+    for run in runs:
+        cold_elapsed = _positive_float(run.get("cold_elapsed_s"))
+        if cold_elapsed is None:
+            out.append(None)
+            continue
+        out.append(
+            perf_score(
+                cold_elapsed,
+                score_ref_seconds=score_ref_seconds,
+                score_ref_day_value=score_ref_day_value,
+            )
+        )
+    return out
+
+
+def _compute_scores(
+    warm_scores: list[float | None],
+    cold_scores: list[float | None],
+    *,
+    ignored: bool,
+    warm_weight: float,
+    cold_weight: float,
+) -> list[float | None]:
+    if ignored:
+        return warm_scores
+    return [
+        composite_score(w, c, warm_weight=warm_weight, cold_weight=cold_weight)
+        for w, c in zip(warm_scores, cold_scores, strict=True)
+    ]
+
+
+def _delta_pct(score: float | None, prev_score: float | None) -> float | None:
+    if prev_score is None or prev_score <= 0 or score is None:
+        return None
+    return ((score - prev_score) / prev_score) * 100.0
+
+
 def score_runs(
     runs: list[dict[str, object]],
     *,
@@ -240,44 +307,34 @@ def score_runs(
     warm_weight: float,
     cold_weight: float,
 ) -> list[dict[str, object]]:
-    ignored = ignore_featuresets or set()
+    ignored = bool(ignore_featuresets)
+    ignored_set = ignore_featuresets or set()
     totals = [total_avg(run) for run in runs]
-    filtered_totals = [run_filtered_metric_total(run, ignored) if ignored else None for run in runs]
-    elapsed_vals: list[float | None] = []
-    for i, run in enumerate(runs):
-        if ignored:
-            raw = filtered_totals[i]
-            elapsed_vals.append(float(raw) if isinstance(raw, (int, float)) and float(raw) > 0 else None)
-        else:
-            raw = run.get("elapsed_s")
-            if isinstance(raw, (int, float)) and float(raw) > 0:
-                elapsed_vals.append(float(raw))
-            else:
-                elapsed_vals.append(totals[i])
+    filtered_totals = [
+        run_filtered_metric_total(run, ignored_set) if ignored else None
+        for run in runs
+    ]
+    elapsed_vals = _compute_elapsed_vals(runs, totals, filtered_totals, ignored=ignored)
     warm_scores = [
-        perf_score(value, score_ref_seconds=score_ref_seconds, score_ref_day_value=score_ref_day_value)
+        perf_score(
+            value,
+            score_ref_seconds=score_ref_seconds,
+            score_ref_day_value=score_ref_day_value,
+        )
         for value in elapsed_vals
     ]
-    cold_scores: list[float | None] = []
-    for run in runs:
-        cold_elapsed = run.get("cold_elapsed_s")
-        if isinstance(cold_elapsed, (int, float)) and float(cold_elapsed) > 0:
-            cold_scores.append(
-                perf_score(
-                    float(cold_elapsed),
-                    score_ref_seconds=score_ref_seconds,
-                    score_ref_day_value=score_ref_day_value,
-                )
-            )
-        else:
-            cold_scores.append(None)
-    if ignored:
-        scores = warm_scores
-    else:
-        scores = [
-            composite_score(w, c, warm_weight=warm_weight, cold_weight=cold_weight)
-            for w, c in zip(warm_scores, cold_scores, strict=True)
-        ]
+    cold_scores = _compute_cold_scores(
+        runs,
+        score_ref_seconds=score_ref_seconds,
+        score_ref_day_value=score_ref_day_value,
+    )
+    scores = _compute_scores(
+        warm_scores,
+        cold_scores,
+        ignored=ignored,
+        warm_weight=warm_weight,
+        cold_weight=cold_weight,
+    )
     valid_scores = [s for s in scores if s is not None and s >= 0]
     best_score = max(valid_scores) if valid_scores else 0.0
 
@@ -285,9 +342,7 @@ def score_runs(
     prev_score: float | None = None
     for i, run in enumerate(runs):
         score = scores[i]
-        delta_score_pct: float | None = None
-        if prev_score is not None and prev_score > 0 and score is not None:
-            delta_score_pct = ((score - prev_score) / prev_score) * 100.0
+        delta_score_pct = _delta_pct(score, prev_score)
         if score is not None and score >= 0:
             prev_score = score
         best_pct: float | None = None

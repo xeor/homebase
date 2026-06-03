@@ -49,6 +49,268 @@ def update_readme_tab_state(app: Any) -> None:
             pass
 
 
+def _format_message_line(app: Any, level: str, ts: str, msg: str, color_accent_hex: str) -> list[str]:
+    if level == "error":
+        prefix = "[bold red]ERR[/]"
+    elif level == "warn":
+        prefix = "[bold yellow]WRN[/]"
+    else:
+        prefix = f"[bold {color_accent_hex}]INF[/]"
+    msg_lines = str(msg).split("\n")
+    head = msg_lines[0]
+    out = [
+        f"[dim]{ts} ({fmt_age_short_from_iso(ts)})[/] {prefix} {app._esc(head)}"
+    ]
+    for cont in msg_lines[1:]:
+        out.append(f"[dim]    {app._esc(cont)}[/]")
+    return out
+
+
+def _info_messages_lines(app: Any, color_accent_hex: str) -> list[str]:
+    if not app.messages:
+        return ["[dim]no recent events[/]"]
+    out: list[str] = []
+    for level, ts, msg in app.messages:
+        out.extend(_format_message_line(app, level, ts, msg, color_accent_hex))
+    return out
+
+
+def _info_tab_lines(app: Any, color_accent_hex: str) -> list[str]:
+    info_tab = app.side_info_tab
+    if info_tab == "global":
+        return list(app._global_info_lines())
+    if info_tab == "stats":
+        return list(app._stats_and_context_lines())
+    if info_tab == "cheat":
+        cheat, _right = app._cheat_columns()
+        return [cheat]
+    if info_tab == "cache":
+        return [
+            *app._cache_info_lines(),
+            "[dim]----------------------------------------[/]",
+            "[cyan]managed processes[/]:",
+            *app._managed_process_info_lines(),
+        ]
+    if info_tab == "hooks":
+        return render_hooks_panel(app).splitlines()
+    return _info_messages_lines(app, color_accent_hex)
+
+
+def _settings_tab_lines(
+    app: Any,
+    *,
+    global_info: Static,
+    global_reload_btn: Button,
+    global_edit_btn: Button,
+) -> list[str]:
+    if app.side_settings_tab not in {"table", "table_config", "open", "global"}:
+        return ["[dim]no settings view[/]"]
+    app._refresh_settings_table()
+    if app.side_settings_tab == "global":
+        global_info.update(app._global_config_status_text())
+        global_reload_btn.display = True
+        global_edit_btn.display = True
+    return [f"[dim]{app.side_settings_tab} settings active[/]"]
+
+
+def _refresh_readme_tab(
+    app: Any,
+    readme_view: ReadmeMarkdownViewer,
+    readme_create_btn: Button,
+    readme_edit_btn: Button,
+) -> None:
+    readme_path = app._selected_readme_path()
+    if readme_path is None:
+        app.side_readme_source_path = None
+        app.side_readme_rendered_path = None
+        placeholder = "# README.md\n\nREADME.md not found."
+        if app.side_readme_rendered_text != placeholder:
+            readme_view.document.update(placeholder)
+            app.side_readme_rendered_text = placeholder
+        readme_create_btn.display = True
+        return
+    app.side_readme_source_path = readme_path
+    readme_create_btn.display = False
+    readme_edit_btn.display = True
+    try:
+        readme_text = readme_path.read_text()
+    except (OSError, UnicodeDecodeError) as exc:
+        app._show_runtime_error("load README.md", exc)
+        readme_text = "# README.md\n\nFailed to read README.md."
+    if (
+        app.side_readme_rendered_path != readme_path
+        or app.side_readme_rendered_text != readme_text
+    ):
+        readme_view.document.update(readme_text)
+        app.side_readme_rendered_path = readme_path
+        app.side_readme_rendered_text = readme_text
+
+
+def _notes_case_mismatch_text(notes_path: Path, actual_name: str) -> str:
+    return (
+        "# E — Notes case mismatch\n\n"
+        "**ERROR**: the note exists on disk but the filename "
+        "does not match the project name in case.\n\n"
+        f"- Expected note file: `{notes_path.name}`\n"
+        f"- On-disk file:       `{actual_name}`\n"
+        f"- Parent directory:   `{notes_path.parent}`\n\n"
+        "Opening this note would create a duplicate in case-"
+        "insensitive editors (e.g. Obsidian). Rename either "
+        "the project or the note so the case matches exactly, "
+        "then reopen this view."
+    )
+
+
+def _update_notes_view(
+    app: Any, notes_view: ReadmeMarkdownViewer, new_text: str, new_path: Path | None
+) -> None:
+    if (
+        app.side_notes_rendered_path != new_path
+        or app.side_notes_rendered_text != new_text
+    ):
+        notes_view.document.update(new_text)
+        app.side_notes_rendered_path = new_path
+        app.side_notes_rendered_text = new_text
+
+
+def _refresh_notes_for_existing_path(
+    app: Any,
+    notes_view: ReadmeMarkdownViewer,
+    notes_path: Path,
+    notes_create_btn: Button,
+    notes_open_btn: Button,
+) -> None:
+    try:
+        notes_exists = notes_path.is_file()
+    except OSError:
+        notes_exists = False
+    actual_name = existing_path_case_mismatch(notes_path) if notes_exists else None
+    if actual_name is not None:
+        notes_create_btn.display = False
+        notes_open_btn.display = False
+        _update_notes_view(
+            app, notes_view, _notes_case_mismatch_text(notes_path, actual_name), None
+        )
+        return
+    if not notes_exists:
+        notes_create_btn.display = True
+        notes_open_btn.display = False
+        _update_notes_view(app, notes_view, "# Notes\n\nNotes file not found.", None)
+        return
+    notes_create_btn.display = False
+    notes_open_btn.display = True
+    try:
+        notes_text = notes_path.read_text()
+    except (OSError, UnicodeDecodeError) as exc:
+        app._show_runtime_error("load notes markdown", exc)
+        notes_text = "# Notes\n\nFailed to read notes markdown."
+    _update_notes_view(app, notes_view, notes_text, notes_path)
+
+
+def _refresh_notes_tab(
+    app: Any,
+    notes_view: ReadmeMarkdownViewer,
+    notes_create_btn: Button,
+    notes_open_btn: Button,
+    *,
+    level_warn: str,
+) -> None:
+    selected_notes = app._selected_row()
+    try:
+        notes_create_btn.label = "Create note"
+        notes_open_btn.label = "Open note"
+    except WIDGET_API_ERRORS:
+        pass
+    if selected_notes is None:
+        app.side_notes_source_path = None
+        _update_notes_view(app, notes_view, "# Notes\n\nNo focused project.", None)
+        return
+    try:
+        notes_path = app._resolve_notes_path_for_row(selected_notes)
+    except (OSError, ValueError, RuntimeError) as exc:
+        app.side_notes_source_path = None
+        app._set_runtime_status(f"notes path error: {exc}", level_warn, ttl_s=6.0)
+        _update_notes_view(
+            app, notes_view, "# Notes\n\nNotes path is not configured correctly.", None
+        )
+        notes_create_btn.display = False
+        notes_open_btn.display = False
+        return
+    app.side_notes_source_path = notes_path
+    _refresh_notes_for_existing_path(
+        app, notes_view, notes_path, notes_create_btn, notes_open_btn
+    )
+
+
+def _selected_default_tab_lines(app: Any, selected: ProjectRow) -> list[str]:
+    wip_slots = {
+        row.path: i for i, row in enumerate(app._wip_rows_sorted()[:9], start=1)
+    }
+    cached_health: tuple[str, str] | None = None
+    cached_entry = app.metadata_health_cache.get(selected.path)
+    if cached_entry is not None:
+        cached_health = (str(cached_entry[0]), str(cached_entry[1]))
+    out = [
+        project_info_text(
+            selected,
+            wip_hotkey=wip_slots.get(selected.path),
+            include_meta_checks=not selected.archived,
+            cached_meta_health=cached_health,
+        )
+    ]
+    if selected.archived:
+        out.append(
+            "[cyan]preview[/]: [dim]disabled in archive overview for speed[/]"
+        )
+    else:
+        out.append("[cyan]preview[/]:")
+        out.extend(app._preview_entries(selected.path))
+    return out
+
+
+def _selected_tab_lines(
+    app: Any,
+    selected: ProjectRow,
+    *,
+    readme_view: ReadmeMarkdownViewer,
+    notes_view: ReadmeMarkdownViewer,
+    readme_create_btn: Button,
+    readme_edit_btn: Button,
+    notes_create_btn: Button,
+    notes_open_btn: Button,
+    level_warn: str,
+) -> list[str]:
+    if app.side_selected_tab in {"git", "files"}:
+        needs_refresh = (
+            app.side_detail_row != selected.path
+            or not app.side_git_text
+            or not app.side_files_text
+        )
+        if needs_refresh:
+            app._refresh_selected_details(log_success=False)
+    if app.side_selected_tab == "readme":
+        _refresh_readme_tab(app, readme_view, readme_create_btn, readme_edit_btn)
+        return []
+    if app.side_selected_tab == "notes":
+        _refresh_notes_tab(
+            app, notes_view, notes_create_btn, notes_open_btn, level_warn=level_warn
+        )
+        return []
+    readme_create_btn.display = False
+    if app.side_selected_tab == "git":
+        return [app.side_git_text or "[dim]git details not loaded yet[/]"]
+    if app.side_selected_tab == "events":
+        return [app._build_side_project_events_text(selected)]
+    if app.side_selected_tab == "files":
+        return [app.side_files_text or "[dim]file details not loaded yet[/]"]
+    return _selected_default_tab_lines(app, selected)
+
+
+def _hide_all_side_buttons(*buttons: Button) -> None:
+    for btn in buttons:
+        btn.display = False
+
+
 def refresh_side(app: Any, *, base_dir: Path, color_accent_hex: str, level_warn: str) -> None:
     side = app.query_one("#side_body", Static)
     readme_view = app.query_one("#side_readme", ReadmeMarkdownViewer)
@@ -60,206 +322,40 @@ def refresh_side(app: Any, *, base_dir: Path, color_accent_hex: str, level_warn:
     global_reload_btn = app.query_one("#side_global_config_reload", Button)
     global_edit_btn = app.query_one("#side_global_config_edit", Button)
     global_info = app.query_one("#side_global_info", Static)
-    readme_create_btn.display = False
-    readme_edit_btn.display = False
-    notes_create_btn.display = False
-    notes_open_btn.display = False
-    global_reload_btn.display = False
-    global_edit_btn.display = False
+    _hide_all_side_buttons(
+        readme_create_btn,
+        readme_edit_btn,
+        notes_create_btn,
+        notes_open_btn,
+        global_reload_btn,
+        global_edit_btn,
+    )
     selected = app._selected_row()
     app._update_readme_tab_state()
-    lines: list[str] = []
 
     if app.side_main_tab == "info":
-        if app.side_info_tab == "global":
-            lines.extend(app._global_info_lines())
-        elif app.side_info_tab == "stats":
-            lines.extend(app._stats_and_context_lines())
-        elif app.side_info_tab == "cheat":
-            cheat, _right = app._cheat_columns()
-            lines.append(cheat)
-        elif app.side_info_tab == "cache":
-            lines.extend(app._cache_info_lines())
-            lines.append("[dim]----------------------------------------[/]")
-            lines.append("[cyan]managed processes[/]:")
-            lines.extend(app._managed_process_info_lines())
-        elif app.side_info_tab == "hooks":
-            lines.extend(render_hooks_panel(app).splitlines())
-        else:
-            if app.messages:
-                for level, ts, msg in app.messages:
-                    if level == "error":
-                        prefix = "[bold red]ERR[/]"
-                    elif level == "warn":
-                        prefix = "[bold yellow]WRN[/]"
-                    else:
-                        prefix = f"[bold {color_accent_hex}]INF[/]"
-                    msg_lines = str(msg).split("\n")
-                    head = msg_lines[0]
-                    lines.append(
-                        f"[dim]{ts} ({fmt_age_short_from_iso(ts)})[/] {prefix} {app._esc(head)}"
-                    )
-                    for cont in msg_lines[1:]:
-                        lines.append(f"[dim]    {app._esc(cont)}[/]")
-            else:
-                lines.append("[dim]no recent events[/]")
+        lines = _info_tab_lines(app, color_accent_hex)
     elif app.side_main_tab == "settings":
-        if app.side_settings_tab in {"table", "table_config", "open", "global"}:
-            app._refresh_settings_table()
-            lines.append(f"[dim]{app.side_settings_tab} settings active[/]")
-            if app.side_settings_tab == "global":
-                global_info.update(app._global_config_status_text())
-                global_reload_btn.display = True
-                global_edit_btn.display = True
-        else:
-            lines.append("[dim]no settings view[/]")
+        lines = _settings_tab_lines(
+            app,
+            global_info=global_info,
+            global_reload_btn=global_reload_btn,
+            global_edit_btn=global_edit_btn,
+        )
     elif not selected:
-        lines.append("[dim]no focused project[/]")
+        lines = ["[dim]no focused project[/]"]
     else:
-        if app.side_selected_tab in {"git", "files"}:
-            needs_refresh = (
-                app.side_detail_row != selected.path
-                or not app.side_git_text
-                or not app.side_files_text
-            )
-            if needs_refresh:
-                app._refresh_selected_details(log_success=False)
-
-        if app.side_selected_tab == "readme":
-            readme_path = app._selected_readme_path()
-            if readme_path is None:
-                app.side_readme_source_path = None
-                app.side_readme_rendered_path = None
-                placeholder = "# README.md\n\nREADME.md not found."
-                if app.side_readme_rendered_text != placeholder:
-                    readme_view.document.update(placeholder)
-                    app.side_readme_rendered_text = placeholder
-                readme_create_btn.display = True
-            else:
-                app.side_readme_source_path = readme_path
-                readme_create_btn.display = False
-                readme_edit_btn.display = True
-                try:
-                    readme_text = readme_path.read_text()
-                except (OSError, UnicodeDecodeError) as exc:
-                    app._show_runtime_error("load README.md", exc)
-                    readme_text = "# README.md\n\nFailed to read README.md."
-                if (
-                    app.side_readme_rendered_path != readme_path
-                    or app.side_readme_rendered_text != readme_text
-                ):
-                    readme_view.document.update(readme_text)
-                    app.side_readme_rendered_path = readme_path
-                    app.side_readme_rendered_text = readme_text
-        elif app.side_selected_tab == "notes":
-            selected_notes = app._selected_row()
-            try:
-                notes_create_btn.label = "Create note"
-                notes_open_btn.label = "Open note"
-            except WIDGET_API_ERRORS:
-                pass
-            if selected_notes is None:
-                app.side_notes_source_path = None
-                app.side_notes_rendered_path = None
-                placeholder = "# Notes\n\nNo focused project."
-                if app.side_notes_rendered_text != placeholder:
-                    notes_view.document.update(placeholder)
-                    app.side_notes_rendered_text = placeholder
-            else:
-                try:
-                    notes_path = app._resolve_notes_path_for_row(selected_notes)
-                except (OSError, ValueError, RuntimeError) as exc:
-                    app.side_notes_source_path = None
-                    app.side_notes_rendered_path = None
-                    app._set_runtime_status(f"notes path error: {exc}", level_warn, ttl_s=6.0)
-                    placeholder = "# Notes\n\nNotes path is not configured correctly."
-                    if app.side_notes_rendered_text != placeholder:
-                        notes_view.document.update(placeholder)
-                        app.side_notes_rendered_text = placeholder
-                    notes_create_btn.display = False
-                    notes_open_btn.display = False
-                else:
-                    app.side_notes_source_path = notes_path
-                    try:
-                        notes_exists = notes_path.is_file()
-                    except OSError:
-                        notes_exists = False
-                    actual_name = (
-                        existing_path_case_mismatch(notes_path)
-                        if notes_exists
-                        else None
-                    )
-                    if actual_name is not None:
-                        notes_create_btn.display = False
-                        notes_open_btn.display = False
-                        app.side_notes_rendered_path = None
-                        error_text = (
-                            "# E — Notes case mismatch\n\n"
-                            "**ERROR**: the note exists on disk but the filename "
-                            "does not match the project name in case.\n\n"
-                            f"- Expected note file: `{notes_path.name}`\n"
-                            f"- On-disk file:       `{actual_name}`\n"
-                            f"- Parent directory:   `{notes_path.parent}`\n\n"
-                            "Opening this note would create a duplicate in case-"
-                            "insensitive editors (e.g. Obsidian). Rename either "
-                            "the project or the note so the case matches exactly, "
-                            "then reopen this view."
-                        )
-                        if app.side_notes_rendered_text != error_text:
-                            notes_view.document.update(error_text)
-                            app.side_notes_rendered_text = error_text
-                    elif not notes_exists:
-                        notes_create_btn.display = True
-                        notes_open_btn.display = False
-                        app.side_notes_rendered_path = None
-                        placeholder = "# Notes\n\nNotes file not found."
-                        if app.side_notes_rendered_text != placeholder:
-                            notes_view.document.update(placeholder)
-                            app.side_notes_rendered_text = placeholder
-                    else:
-                        notes_create_btn.display = False
-                        notes_open_btn.display = True
-                        try:
-                            notes_text = notes_path.read_text()
-                        except (OSError, UnicodeDecodeError) as exc:
-                            app._show_runtime_error("load notes markdown", exc)
-                            notes_text = "# Notes\n\nFailed to read notes markdown."
-                        if (
-                            app.side_notes_rendered_path != notes_path
-                            or app.side_notes_rendered_text != notes_text
-                        ):
-                            notes_view.document.update(notes_text)
-                            app.side_notes_rendered_path = notes_path
-                            app.side_notes_rendered_text = notes_text
-        elif app.side_selected_tab == "git":
-            readme_create_btn.display = False
-            lines.append(app.side_git_text or "[dim]git details not loaded yet[/]")
-        elif app.side_selected_tab == "events":
-            readme_create_btn.display = False
-            lines.append(app._build_side_project_events_text(selected))
-        elif app.side_selected_tab == "files":
-            readme_create_btn.display = False
-            lines.append(app.side_files_text or "[dim]file details not loaded yet[/]")
-        else:
-            readme_create_btn.display = False
-            wip_slots = {row.path: i for i, row in enumerate(app._wip_rows_sorted()[:9], start=1)}
-            cached_health: tuple[str, str] | None = None
-            cached_entry = app.metadata_health_cache.get(selected.path)
-            if cached_entry is not None:
-                cached_health = (str(cached_entry[0]), str(cached_entry[1]))
-            lines.append(
-                project_info_text(
-                    selected,
-                    wip_hotkey=wip_slots.get(selected.path),
-                    include_meta_checks=not selected.archived,
-                    cached_meta_health=cached_health,
-                )
-            )
-            if selected.archived:
-                lines.append("[cyan]preview[/]: [dim]disabled in archive overview for speed[/]")
-            else:
-                lines.append("[cyan]preview[/]:")
-                lines.extend(app._preview_entries(selected.path))
+        lines = _selected_tab_lines(
+            app,
+            selected,
+            readme_view=readme_view,
+            notes_view=notes_view,
+            readme_create_btn=readme_create_btn,
+            readme_edit_btn=readme_edit_btn,
+            notes_create_btn=notes_create_btn,
+            notes_open_btn=notes_open_btn,
+            level_warn=level_warn,
+        )
 
     side.update("\n".join(lines))
     app._refresh_wip_bar()

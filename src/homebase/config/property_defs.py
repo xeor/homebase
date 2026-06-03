@@ -53,6 +53,128 @@ def _to_tuple(value: object) -> tuple[str, ...]:
     return ()
 
 
+_CACHE_OVERRIDE_KEYS = frozenset(
+    {
+        "update_interval_s",
+        "update_batch_size",
+        "update_priority",
+        "cache_mode",
+        "cache_ttl_s",
+        "use_usage_score",
+        "usage_weight",
+        "stale_boost",
+        "max_parallelism",
+        "min_interval_s",
+        "refresh_on_event",
+        "jitter_pct",
+    }
+)
+
+
+def _parse_queries(raw_queries: object) -> tuple[dict[str, object], ...]:
+    if not isinstance(raw_queries, list):
+        return ()
+    norm: list[dict[str, object]] = []
+    for q in raw_queries:
+        if isinstance(q, dict) and str(q.get("type", "")).strip():
+            norm.append(dict(q))
+    return tuple(norm)
+
+
+def _explicit_cache_fields(item: dict) -> dict[str, object]:
+    return {
+        str(k): v for k, v in item.items() if str(k) in _CACHE_OVERRIDE_KEYS
+    }
+
+
+def _resolve_cache_profiles(
+    token: str,
+    item: dict,
+    profile_table: dict,
+    cache_ttl_s: float,
+) -> tuple[dict[str, dict[str, object]] | None, float, str]:
+    cache_profile = str(item.get("cache_profile", "")).strip()
+    if not cache_profile:
+        return None, cache_ttl_s, cache_profile
+    explicit_fields = _explicit_cache_fields(item)
+    profile_overrides = item.get("cache_profile_overrides", None)
+    try:
+        active_profile = cache_profile_config.resolve_cache_profile(
+            profile_name=cache_profile,
+            view="active",
+            profile_table=profile_table,
+            explicit_fields=explicit_fields,
+            profile_overrides=profile_overrides,
+        )
+        archive_profile = cache_profile_config.resolve_cache_profile(
+            profile_name=cache_profile,
+            view="archive",
+            profile_table=profile_table,
+            explicit_fields=explicit_fields,
+            profile_overrides=profile_overrides,
+        )
+    except ValueError as exc:
+        raise ValueError(
+            f"invalid cache profile for property {token}: {exc}"
+        ) from exc
+    try:
+        cache_ttl_s = float(active_profile.get("cache_ttl_s", cache_ttl_s))
+    except (TypeError, ValueError):
+        pass
+    return (
+        {"active": active_profile, "archive": archive_profile},
+        cache_ttl_s,
+        cache_profile,
+    )
+
+
+def _build_property_def(
+    token_key: object,
+    item: object,
+    vars_ctx: dict,
+    profile_table: dict,
+) -> PropertyDef | None:
+    if not isinstance(item, dict):
+        return None
+    token = str(token_key).strip().upper()
+    if not token:
+        return None
+    key = token.lower()
+    label = _render_value(str(item.get("label", token)).strip() or token, vars_ctx)
+    color = _render_value(str(item.get("color", "")).strip(), vars_ctx)
+    file_exists = _to_tuple(_render_obj(item.get("file-exists", []), vars_ctx))
+    dir_exists = _to_tuple(_render_obj(item.get("dir-exists", []), vars_ctx))
+    path_exists = _to_tuple(_render_obj(item.get("path-exists", []), vars_ctx))
+    queries = _parse_queries(_render_obj(item.get("queries", []), vars_ctx))
+    enabled = sum(
+        1
+        for x in (file_exists, dir_exists, path_exists, queries)
+        if x
+    )
+    if enabled != 1:
+        return None
+    try:
+        cache_ttl_s = float(item.get("cache_ttl_s", 15.0))
+    except (TypeError, ValueError):
+        cache_ttl_s = 15.0
+    cache_profiles_by_view, cache_ttl_s, cache_profile = _resolve_cache_profiles(
+        token, item, profile_table, cache_ttl_s
+    )
+    return PropertyDef(
+        key=key,
+        label=label,
+        token=token,
+        color=color,
+        file_exists=file_exists,
+        dir_exists=dir_exists,
+        path_exists=path_exists,
+        queries=queries,
+        cache_ttl_s=max(1.0, cache_ttl_s),
+        cache_profile=cache_profile,
+        cache_profiles_by_view=cache_profiles_by_view,
+    )
+
+
 def load_property_defs(base_dir: Path) -> list[PropertyDef]:
     raw = load_global_config_dict(base_dir)
     profile_table = cache_profile_config.load_cache_profile_table(raw)
@@ -60,101 +182,9 @@ def load_property_defs(base_dir: Path) -> list[PropertyDef]:
     properties_raw = raw.get("properties", {}) if isinstance(raw, dict) else {}
     if not isinstance(properties_raw, dict):
         return []
-
     defs: list[PropertyDef] = []
     for token_key, item in properties_raw.items():
-        if not isinstance(item, dict):
-            continue
-        token = str(token_key).strip().upper()
-        if not token:
-            continue
-        key = token.lower()
-        if not key:
-            continue
-        label = _render_value(str(item.get("label", token)).strip() or token, vars_ctx)
-        color = _render_value(str(item.get("color", "")).strip(), vars_ctx)
-        file_exists = _to_tuple(_render_obj(item.get("file-exists", []), vars_ctx))
-        dir_exists = _to_tuple(_render_obj(item.get("dir-exists", []), vars_ctx))
-        path_exists = _to_tuple(_render_obj(item.get("path-exists", []), vars_ctx))
-        queries_raw = _render_obj(item.get("queries", []), vars_ctx)
-        queries: tuple[dict[str, object], ...] = ()
-        if isinstance(queries_raw, list):
-            norm: list[dict[str, object]] = []
-            for q in queries_raw:
-                if isinstance(q, dict) and str(q.get("type", "")).strip():
-                    norm.append(dict(q))
-            queries = tuple(norm)
-        enabled_detectors = sum(
-            1 if x else 0
-            for x in (bool(file_exists), bool(dir_exists), bool(path_exists), bool(queries))
-        )
-        if enabled_detectors != 1:
-            continue
-        try:
-            cache_ttl_s = float(item.get("cache_ttl_s", 15.0))
-        except (TypeError, ValueError):
-            cache_ttl_s = 15.0
-        explicit_cache_fields = {
-            str(k): v
-            for k, v in item.items()
-            if str(k)
-            in {
-                "update_interval_s",
-                "update_batch_size",
-                "update_priority",
-                "cache_mode",
-                "cache_ttl_s",
-                "use_usage_score",
-                "usage_weight",
-                "stale_boost",
-                "max_parallelism",
-                "min_interval_s",
-                "refresh_on_event",
-                "jitter_pct",
-            }
-        }
-        cache_profile = str(item.get("cache_profile", "")).strip()
-        profile_overrides = item.get("cache_profile_overrides", None)
-        cache_profiles_by_view: dict[str, dict[str, object]] | None = None
-        if cache_profile:
-            try:
-                active_profile = cache_profile_config.resolve_cache_profile(
-                    profile_name=cache_profile,
-                    view="active",
-                    profile_table=profile_table,
-                    explicit_fields=explicit_cache_fields,
-                    profile_overrides=profile_overrides,
-                )
-                archive_profile = cache_profile_config.resolve_cache_profile(
-                    profile_name=cache_profile,
-                    view="archive",
-                    profile_table=profile_table,
-                    explicit_fields=explicit_cache_fields,
-                    profile_overrides=profile_overrides,
-                )
-            except ValueError as exc:
-                raise ValueError(f"invalid cache profile for property {token}: {exc}") from exc
-            cache_profiles_by_view = {
-                "active": active_profile,
-                "archive": archive_profile,
-            }
-            try:
-                cache_ttl_s = float(active_profile.get("cache_ttl_s", cache_ttl_s))
-            except (TypeError, ValueError):
-                pass
-        defs.append(
-            PropertyDef(
-                key=key,
-                label=label,
-                token=token,
-                color=color,
-                file_exists=file_exists,
-                dir_exists=dir_exists,
-                path_exists=path_exists,
-                queries=queries,
-                cache_ttl_s=max(1.0, cache_ttl_s),
-                cache_profile=cache_profile,
-                cache_profiles_by_view=cache_profiles_by_view,
-            )
-        )
+        prop = _build_property_def(token_key, item, vars_ctx, profile_table)
+        if prop is not None:
+            defs.append(prop)
     return defs

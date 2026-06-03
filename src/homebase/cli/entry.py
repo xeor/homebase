@@ -108,6 +108,86 @@ def _resolve_filter_expression(base_dir: Path, expr: str):
     return resolve_filter_expression(base_dir, expr)
 
 
+def _parse_args(argv: list[str], parser):
+    try:
+        return parser.parse_args(argv), 0
+    except SystemExit as exc:
+        return None, int(exc.code)
+
+
+def _handle_fast_path_commands(ns, base_dir: Path, parser) -> int | None:
+    """Return an exit code if the command should bypass config loading; else None."""
+    if ns.command == "completion":
+        return _cmd_completion(str(ns.shell))
+    if ns.command == "shell-init":
+        shell_name = str(getattr(ns, "shell", "") or "").strip()
+        if not shell_name:
+            print(shell_init_help_text())
+            return 0
+        print(shell_init_script(shell_name), end="")
+        return 0
+    if ns.command == "__complete":
+        words = [str(x) for x in ns.words]
+        if words and words[0] == "--":
+            words = words[1:]
+        return _cmd_internal_complete(
+            str(ns.shell), int(ns.cword), words, base_dir=base_dir
+        )
+    if ns.command == "help":
+        from ..commands.help import TOPICS, list_topics
+
+        topic = str(getattr(ns, "topic", "")).strip().lower()
+        if not topic:
+            parser.print_help()
+            return 0
+        if topic == "topics":
+            return list_topics()
+        if topic not in TOPICS:
+            parser.print_help()
+            print()
+            print(f"unknown help topic: {topic!r}", file=sys.stderr)
+            list_topics()
+            return 2
+    return None
+
+
+def _print_validation_issues(issues, header: str) -> None:
+    print(header, file=sys.stderr)
+    for issue in issues:
+        if issue.path is not None:
+            print(f"- {issue.message}: {issue.path}", file=sys.stderr)
+        else:
+            print(f"- {issue.message}", file=sys.stderr)
+
+
+def _handle_startup_validation(ns, base_dir: Path) -> int | None:
+    """Return an exit code if startup validation requires aborting; else None."""
+    skip_validation = ns.command == "fix"
+    issues = run_startup_validations(base_dir)
+    if not issues:
+        return None
+    if skip_validation:
+        _print_validation_issues(issues, "startup validation warnings:")
+        return None
+    _print_validation_issues(issues, "startup validation failed:")
+    print("Run `b fix --all` to attempt repairs.", file=sys.stderr)
+    return 1
+
+
+def _config_error_help_response(ns, parser, prefix: str, exc: BaseException) -> int:
+    print(f"warning: {prefix}: {exc}", file=sys.stderr)
+    return cmd_help_dispatch(
+        str(getattr(ns, "topic", "")).strip().lower(),
+        print_default_help=parser.print_help,
+        handlers={
+            "actions": lambda: cmd_help_actions_render(
+                actions={}, hotbar=[], keys={},
+            ),
+            "hotkeys": lambda: cmd_help_hotkeys_render(keys={}),
+        },
+    )
+
+
 def main(argv: list[str]) -> int:
     from ..config import prefs as app_prefs  # noqa: F401  (alias for clarity)
     from ..config.hooks import HookConfigError, load_hook_refresh_config, load_hook_specs
@@ -135,10 +215,9 @@ def main(argv: list[str]) -> int:
     from ..workspace.regression import cmd_test_regression
 
     parser = build_cli_parser()
-    try:
-        ns = parser.parse_args(argv)
-    except SystemExit as exc:
-        return int(exc.code)
+    ns, rc = _parse_args(argv, parser)
+    if ns is None:
+        return rc
 
     verbosity = configure_logging(int(getattr(ns, "verbose", 0) or 0))
     logger.debug(
@@ -160,75 +239,17 @@ def main(argv: list[str]) -> int:
     base_dir = resolve_base_dir(ns.base_folder)
     os.environ[ENV_BASE_DIR] = str(base_dir)
 
-    # Fast paths that must work even when the global config is broken
-    # (otherwise shell completion keeps spamming "config error: ..." on
-    # every keystroke that triggers the completion function).
-    if ns.command == "completion":
-        return _cmd_completion(str(ns.shell))
-    if ns.command == "shell-init":
-        shell_name = str(getattr(ns, "shell", "") or "").strip()
-        if not shell_name:
-            print(shell_init_help_text())
-            return 0
-        print(shell_init_script(shell_name), end="")
-        return 0
-    if ns.command == "__complete":
-        # Strip a leading ``--`` separator that newer shell wrappers
-        # use to keep argparse from eating option-shaped user words.
-        words = [str(x) for x in ns.words]
-        if words and words[0] == "--":
-            words = words[1:]
-        return _cmd_internal_complete(
-            str(ns.shell),
-            int(ns.cword),
-            words,
-            base_dir=base_dir,
-        )
-    if ns.command == "help":
-        from ..commands.help import TOPICS, list_topics
+    fast_rc = _handle_fast_path_commands(ns, base_dir, parser)
+    if fast_rc is not None:
+        return fast_rc
 
-        topic = str(getattr(ns, "topic", "")).strip().lower()
-        if not topic:
-            parser.print_help()
-            return 0
-        if topic == "topics":
-            return list_topics()
-        if topic not in TOPICS:
-            parser.print_help()
-            print()
-            print(f"unknown help topic: {topic!r}", file=sys.stderr)
-            list_topics()
-            return 2
+    validation_rc = _handle_startup_validation(ns, base_dir)
+    if validation_rc is not None:
+        return validation_rc
 
-    # ``b fix`` is the repair command — it must be able to run even
-    # when the workspace is malformed. Surface validation findings as
-    # warnings so the user still sees them.
-    skip_validation = ns.command == "fix"
-    startup_issues = run_startup_validations(base_dir)
-    if startup_issues:
-        if skip_validation:
-            print("startup validation warnings:", file=sys.stderr)
-            for issue in startup_issues:
-                if issue.path is not None:
-                    print(f"- {issue.message}: {issue.path}", file=sys.stderr)
-                else:
-                    print(f"- {issue.message}", file=sys.stderr)
-        else:
-            print("startup validation failed:", file=sys.stderr)
-            for issue in startup_issues:
-                if issue.path is not None:
-                    print(f"- {issue.message}: {issue.path}", file=sys.stderr)
-                else:
-                    print(f"- {issue.message}", file=sys.stderr)
-            print(
-                "Run `b fix --all` to attempt repairs.",
-                file=sys.stderr,
-            )
-            return 1
-
+    runtime_builtins = dict(BUILTIN_ACTIONS)
+    runtime_builtins.update(discover_tab_actions())
     try:
-        runtime_builtins = dict(BUILTIN_ACTIONS)
-        runtime_builtins.update(discover_tab_actions())
         runtime_cfg = runtime_init.load_runtime_config(
             base_dir,
             default_archive_tz_name=DEFAULT_ARCHIVE_TZ_NAME,
@@ -254,32 +275,12 @@ def main(argv: list[str]) -> int:
         # when the config is broken — that's often exactly why the user
         # is asking for help.
         if ns.command == "help":
-            print(f"warning: hook config error: {exc}", file=sys.stderr)
-            return cmd_help_dispatch(
-                str(getattr(ns, "topic", "")).strip().lower(),
-                print_default_help=parser.print_help,
-                handlers={
-                    "actions": lambda: cmd_help_actions_render(
-                        actions={}, hotbar=[], keys={},
-                    ),
-                    "hotkeys": lambda: cmd_help_hotkeys_render(keys={}),
-                },
-            )
+            return _config_error_help_response(ns, parser, "hook config error", exc)
         print(f"hook config error: {exc}", file=sys.stderr)
         return 1
     except ValueError as exc:
         if ns.command == "help":
-            print(f"warning: config error: {exc}", file=sys.stderr)
-            return cmd_help_dispatch(
-                str(getattr(ns, "topic", "")).strip().lower(),
-                print_default_help=parser.print_help,
-                handlers={
-                    "actions": lambda: cmd_help_actions_render(
-                        actions={}, hotbar=[], keys={},
-                    ),
-                    "hotkeys": lambda: cmd_help_hotkeys_render(keys={}),
-                },
-            )
+            return _config_error_help_response(ns, parser, "config error", exc)
         print(f"config error: {exc}", file=sys.stderr)
         return 1
     ui_ctx = UIContext(

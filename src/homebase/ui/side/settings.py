@@ -47,6 +47,99 @@ from ...core.utils import WIDGET_API_ERRORS
 from ..context import UIContext
 
 
+def _set_notes_height(notes_widget: Static, value: int) -> None:
+    try:
+        notes_widget.styles.height = value
+    except WIDGET_API_ERRORS:
+        pass
+
+
+def _set_cursor_coordinate(table: DataTable, coord: tuple[int, int]) -> None:
+    try:
+        table.cursor_coordinate = coord
+    except WIDGET_API_ERRORS:
+        pass
+
+
+def _refresh_open_settings(app: Any, table: DataTable, notes_widget: Static) -> None:
+    _set_notes_height(notes_widget, 15)
+    table.add_column("", width=3)
+    table.add_column("MODE", width=54)
+    rows = app._open_mode_rows()
+    selected_profile = str(
+        app.open_mode.get("profile", OPEN_MODE_CONFIG["profile"])
+    )
+    if app.open_settings_index < 0:
+        app.open_settings_index = 0
+    if app.open_settings_index >= len(rows):
+        app.open_settings_index = len(rows) - 1
+    for i, (profile_id, mode_line, _details) in enumerate(rows):
+        enabled = profile_id == selected_profile
+        table.add_row(Text("(x)" if enabled else "( )"), mode_line, key=str(i))
+    _set_cursor_coordinate(table, (app.open_settings_index, 0))
+    app._update_open_settings_details(rows)
+
+
+def _refresh_global_settings(table: DataTable, notes_widget: Static) -> None:
+    _set_notes_height(notes_widget, 15)
+    table.add_column("", width=3)
+    table.add_column("ACTION", width=54)
+    table.add_row(Text("*"), "Edit global config in $EDITOR", key="0")
+    _set_cursor_coordinate(table, (0, 0))
+    notes_widget.update(
+        "enter/space opens .homebase/config.yaml in $EDITOR\n"
+        "when editor exits, runtime config is reloaded"
+    )
+
+
+def _refresh_table_columns(app: Any, table: DataTable, notes_widget: Static) -> None:
+    table.add_column("", width=3)
+    table.add_column("COLUMN", width=18)
+    table.add_column("WIDTH", width=14)
+    _set_notes_height(notes_widget, 3)
+    notes_widget.update(
+        f"For table: {app.view_mode}\nchanges here apply only to this view"
+    )
+    current_columns = app._table_columns_for_view(app.view_mode)
+    if not current_columns:
+        return
+    if app.table_settings_index < 0:
+        app.table_settings_index = 0
+    if app.table_settings_index >= len(current_columns):
+        app.table_settings_index = len(current_columns) - 1
+    enabled_cols = [c for c in current_columns if bool(c.get("enabled", True))]
+    last_enabled_id = (
+        str(enabled_cols[-1].get("id", "")).strip() if enabled_cols else ""
+    )
+    effective_widths = dict(
+        getattr(app, "_visible_column_effective_width_by_id", {}) or {}
+    )
+    for i, col in enumerate(current_columns):
+        cid = str(col.get("id", ""))
+        enabled = bool(col.get("enabled", True))
+        try:
+            width = int(col.get("width", 12))
+        except (TypeError, ValueError):
+            width = 12
+        cid_short = cid if len(cid) <= 18 else (cid[:15] + "...")
+        width_text = str(width)
+        effective = int(effective_widths.get(cid, 0) or 0)
+        if (
+            enabled
+            and cid == last_enabled_id
+            and effective > 0
+            and effective != width
+        ):
+            width_text = f"{width} ({effective})"
+        table.add_row(
+            Text("[x]" if enabled else "[ ]"),
+            cid_short,
+            width_text,
+            key=str(i),
+        )
+    _set_cursor_coordinate(table, (app.table_settings_index, 0))
+
+
 def refresh_settings_table(app: Any) -> None:
     table = app.query_one("#side_settings_table", DataTable)
     notes_widget = app.query_one("#side_settings_notes", Static)
@@ -58,92 +151,15 @@ def refresh_settings_table(app: Any) -> None:
     notes_widget.update("")
 
     if app.side_settings_tab == "open":
-        try:
-            notes_widget.styles.height = 15
-        except WIDGET_API_ERRORS:
-            pass
-        table.add_column("", width=3)
-        table.add_column("MODE", width=54)
-        rows = app._open_mode_rows()
-        selected_profile = str(app.open_mode.get("profile", OPEN_MODE_CONFIG["profile"]))
-
-        if app.open_settings_index < 0:
-            app.open_settings_index = 0
-        if app.open_settings_index >= len(rows):
-            app.open_settings_index = len(rows) - 1
-        for i, (profile_id, mode_line, _details) in enumerate(rows):
-            enabled = profile_id == selected_profile
-            table.add_row(Text("(x)" if enabled else "( )"), mode_line, key=str(i))
-        try:
-            table.cursor_coordinate = (app.open_settings_index, 0)
-        except WIDGET_API_ERRORS:
-            pass
-        app._update_open_settings_details(rows)
+        _refresh_open_settings(app, table, notes_widget)
         return
-
     if app.side_settings_tab == "table_config":
         populate_config_panel(app)
         return
-
     if app.side_settings_tab == "global":
-        try:
-            notes_widget.styles.height = 15
-        except WIDGET_API_ERRORS:
-            pass
-        table.add_column("", width=3)
-        table.add_column("ACTION", width=54)
-        table.add_row(Text("*"), "Edit global config in $EDITOR", key="0")
-        try:
-            table.cursor_coordinate = (0, 0)
-        except WIDGET_API_ERRORS:
-            pass
-        notes_widget.update(
-            "enter/space opens .homebase/config.yaml in $EDITOR\n"
-            "when editor exits, runtime config is reloaded"
-        )
+        _refresh_global_settings(table, notes_widget)
         return
-
-    table.add_column("", width=3)
-    table.add_column("COLUMN", width=18)
-    table.add_column("WIDTH", width=14)
-    try:
-        notes_widget.styles.height = 3
-    except WIDGET_API_ERRORS:
-        pass
-    notes_widget.update(
-        f"For table: {app.view_mode}\n"
-        "changes here apply only to this view"
-    )
-
-    current_columns = app._table_columns_for_view(app.view_mode)
-    if not current_columns:
-        return
-    if app.table_settings_index < 0:
-        app.table_settings_index = 0
-    if app.table_settings_index >= len(current_columns):
-        app.table_settings_index = len(current_columns) - 1
-
-    enabled_cols = [c for c in current_columns if bool(c.get("enabled", True))]
-    last_enabled_id = str(enabled_cols[-1].get("id", "")).strip() if enabled_cols else ""
-    effective_widths = dict(getattr(app, "_visible_column_effective_width_by_id", {}) or {})
-
-    for i, col in enumerate(current_columns):
-        cid = str(col.get("id", ""))
-        enabled = bool(col.get("enabled", True))
-        try:
-            width = int(col.get("width", 12))
-        except (TypeError, ValueError):
-            width = 12
-        cid_short = cid if len(cid) <= 18 else (cid[:15] + "...")
-        width_text = str(width)
-        effective = int(effective_widths.get(cid, 0) or 0)
-        if enabled and cid == last_enabled_id and effective > 0 and effective != width:
-            width_text = f"{width} ({effective})"
-        table.add_row(Text("[x]" if enabled else "[ ]"), cid_short, width_text, key=str(i))
-    try:
-        table.cursor_coordinate = (app.table_settings_index, 0)
-    except WIDGET_API_ERRORS:
-        pass
+    _refresh_table_columns(app, table, notes_widget)
 
 
 def update_open_settings_details(

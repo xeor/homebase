@@ -25,6 +25,288 @@ def _one_line(text: str, *, max_len: int = 110) -> str:
     return line[: max_len - 3].rstrip() + "..."
 
 
+def _cache_db_lines(app: Any, base_dir: Path, cache_schema_version: int) -> list[str]:
+    out: list[str] = []
+    db = cache_db_path(base_dir)
+    exists = db.is_file()
+    out.append("[cyan]cache[/]:")
+    out.append(f"path: {app._esc(db)}")
+    out.append(f"exists: {'yes' if exists else 'no'}")
+    if exists:
+        try:
+            out.append(f"size: {db.stat().st_size} bytes")
+        except OSError:
+            out.append("size: -")
+    else:
+        out.append("size: -")
+    out.append(f"schema version: {cache_schema_version}")
+    return out
+
+
+def _drift_lines(app: Any) -> list[str]:
+    snap = cache_concurrency.snapshot()
+    if snap.drift_count <= 0 or snap.last_event is None:
+        return ["schema drift: none observed"]
+    ev = snap.last_event
+    return [
+        f"[red]schema drift[/]: count={snap.drift_count} last={ev.kind} "
+        f"observed=v{ev.observed_version} expected=v{ev.expected_version} "
+        f"at {fmt_iso(ev.ts)} ({fmt_age_short(ev.ts)})",
+        f"drift detail: {app._esc(ev.detail)}",
+    ]
+
+
+def _cache_worker_lines(
+    app: Any, cache_max_age_s: int, cache_bg_refresh_s: int
+) -> list[str]:
+    out = [
+        f"policy: max_age={cache_max_age_s}s background_refresh={cache_bg_refresh_s}s",
+        f"cache epoch: {app.cache_refresh_epoch}",
+        f"cache worker: {'running' if app.cache_worker_running else 'idle'}",
+    ]
+    if app.cache_worker_running and app.cache_worker_started_ts > 0:
+        started_ts = int(app.cache_worker_started_ts)
+        out.append(f"cache worker running for: {fmt_age_short(started_ts)}")
+    elif app.cache_worker_last_done_ts > 0:
+        done_ts = int(app.cache_worker_last_done_ts)
+        out.append(
+            f"cache worker last done: {fmt_iso(done_ts)} ({fmt_age_short(done_ts)})"
+        )
+    out.append(
+        f"worker note: {app._esc(app.cache_worker_note) if app.cache_worker_note else '-'}"
+    )
+    if app.cache_last_refresh_ts > 0:
+        out.append(
+            f"last refresh: {fmt_iso(app.cache_last_refresh_ts)} "
+            f"({fmt_age_short(app.cache_last_refresh_ts)})"
+        )
+    else:
+        out.append("last refresh: -")
+    active_stale = sum(1 for r in app.active_rows if r.stale)
+    archived_stale = sum(1 for r in app.archived_rows if r.stale)
+    out.append(
+        f"rows: active={len(app.active_rows)} archived={len(app.archived_rows)}"
+    )
+    out.append(f"stale rows: active={active_stale} archived={archived_stale}")
+    return out
+
+
+def _reconcile_cfg_get(cfg: object, key: str, default: object, *, kind: type) -> Any:
+    if not isinstance(cfg, dict):
+        return default
+    raw = cfg.get(key, default)
+    try:
+        if kind is bool:
+            return bool(raw)
+        if kind is int:
+            return int(raw)
+        if kind is float:
+            return float(raw)
+    except (TypeError, ValueError):
+        return default
+    return raw
+
+
+def _reconcile_mode_lines(app: Any, mode: str) -> list[str]:
+    cfg = app.reconcile_config.get(mode, {})
+    wait_s = app._effective_reconcile_wait_s(mode)
+    parallel = app._effective_reconcile_parallelism(mode)
+    batch_size = max(1, _reconcile_cfg_get(cfg, "batch_size", 1, kind=int))
+    usage_enabled = _reconcile_cfg_get(cfg, "use_usage_score", True, kind=bool)
+    usage_weight = max(0.0, _reconcile_cfg_get(cfg, "usage_weight", 1.0, kind=float))
+    stale_boost = _reconcile_cfg_get(cfg, "stale_boost", True, kind=bool)
+    stale_interval_s = max(
+        0.05, _reconcile_cfg_get(cfg, "stale_interval_s", 0.5, kind=float)
+    )
+    stale_parallelism = max(
+        1, _reconcile_cfg_get(cfg, "stale_parallelism", parallel, kind=int)
+    )
+    stale_batch_size = max(
+        1, _reconcile_cfg_get(cfg, "stale_batch_size", batch_size, kind=int)
+    )
+    due_at = float(app.reconcile_next_due.get(mode, 0.0))
+    wait_left = max(0.0, due_at - time.time()) if due_at > 0 else 0.0
+    return [
+        f"reconcile policy ({mode}): wait={wait_s:.2f}s batch={batch_size} "
+        f"parallel={parallel} next_in={wait_left:.2f}s",
+        f"reconcile policy ({mode}) details: "
+        f"stale_boost={'yes' if stale_boost else 'no'} "
+        f"stale_wait={stale_interval_s:.2f}s stale_batch={stale_batch_size} "
+        f"stale_parallel={stale_parallelism} "
+        f"usage={'yes' if usage_enabled else 'no'} "
+        f"usage_weight={usage_weight:.2f}",
+    ]
+
+
+def _selected_cache_lines(app: Any) -> list[str]:
+    out = [
+        "[dim]----------------------------------------[/]",
+        "[cyan]selected cache state[/]:",
+    ]
+    selected = app._selected_row()
+    if selected is None:
+        out.extend(
+            [
+                "row: -",
+                "last cached: -",
+                "last reconciled: -",
+                "reconcile score: -",
+            ]
+        )
+        return out
+    out.append(f"row: {app._esc(selected.name)}")
+    if selected.last_cached_ts > 0:
+        out.append(
+            f"last cached: {fmt_iso(selected.last_cached_ts)} "
+            f"({fmt_age_short(selected.last_cached_ts)})"
+        )
+    else:
+        out.append("last cached: -")
+    if selected.last_reconciled_ts > 0:
+        out.append(
+            f"last reconciled: {fmt_iso(selected.last_reconciled_ts)} "
+            f"({fmt_age_short(selected.last_reconciled_ts)})"
+        )
+    else:
+        out.append("last reconciled: -")
+    usage_score = float(app.row_usage_score.get(selected.path, 0.0))
+    usage_hits = int(app.row_usage_hits.get(selected.path, 0))
+    out.append(f"reconcile score: {usage_score:.2f} hits={usage_hits}")
+    return out
+
+
+def _reconcile_worker_lines(app: Any) -> list[str]:
+    out = [
+        "[dim]----------------------------------------[/]",
+        "[cyan]workers[/]:",
+        f"cache refresh thread: {'running' if app.cache_worker_running else 'idle'}",
+        f"reconcile worker: {'running' if app.reconcile_worker_running else 'idle'}",
+    ]
+    if app.reconcile_worker_running and app.reconcile_worker_started_ts > 0:
+        started_ts = int(app.reconcile_worker_started_ts)
+        out.append(f"reconcile worker running for: {fmt_age_short(started_ts)}")
+    elif app.reconcile_worker_last_done_ts > 0:
+        done_ts = int(app.reconcile_worker_last_done_ts)
+        out.append(
+            f"reconcile worker last done: {fmt_iso(done_ts)} ({fmt_age_short(done_ts)})"
+        )
+    out.append(f"git worker: {'running' if app.git_refresh_running else 'idle'}")
+    out.append(
+        f"git worker reason: "
+        f"{app._esc(app.git_refresh_reason) if app.git_refresh_reason else '-'}"
+    )
+    if app.reconcile_worker_reason:
+        out.append(
+            f"reconcile reason: {app._esc(app.reconcile_worker_reason)} "
+            f"({app._esc(app.reconcile_worker_mode)})"
+        )
+    else:
+        out.append("reconcile reason: -")
+    if app.reconcile_last_skip_reason:
+        skip_ts = (
+            int(app.reconcile_last_skip_ts) if app.reconcile_last_skip_ts > 0 else 0
+        )
+        if skip_ts > 0:
+            out.append(
+                f"reconcile scheduler: {app._esc(app.reconcile_last_skip_reason)} "
+                f"({fmt_age_short(skip_ts)})"
+            )
+        else:
+            out.append(
+                f"reconcile scheduler: {app._esc(app.reconcile_last_skip_reason)}"
+            )
+    return out
+
+
+def _recent_reconciled_lines(app: Any) -> list[str]:
+    out = ["[cyan]recent reconciled[/] [dim](last 5 per type)[/]:"]
+    for kind in ("active", "archive"):
+        items = app.reconcile_recent.get(kind, [])
+        out.append(f"{kind}: {len(items)}")
+        slots = list(reversed(items[-5:]))
+        while len(slots) < 5:
+            slots.append(("-", "-"))
+        for ts, label in slots:
+            if ts == "-":
+                out.append("  [dim]-[/]")
+                continue
+            out.append(
+                f"  [dim]{app._esc(ts)} ({fmt_age_short_from_iso(ts)})[/] "
+                f"{app._esc(label)}"
+            )
+    return out
+
+
+def _queue_lines(app: Any) -> list[str]:
+    return [
+        f"cache queue: pending={'yes' if app.cache_refresh_pending else 'no'} "
+        f"force={'yes' if app.cache_refresh_pending_force else 'no'}",
+        f"reconcile queue size: {len(app.reconcile_queue)}",
+        f"cache pending reason: "
+        f"{app._esc(app.cache_refresh_pending_reason) if app.cache_refresh_pending_reason else '-'}",
+        f"cache active reason: "
+        f"{app._esc(app.cache_worker_note) if app.cache_worker_note else '-'}",
+        f"detail worker: {'running' if app.detail_worker_running else 'idle'}",
+        f"detail path: "
+        f"{app._esc(app.detail_worker_path) if app.detail_worker_path is not None else '-'}",
+        f"detail token: {app.detail_worker_token}",
+        f"tag sync worker: {'running' if app.tag_sync_running else 'idle'}",
+        f"tag sync queue: pending={'yes' if app.tag_sync_pending else 'no'}",
+        f"tag sync pending reason: "
+        f"{app._esc(app.tag_sync_pending_reason) if app.tag_sync_pending_reason else '-'}",
+    ]
+
+
+def _archive_action_lines(app: Any) -> list[str]:
+    out = [
+        f"archive action worker: {'running' if app.action_worker_running else 'idle'}",
+        f"archive backend: tar="
+        f"{'yes' if shutil.which('tar') is not None else 'python fallback'}",
+        f"archive action: "
+        f"{app._esc(app.action_worker_action) if app.action_worker_action else '-'}",
+        f"archive progress: {app.action_worker_done}/{app.action_worker_total}",
+        f"archive current item: "
+        f"{app._esc(app.action_worker_current) if app.action_worker_current else '-'}",
+        f"archive stage: "
+        f"{app._esc(app.action_worker_stage) if app.action_worker_stage else '-'}",
+    ]
+    if app.action_worker_command:
+        out.append(f"archive command: [dim]{app._esc(app.action_worker_command)}[/]")
+    else:
+        out.append("archive command: -")
+    if app.action_worker_started_ts > 0:
+        out.append(
+            f"archive started: {fmt_iso(app.action_worker_started_ts)} "
+            f"({fmt_age_short(app.action_worker_started_ts)})"
+        )
+    else:
+        out.append("archive started: -")
+    return out
+
+
+def _misc_worker_lines(app: Any) -> list[str]:
+    out = [
+        f"pane probe: {'running' if app.pane_probe_running else 'idle'}",
+        f"busy overlay: depth={app._busy_depth} label={app._esc(app._busy_label)}",
+        f"restore queue: active={len(app.pending_restore_queue)} "
+        f"ok={app.pending_restore_ok} failed={app.pending_restore_failed}",
+        f"pending tag confirmations: {len(app.pending_tag_updates)}",
+        "[dim]notes: stale rows auto-refresh; selected git/files refresh on demand[/]",
+        "[cyan]worker debug[/] [dim](last 10)[/]:",
+    ]
+    debug_slots = list(app.worker_debug_events[-10:])
+    while len(debug_slots) < 10:
+        debug_slots.insert(0, ("-", "-"))
+    for ts, msg in debug_slots:
+        if ts == "-":
+            out.append("  [dim]-[/]")
+            continue
+        out.append(
+            f"  [dim]{app._esc(ts)} ({fmt_age_short_from_iso(ts)})[/] {app._esc(msg)}"
+        )
+    return out
+
+
 def cache_info_lines(
     app: Any,
     *,
@@ -37,212 +319,17 @@ def cache_info_lines(
     archive_dir_name: str,
 ) -> list[str]:
     out: list[str] = []
-    db = cache_db_path(base_dir)
-    exists = db.is_file()
-    out.append("[cyan]cache[/]:")
-    out.append(f"path: {app._esc(db)}")
-    out.append(f"exists: {'yes' if exists else 'no'}")
-    if exists:
-        try:
-            size = db.stat().st_size
-            out.append(f"size: {size} bytes")
-        except OSError:
-            out.append("size: -")
-    else:
-        out.append("size: -")
-    out.append(f"schema version: {cache_schema_version}")
-    snap = cache_concurrency.snapshot()
-    if snap.drift_count > 0 and snap.last_event is not None:
-        ev = snap.last_event
-        out.append(
-            f"[red]schema drift[/]: count={snap.drift_count} last={ev.kind} "
-            f"observed=v{ev.observed_version} expected=v{ev.expected_version} "
-            f"at {fmt_iso(ev.ts)} ({fmt_age_short(ev.ts)})"
-        )
-        out.append(f"drift detail: {app._esc(ev.detail)}")
-    else:
-        out.append("schema drift: none observed")
-    out.append(
-        f"policy: max_age={cache_max_age_s}s background_refresh={cache_bg_refresh_s}s"
-    )
-    out.append(f"cache epoch: {app.cache_refresh_epoch}")
-    out.append(f"cache worker: {'running' if app.cache_worker_running else 'idle'}")
-    if app.cache_worker_running and app.cache_worker_started_ts > 0:
-        started_ts = int(app.cache_worker_started_ts)
-        out.append(f"cache worker running for: {fmt_age_short(started_ts)}")
-    elif app.cache_worker_last_done_ts > 0:
-        done_ts = int(app.cache_worker_last_done_ts)
-        out.append(f"cache worker last done: {fmt_iso(done_ts)} ({fmt_age_short(done_ts)})")
-    out.append(
-        f"worker note: {app._esc(app.cache_worker_note) if app.cache_worker_note else '-'}"
-    )
-    if app.cache_last_refresh_ts > 0:
-        out.append(
-            f"last refresh: {fmt_iso(app.cache_last_refresh_ts)} ({fmt_age_short(app.cache_last_refresh_ts)})"
-        )
-    else:
-        out.append("last refresh: -")
-    active_stale = sum(1 for r in app.active_rows if r.stale)
-    archived_stale = sum(1 for r in app.archived_rows if r.stale)
-    out.append(f"rows: active={len(app.active_rows)} archived={len(app.archived_rows)}")
-    out.append(f"stale rows: active={active_stale} archived={archived_stale}")
+    out.extend(_cache_db_lines(app, base_dir, cache_schema_version))
+    out.extend(_drift_lines(app))
+    out.extend(_cache_worker_lines(app, cache_max_age_s, cache_bg_refresh_s))
     for mode in (mode_active, mode_archive):
-        cfg = app.reconcile_config.get(mode, {})
-        wait_s = app._effective_reconcile_wait_s(mode)
-        parallel = app._effective_reconcile_parallelism(mode)
-        batch_size = max(1, int(cfg.get("batch_size", 1))) if isinstance(cfg, dict) else 1
-        usage_enabled = bool(cfg.get("use_usage_score", True)) if isinstance(cfg, dict) else True
-        usage_weight = (
-            max(0.0, float(cfg.get("usage_weight", 1.0))) if isinstance(cfg, dict) else 1.0
-        )
-        stale_boost = bool(cfg.get("stale_boost", True)) if isinstance(cfg, dict) else True
-        stale_interval_s = (
-            max(0.05, float(cfg.get("stale_interval_s", 0.5))) if isinstance(cfg, dict) else 0.5
-        )
-        stale_parallelism = (
-            max(1, int(cfg.get("stale_parallelism", parallel))) if isinstance(cfg, dict) else parallel
-        )
-        stale_batch_size = (
-            max(1, int(cfg.get("stale_batch_size", batch_size))) if isinstance(cfg, dict) else batch_size
-        )
-        due_at = float(app.reconcile_next_due.get(mode, 0.0))
-        wait_left = max(0.0, due_at - time.time()) if due_at > 0 else 0.0
-        out.append(
-            f"reconcile policy ({mode}): wait={wait_s:.2f}s batch={batch_size} parallel={parallel} next_in={wait_left:.2f}s"
-        )
-        out.append(
-            f"reconcile policy ({mode}) details: stale_boost={'yes' if stale_boost else 'no'} stale_wait={stale_interval_s:.2f}s stale_batch={stale_batch_size} stale_parallel={stale_parallelism} usage={'yes' if usage_enabled else 'no'} usage_weight={usage_weight:.2f}"
-        )
-    selected = app._selected_row()
-    out.append("[dim]----------------------------------------[/]")
-    out.append("[cyan]selected cache state[/]:")
-    if selected is None:
-        out.append("row: -")
-        out.append("last cached: -")
-        out.append("last reconciled: -")
-        out.append("reconcile score: -")
-    else:
-        out.append(f"row: {app._esc(selected.name)}")
-        if selected.last_cached_ts > 0:
-            out.append(
-                f"last cached: {fmt_iso(selected.last_cached_ts)} ({fmt_age_short(selected.last_cached_ts)})"
-            )
-        else:
-            out.append("last cached: -")
-        if selected.last_reconciled_ts > 0:
-            out.append(
-                f"last reconciled: {fmt_iso(selected.last_reconciled_ts)} ({fmt_age_short(selected.last_reconciled_ts)})"
-            )
-        else:
-            out.append("last reconciled: -")
-        usage_score = float(app.row_usage_score.get(selected.path, 0.0))
-        usage_hits = int(app.row_usage_hits.get(selected.path, 0))
-        out.append(f"reconcile score: {usage_score:.2f} hits={usage_hits}")
-    out.append("[dim]----------------------------------------[/]")
-    out.append("[cyan]workers[/]:")
-    out.append(f"cache refresh thread: {'running' if app.cache_worker_running else 'idle'}")
-    out.append(f"reconcile worker: {'running' if app.reconcile_worker_running else 'idle'}")
-    if app.reconcile_worker_running and app.reconcile_worker_started_ts > 0:
-        started_ts = int(app.reconcile_worker_started_ts)
-        out.append(f"reconcile worker running for: {fmt_age_short(started_ts)}")
-    elif app.reconcile_worker_last_done_ts > 0:
-        done_ts = int(app.reconcile_worker_last_done_ts)
-        out.append(
-            f"reconcile worker last done: {fmt_iso(done_ts)} ({fmt_age_short(done_ts)})"
-        )
-    out.append(f"git worker: {'running' if app.git_refresh_running else 'idle'}")
-    out.append(
-        f"git worker reason: {app._esc(app.git_refresh_reason) if app.git_refresh_reason else '-'}"
-    )
-    if app.reconcile_worker_reason:
-        out.append(
-            f"reconcile reason: {app._esc(app.reconcile_worker_reason)} ({app._esc(app.reconcile_worker_mode)})"
-        )
-    else:
-        out.append("reconcile reason: -")
-    if app.reconcile_last_skip_reason:
-        skip_ts = int(app.reconcile_last_skip_ts) if app.reconcile_last_skip_ts > 0 else 0
-        if skip_ts > 0:
-            out.append(
-                f"reconcile scheduler: {app._esc(app.reconcile_last_skip_reason)} ({fmt_age_short(skip_ts)})"
-            )
-        else:
-            out.append(f"reconcile scheduler: {app._esc(app.reconcile_last_skip_reason)}")
-    out.append("[cyan]recent reconciled[/] [dim](last 5 per type)[/]:")
-    for kind in ("active", "archive"):
-        items = app.reconcile_recent.get(kind, [])
-        out.append(f"{kind}: {len(items)}")
-        slots = list(reversed(items[-5:]))
-        while len(slots) < 5:
-            slots.append(("-", "-"))
-        for ts, label in slots:
-            if ts == "-":
-                out.append("  [dim]-[/]")
-                continue
-            out.append(f"  [dim]{app._esc(ts)} ({fmt_age_short_from_iso(ts)})[/] {app._esc(label)}")
-    out.append(
-        f"cache queue: pending={'yes' if app.cache_refresh_pending else 'no'} force={'yes' if app.cache_refresh_pending_force else 'no'}"
-    )
-    out.append(f"reconcile queue size: {len(app.reconcile_queue)}")
-    out.append(
-        f"cache pending reason: {app._esc(app.cache_refresh_pending_reason) if app.cache_refresh_pending_reason else '-'}"
-    )
-    out.append(
-        f"cache active reason: {app._esc(app.cache_worker_note) if app.cache_worker_note else '-'}"
-    )
-    out.append(f"detail worker: {'running' if app.detail_worker_running else 'idle'}")
-    out.append(
-        f"detail path: {app._esc(app.detail_worker_path) if app.detail_worker_path is not None else '-'}"
-    )
-    out.append(f"detail token: {app.detail_worker_token}")
-    out.append(f"tag sync worker: {'running' if app.tag_sync_running else 'idle'}")
-    out.append(f"tag sync queue: pending={'yes' if app.tag_sync_pending else 'no'}")
-    out.append(
-        f"tag sync pending reason: {app._esc(app.tag_sync_pending_reason) if app.tag_sync_pending_reason else '-'}"
-    )
-    out.append(f"archive action worker: {'running' if app.action_worker_running else 'idle'}")
-    out.append(
-        f"archive backend: tar={'yes' if shutil.which('tar') is not None else 'python fallback'}"
-    )
-    out.append(
-        f"archive action: {app._esc(app.action_worker_action) if app.action_worker_action else '-'}"
-    )
-    out.append(f"archive progress: {app.action_worker_done}/{app.action_worker_total}")
-    out.append(
-        f"archive current item: {app._esc(app.action_worker_current) if app.action_worker_current else '-'}"
-    )
-    out.append(
-        f"archive stage: {app._esc(app.action_worker_stage) if app.action_worker_stage else '-'}"
-    )
-    out.append(
-        f"archive command: [dim]{app._esc(app.action_worker_command)}[/]"
-        if app.action_worker_command
-        else "archive command: -"
-    )
-    out.append(
-        "archive started: "
-        f"{fmt_iso(app.action_worker_started_ts)} ({fmt_age_short(app.action_worker_started_ts)})"
-        if app.action_worker_started_ts > 0
-        else "archive started: -"
-    )
-    out.append(f"pane probe: {'running' if app.pane_probe_running else 'idle'}")
-    out.append(f"busy overlay: depth={app._busy_depth} label={app._esc(app._busy_label)}")
-    out.append(
-        f"restore queue: active={len(app.pending_restore_queue)} ok={app.pending_restore_ok} failed={app.pending_restore_failed}"
-    )
-    out.append(f"pending tag confirmations: {len(app.pending_tag_updates)}")
-    out.append("[dim]notes: stale rows auto-refresh; selected git/files refresh on demand[/]")
-    out.append("[cyan]worker debug[/] [dim](last 10)[/]:")
-    debug_slots = list(app.worker_debug_events[-10:])
-    while len(debug_slots) < 10:
-        debug_slots.insert(0, ("-", "-"))
-    for ts, msg in debug_slots:
-        if ts == "-":
-            out.append("  [dim]-[/]")
-            continue
-        out.append(
-            f"  [dim]{app._esc(ts)} ({fmt_age_short_from_iso(ts)})[/] {app._esc(msg)}"
-        )
+        out.extend(_reconcile_mode_lines(app, mode))
+    out.extend(_selected_cache_lines(app))
+    out.extend(_reconcile_worker_lines(app))
+    out.extend(_recent_reconciled_lines(app))
+    out.extend(_queue_lines(app))
+    out.extend(_archive_action_lines(app))
+    out.extend(_misc_worker_lines(app))
     return [_one_line(line) for line in out]
 
 

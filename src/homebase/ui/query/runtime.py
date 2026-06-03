@@ -215,6 +215,93 @@ def flush_query_apply_if_due(app: Any) -> None:
     app._refresh_side()
 
 
+def _esc_bracket(text: str) -> str:
+    return text.replace("[", "\\[")
+
+
+def _query_badge(
+    app: Any,
+    *,
+    color_interactive_hex: str,
+    query_mode: bool,
+    query_resolve_err: str | None,
+    query_err: str | None,
+) -> str:
+    badge = ""
+    if query_mode:
+        badge = f" [{color_interactive_hex}](expr)[/]"
+        if query_resolve_err:
+            badge = f" [red](expr: {query_resolve_err})[/]"
+        elif query_err:
+            badge = " [red](expr invalid)[/]"
+    if app.query_apply_pending:
+        badge += " [dim](typing)[/]"
+    return badge
+
+
+def _format_status_line(
+    app: Any,
+    *,
+    color_interactive_hex: str,
+    color_nav_hex: str,
+    color_archive_hex: str,
+    color_success_hex: str,
+    color_error_hex: str,
+    color_warn_hex: str,
+    mode_active: str,
+    count: int,
+) -> str:
+    view_color = (
+        color_nav_hex if app.view_mode == mode_active else color_archive_hex
+    )
+    cache_state = "warming" if app.cache_worker_running else "ready"
+    cache_state_color = (
+        color_interactive_hex if app.cache_worker_running else color_success_hex
+    )
+    select_color = color_success_hex if app.select_mode else color_error_hex
+    line = (
+        f"[bold {color_nav_hex}]VIEW[/]: [{view_color}]{app.view_mode}[/]"
+        f"   [bold {color_nav_hex}]SORT[/]: [{color_interactive_hex}]{app.sort_mode}[/]"
+        f"   [bold {color_nav_hex}]ROWS[/]: [white]{count}[/]"
+        f"   [bold {color_nav_hex}]SELECT[/]: [{select_color}]"
+        f"{'ON' if app.select_mode else 'OFF'}[/]"
+        f"   [bold {color_nav_hex}]CACHE[/]: [{cache_state_color}]{cache_state}[/]"
+    )
+    if app._critical_job_active():
+        line += (
+            f"   [{color_warn_hex}]![/] [{color_warn_hex}]"
+            f"{_esc_bracket(app._critical_job_label())}[/]"
+        )
+    if app.select_mode:
+        line += (
+            f"   [bold {color_nav_hex}]SELECTED_COUNT[/]: "
+            f"[{color_interactive_hex}]{len(app.multi_selected)}[/]"
+        )
+    if app._busy_depth > 0:
+        spinner = app._busy_frames[app._busy_frame_index]
+        line += (
+            f" [{color_interactive_hex}]{spinner} "
+            f"{_esc_bracket(app._busy_label)}[/]"
+        )
+    line += f"   [bold {color_nav_hex}]DETAILS[/]:"
+    if app.detail_worker_running and app.detail_worker_path is not None:
+        line += (
+            f" [{color_interactive_hex}]refreshing "
+            f"{_esc_bracket(app.detail_worker_path.name)}[/]"
+        )
+    if app.runtime_status_text:
+        color = color_success_hex
+        if app.runtime_status_level == "warn":
+            color = color_warn_hex
+        elif app.runtime_status_level == "error":
+            color = color_error_hex
+        line += (
+            f"   [bold {color_nav_hex}]STATUS[/]: "
+            f"[{color}]{_esc_bracket(app.runtime_status_text)}[/]"
+        )
+    return line
+
+
 def refresh_search_display(
     app: Any,
     *,
@@ -229,74 +316,50 @@ def refresh_search_display(
     disp_left = app.query_one("#global_meta_left", Static)
     disp_right = app.query_one("#global_meta_right", Static)
 
-    def esc(text: str) -> str:
-        return text.replace("[", "\\[")
-
     app._normalize_query_cursor()
-    if app.query:
-        active = _render_query_with_cursor(
+    active = (
+        _render_query_with_cursor(
             app.query,
             app.query_cursor,
             color_key=color_nav_hex,
             color_op=color_archive_hex,
             color_value=color_success_hex,
             color_unknown=color_warn_hex,
-            esc=esc,
+            esc=_esc_bracket,
         )
-    else:
-        active = ""
-    count = app.query_last_rows_count
-    query_mode, _resolved_query, query_resolve_err, _qpred, query_err = app._query_eval(
-        app.query
+        if app.query
+        else ""
     )
+    count = app.query_last_rows_count
+    (
+        query_mode,
+        _resolved_query,
+        query_resolve_err,
+        _qpred,
+        query_err,
+    ) = app._query_eval(app.query)
     if not app.query_apply_pending:
         count = len(app._current_rows())
         app.query_last_rows_count = count
-    query_badge = ""
-    if query_mode:
-        query_badge = f" [{color_interactive_hex}](expr)[/]"
-        if query_resolve_err:
-            query_badge = f" [red](expr: {query_resolve_err})[/]"
-        elif query_err:
-            query_badge = " [red](expr invalid)[/]"
-    if app.query_apply_pending:
-        query_badge += " [dim](typing)[/]"
-    line1 = f"[bold {color_nav_hex}]QUERY[/] [bold white]{active}[/]{query_badge}"
-    view_color = color_nav_hex if app.view_mode == mode_active else color_archive_hex
-    cache_state = "warming" if app.cache_worker_running else "ready"
-    cache_state_color = color_interactive_hex if app.cache_worker_running else color_success_hex
-    select_color = color_success_hex if app.select_mode else color_error_hex
-    line2 = (
-        f"[bold {color_nav_hex}]VIEW[/]: [{view_color}]{app.view_mode}[/]"
-        f"   [bold {color_nav_hex}]SORT[/]: [{color_interactive_hex}]{app.sort_mode}[/]"
-        f"   [bold {color_nav_hex}]ROWS[/]: [white]{count}[/]"
-        f"   [bold {color_nav_hex}]SELECT[/]: [{select_color}]{'ON' if app.select_mode else 'OFF'}[/]"
-        f"   [bold {color_nav_hex}]CACHE[/]: [{cache_state_color}]{cache_state}[/]"
+    badge = _query_badge(
+        app,
+        color_interactive_hex=color_interactive_hex,
+        query_mode=query_mode,
+        query_resolve_err=query_resolve_err,
+        query_err=query_err,
     )
-    if app._critical_job_active():
-        line2 += (
-            f"   [{color_warn_hex}]![/] [{color_warn_hex}]{esc(app._critical_job_label())}[/]"
-        )
-    if app.select_mode:
-        line2 += (
-            f"   [bold {color_nav_hex}]SELECTED_COUNT[/]: [{color_interactive_hex}]"
-            f"{len(app.multi_selected)}[/]"
-        )
-    if app._busy_depth > 0:
-        spinner = app._busy_frames[app._busy_frame_index]
-        line2 += f" [{color_interactive_hex}]{spinner} {esc(app._busy_label)}[/]"
-    line2 += f"   [bold {color_nav_hex}]DETAILS[/]:"
-    if app.detail_worker_running and app.detail_worker_path is not None:
-        line2 += (
-            f" [{color_interactive_hex}]refreshing {esc(app.detail_worker_path.name)}[/]"
-        )
-    if app.runtime_status_text:
-        color = color_success_hex
-        if app.runtime_status_level == "warn":
-            color = color_warn_hex
-        elif app.runtime_status_level == "error":
-            color = color_error_hex
-        line2 += f"   [bold {color_nav_hex}]STATUS[/]: [{color}]{esc(app.runtime_status_text)}[/]"
+    line1 = f"[bold {color_nav_hex}]QUERY[/] [bold white]{active}[/]{badge}"
+    line2 = _format_status_line(
+        app,
+        color_interactive_hex=color_interactive_hex,
+        color_nav_hex=color_nav_hex,
+        color_archive_hex=color_archive_hex,
+        color_success_hex=color_success_hex,
+        color_error_hex=color_error_hex,
+        color_warn_hex=color_warn_hex,
+        mode_active=mode_active,
+        count=count,
+    )
     text = f"{line1}\n{line2}"
     if app.select_mode:
         text += (
@@ -316,7 +379,7 @@ def refresh_search_display(
     parts: list[str] = [f"[bold {color_nav_hex}]HOTBAR[/] [dim]^@[/]:"]
     for i, target in enumerate(targets):
         label = app._hotbar_target_label(target)
-        rendered_label = esc(label)
+        rendered_label = _esc_bracket(label)
         if app.select_mode and target in {"open_selected", "action:open_selected"}:
             rendered_label = f"{rendered_label} [1]"
         cell = f" {rendered_label} "

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sqlite3
 import subprocess
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
@@ -119,6 +120,307 @@ def _archive_note_sync_with_rollback(
     return True
 
 
+@dataclass
+class _BulkCallbacks:
+    archive_move_internal: Callable[[Path, Path, bool], Path]
+    archive_restore_internal: Callable[[Path, Path, bool], Path]
+    archive_pack_internal: Callable[[Path, Path], Path]
+    archive_unpack_internal: Callable[[Path, Path], Path]
+    delete_internal: Callable[[Path, Path, bool], None]
+    is_packed_archive_path: Callable[[Path], bool]
+    open_meta_for_review: Callable[[Path], tuple[bool, str]]
+    rename_legacy_base_yaml: Callable[[Path], tuple[bool, str]]
+    project_row: Callable[..., ProjectRow]
+    row_build_errors: tuple[type[BaseException], ...]
+    deworktree_internal: Callable[[Path, Path], None]
+
+
+@dataclass
+class _BulkState:
+    success: int = 0
+    failed: int = 0
+    removed_paths: list[Path] = field(default_factory=list)
+    upsert_rows: list[ProjectRow] = field(default_factory=list)
+
+
+def _safe_build_archived_row(app: Any, path: Path, errors: tuple) -> ProjectRow | None:
+    try:
+        return app._build_archived_row_from_entry(path)
+    except errors:
+        return None
+
+
+def _action_archive(app: Any, path: Path, cb: _BulkCallbacks) -> tuple[bool, Path | None, ProjectRow | None]:
+    dest = cb.archive_move_internal(app.base_dir, path, sync_tags=False)
+    if not _archive_note_sync_with_rollback(
+        app,
+        source_path=path,
+        archived_path=dest,
+        archive_restore_internal=cb.archive_restore_internal,
+    ):
+        return False, None, None
+    app._log(f"archived: {path.name} -> {dest}", "info")
+    return True, path, _safe_build_archived_row(app, dest, cb.row_build_errors)
+
+
+def _action_restore(app: Any, path: Path, cb: _BulkCallbacks) -> tuple[bool, Path | None, ProjectRow | None]:
+    restored = cb.archive_restore_internal(app.base_dir, path, sync_tags=False)
+    app._log(f"restored: {path.name} -> {restored}", "info")
+    return True, None, None
+
+
+def _action_pack(app: Any, path: Path, cb: _BulkCallbacks) -> tuple[bool, Path | None, ProjectRow | None]:
+    packed_path = cb.archive_pack_internal(app.base_dir, path)
+    app._log(f"packed: {path.name} -> {packed_path.name}", "info")
+    return True, path, _safe_build_archived_row(app, packed_path, cb.row_build_errors)
+
+
+def _action_unpack(app: Any, path: Path, cb: _BulkCallbacks) -> tuple[bool, Path | None, ProjectRow | None]:
+    unpacked_path = cb.archive_unpack_internal(app.base_dir, path)
+    app._log(f"unpacked: {path.name} -> {unpacked_path.name}", "info")
+    return True, path, _safe_build_archived_row(app, unpacked_path, cb.row_build_errors)
+
+
+def _action_toggle_pack(app: Any, path: Path, cb: _BulkCallbacks) -> tuple[bool, Path | None, ProjectRow | None]:
+    if cb.is_packed_archive_path(path):
+        new_path = cb.archive_unpack_internal(app.base_dir, path)
+        verb = "unpacked"
+    else:
+        new_path = cb.archive_pack_internal(app.base_dir, path)
+        verb = "packed"
+    app._log(f"{verb}: {path.name} -> {new_path.name}", "info")
+    return True, path, _safe_build_archived_row(app, new_path, cb.row_build_errors)
+
+
+def _action_delete(app: Any, path: Path, cb: _BulkCallbacks) -> tuple[bool, Path | None, ProjectRow | None]:
+    cb.delete_internal(app.base_dir, path, sync_tags=False)
+    app._log(f"deleted: {path}", "info")
+    return True, path, None
+
+
+def _action_deworktree(app: Any, path: Path, cb: _BulkCallbacks) -> tuple[bool, Path | None, ProjectRow | None]:
+    cb.deworktree_internal(app.base_dir, path)
+    app._log(f"deworktreed: {path.name}", "info")
+    try:
+        return True, None, cb.project_row(path, archived=False)
+    except cb.row_build_errors:
+        return True, None, None
+
+
+def _action_review_meta(app: Any, path: Path, cb: _BulkCallbacks) -> tuple[bool, Path | None, ProjectRow | None]:
+    ok_review, msg = cb.open_meta_for_review(path)
+    if not ok_review:
+        app._log(f"review failed for {path.name}: {msg}", "error")
+        return False, None, None
+    app._log(f"review opened: {path.name}", "info")
+    return True, None, None
+
+
+_RENAME_META_ROW_ERRORS = (
+    OSError, ValueError, TypeError, subprocess.SubprocessError, sqlite3.Error,
+)
+
+
+def _rename_meta_upsert(app: Any, path: Path, cb: _BulkCallbacks) -> ProjectRow | None:
+    try:
+        cur = app._find_row(path)
+        if cur is not None:
+            rws, ridx = cur
+            cur_row = rws[ridx]
+            return cb.project_row(
+                path,
+                archived=cur_row.archived,
+                restore_target=cur_row.restore_target,
+                archived_ts=cur_row.archived_ts,
+            )
+        return cb.project_row(path, archived=False)
+    except _RENAME_META_ROW_ERRORS:
+        return None
+
+
+def _action_rename_meta_ext(app: Any, path: Path, cb: _BulkCallbacks) -> tuple[bool, Path | None, ProjectRow | None]:
+    ok_rename, msg = cb.rename_legacy_base_yaml(path)
+    if not ok_rename:
+        app._log(f"rename failed for {path.name}: {msg}", "error")
+        return False, None, None
+    app._log(f"renamed metadata extension: {path.name}", "info")
+    return True, None, _rename_meta_upsert(app, path, cb)
+
+
+_ACTION_HANDLERS: dict[str, Callable[[Any, Path, _BulkCallbacks], tuple[bool, Path | None, ProjectRow | None]]] = {
+    "archive": _action_archive,
+    "restore": _action_restore,
+    "pack": _action_pack,
+    "unpack": _action_unpack,
+    "toggle_pack": _action_toggle_pack,
+    "delete": _action_delete,
+    "deworktree": _action_deworktree,
+    "review_meta": _action_review_meta,
+    "rename_meta_ext": _action_rename_meta_ext,
+}
+
+
+def _run_one(
+    app: Any,
+    action: str,
+    path: Path,
+    cb: _BulkCallbacks,
+    state: _BulkState,
+) -> None:
+    handler = _ACTION_HANDLERS.get(action)
+    if handler is None:
+        app._log(f"unknown action: {action}", "error")
+        state.failed += 1
+        return
+    try:
+        success, removed, upsert = handler(app, path, cb)
+    except ValueError as exc:
+        state.failed += 1
+        app._log(f"{action} failed for {path.name}: {exc}", "error")
+        return
+    if not success:
+        state.failed += 1
+        if action == "archive":
+            app.multi_selected.discard(path)
+        return
+    if removed is not None:
+        state.removed_paths.append(removed)
+    if upsert is not None:
+        state.upsert_rows.append(upsert)
+    state.success += 1
+    app.multi_selected.discard(path)
+
+
+def _build_delete_snapshots(
+    app: Any, runnable_paths: list[Path]
+) -> tuple[list[HookTarget], dict[Path, dict[str, object]]]:
+    delete_targets: list[HookTarget] = []
+    removed_snapshots: dict[Path, dict[str, object]] = {}
+    for path in runnable_paths:
+        hit = app._find_row(path)
+        if hit is None:
+            continue
+        rows, idx = hit
+        row = rows[idx]
+        try:
+            base_meta = load_base_data(path)
+        except OSError:
+            base_meta = {}
+        target = snapshot_target(row, base_meta)
+        delete_targets.append(target)
+        removed_snapshots[path] = {
+            "name": target.name,
+            "archived": target.archived,
+            "tags": list(target.tags),
+            "properties": list(target.properties),
+            "description": target.description,
+            "wip": target.wip,
+            "suffix": target.suffix,
+            "packed": target.packed,
+            "base_meta": dict(target.base_meta),
+        }
+    return delete_targets, removed_snapshots
+
+
+def _maybe_run_pre_delete_hook(
+    app: Any,
+    action: str,
+    runnable_paths: list[Path],
+) -> tuple[list[HookTarget], dict[Path, dict[str, object]], bool]:
+    """Return (delete_targets, removed_snapshots, cancelled)."""
+    if action != "delete":
+        return [], {}, False
+    delete_targets, removed_snapshots = _build_delete_snapshots(app, runnable_paths)
+    pre_outcome = hooks_runtime.dispatch_pre(
+        app,
+        event="delete",
+        targets=delete_targets,
+        change={
+            "removed_paths": [target.path for target in delete_targets],
+            "removed_snapshots": removed_snapshots,
+        },
+        view=app.view_mode,
+    )
+    if pre_outcome.cancelled:
+        app._log(f"delete cancelled by hook: {pre_outcome.reason}", "warn")
+        app._refresh_side()
+        return delete_targets, removed_snapshots, True
+    return delete_targets, removed_snapshots, False
+
+
+def _finalize_bulk(
+    app: Any,
+    action: str,
+    state: _BulkState,
+    delete_targets: list[HookTarget],
+    removed_snapshots: dict[Path, dict[str, object]],
+) -> None:
+    if state.removed_paths:
+        app._remove_paths_local(state.removed_paths)
+    if action in {"archive", "restore"}:
+        app._request_tag_sync(f"{action} update")
+    if action == "delete" and delete_targets:
+        hooks_runtime.dispatch_post(
+            app,
+            event="delete",
+            targets=delete_targets,
+            change={
+                "removed_paths": [target.path for target in delete_targets],
+                "removed_snapshots": removed_snapshots,
+            },
+            view=app.view_mode,
+        )
+    for row in state.upsert_rows:
+        app._upsert_row_local(row)
+    if state.removed_paths or state.upsert_rows:
+        app._touch_rows_cache(state.upsert_rows, removed=state.removed_paths)
+        app._start_cache_refresh(f"{action} update", force=False)
+    else:
+        app._refresh_data()
+    app._refresh_table()
+    app._log(
+        f"{action} finished: ok={state.success}, failed={state.failed}", "info"
+    )
+    app._refresh_side()
+
+
+def _preflight(
+    app: Any, action: str, paths: list[Path]
+) -> tuple[list[Path], bool]:
+    """Return (runnable, should_continue). should_continue=False means
+    side-effects already done; caller must return."""
+    runnable_paths, skipped_paths = app._preflight_bulk_action(action, paths)
+    if skipped_paths:
+        app._log(
+            f"{action} preflight skipped {len(skipped_paths)} item(s): "
+            f"{app._preflight_skip_summary(skipped_paths)}",
+            "warn",
+        )
+    if not runnable_paths:
+        app._log(f"{action} skipped: no eligible items", "warn")
+        app._refresh_side()
+        return [], False
+    return runnable_paths, True
+
+
+def _maybe_handle_async_action(
+    app: Any, action: str, runnable_paths: list[Path]
+) -> bool:
+    """Restore + pack/unpack/toggle_pack are dispatched to async workers.
+    Return True if handled (caller must return)."""
+    if action == "restore":
+        app.pending_restore_queue = list(runnable_paths)
+        app.pending_restore_ok = 0
+        app.pending_restore_failed = 0
+        app._busy_start("restoring target items")
+        app._process_next_restore()
+        return True
+    if action in {"pack", "unpack", "toggle_pack"}:
+        app._start_archive_action_worker(action, list(runnable_paths))
+        return True
+    return False
+
+
 def on_confirm_bulk(
     app: Any,
     ok: bool,
@@ -142,211 +444,39 @@ def on_confirm_bulk(
         app._refresh_side()
         return
 
-    runnable_paths, skipped_paths = app._preflight_bulk_action(action, paths)
-    if skipped_paths:
-        app._log(
-            f"{action} preflight skipped {len(skipped_paths)} item(s): {app._preflight_skip_summary(skipped_paths)}",
-            "warn",
-        )
-    if not runnable_paths:
-        app._log(f"{action} skipped: no eligible items", "warn")
-        app._refresh_side()
+    runnable_paths, cont = _preflight(app, action, paths)
+    if not cont:
         return
 
-    if action == "restore":
-        app.pending_restore_queue = list(runnable_paths)
-        app.pending_restore_ok = 0
-        app.pending_restore_failed = 0
-        app._busy_start("restoring target items")
-        app._process_next_restore()
+    if _maybe_handle_async_action(app, action, runnable_paths):
         return
 
-    if action in {"pack", "unpack", "toggle_pack"}:
-        app._start_archive_action_worker(action, list(runnable_paths))
+    delete_targets, removed_snapshots, cancelled = _maybe_run_pre_delete_hook(
+        app, action, runnable_paths
+    )
+    if cancelled:
         return
 
-    success = 0
-    failed = 0
-    removed_paths: list[Path] = []
-    upsert_rows: list[ProjectRow] = []
-    delete_targets: list[HookTarget] = []
-    removed_snapshots: dict[Path, dict[str, object]] = {}
-    if action == "delete":
-        for path in runnable_paths:
-            hit = app._find_row(path)
-            if hit is None:
-                continue
-            rows, idx = hit
-            row = rows[idx]
-            try:
-                base_meta = load_base_data(path)
-            except OSError:
-                base_meta = {}
-            target = snapshot_target(row, base_meta)
-            delete_targets.append(target)
-            removed_snapshots[path] = {
-                "name": target.name,
-                "archived": target.archived,
-                "tags": list(target.tags),
-                "properties": list(target.properties),
-                "description": target.description,
-                "wip": target.wip,
-                "suffix": target.suffix,
-                "packed": target.packed,
-                "base_meta": dict(target.base_meta),
-            }
-        pre_outcome = hooks_runtime.dispatch_pre(
-            app,
-            event="delete",
-            targets=delete_targets,
-            change={
-                "removed_paths": [target.path for target in delete_targets],
-                "removed_snapshots": removed_snapshots,
-            },
-            view=app.view_mode,
-        )
-        if pre_outcome.cancelled:
-            app._log(f"delete cancelled by hook: {pre_outcome.reason}", "warn")
-            app._refresh_side()
-            return
+    cb = _BulkCallbacks(
+        archive_move_internal=archive_move_internal,
+        archive_restore_internal=archive_restore_internal,
+        archive_pack_internal=archive_pack_internal,
+        archive_unpack_internal=archive_unpack_internal,
+        delete_internal=delete_internal,
+        is_packed_archive_path=is_packed_archive_path,
+        open_meta_for_review=open_meta_for_review,
+        rename_legacy_base_yaml=rename_legacy_base_yaml,
+        project_row=project_row,
+        row_build_errors=row_build_errors,
+        deworktree_internal=deworktree_internal,
+    )
+    state = _BulkState()
     app._busy_start(f"running {action} on target")
     try:
         for path in runnable_paths:
             app._busy_tick()
-            try:
-                if action == "archive":
-                    dest = archive_move_internal(app.base_dir, path, sync_tags=False)
-                    if not _archive_note_sync_with_rollback(
-                        app,
-                        source_path=path,
-                        archived_path=dest,
-                        archive_restore_internal=archive_restore_internal,
-                    ):
-                        failed += 1
-                        app.multi_selected.discard(path)
-                        continue
-                    app._log(f"archived: {path.name} -> {dest}", "info")
-                    removed_paths.append(path)
-                    try:
-                        upsert_rows.append(app._build_archived_row_from_entry(dest))
-                    except row_build_errors:
-                        pass
-                elif action == "restore":
-                    restored = archive_restore_internal(app.base_dir, path, sync_tags=False)
-                    app._log(f"restored: {path.name} -> {restored}", "info")
-                elif action == "pack":
-                    packed_path = archive_pack_internal(app.base_dir, path)
-                    app._log(f"packed: {path.name} -> {packed_path.name}", "info")
-                    removed_paths.append(path)
-                    try:
-                        upsert_rows.append(app._build_archived_row_from_entry(packed_path))
-                    except row_build_errors:
-                        pass
-                elif action == "unpack":
-                    unpacked_path = archive_unpack_internal(app.base_dir, path)
-                    app._log(f"unpacked: {path.name} -> {unpacked_path.name}", "info")
-                    removed_paths.append(path)
-                    try:
-                        upsert_rows.append(
-                            app._build_archived_row_from_entry(unpacked_path)
-                        )
-                    except row_build_errors:
-                        pass
-                elif action == "toggle_pack":
-                    if is_packed_archive_path(path):
-                        new_path = archive_unpack_internal(app.base_dir, path)
-                        verb = "unpacked"
-                    else:
-                        new_path = archive_pack_internal(app.base_dir, path)
-                        verb = "packed"
-                    app._log(f"{verb}: {path.name} -> {new_path.name}", "info")
-                    removed_paths.append(path)
-                    try:
-                        upsert_rows.append(app._build_archived_row_from_entry(new_path))
-                    except row_build_errors:
-                        pass
-                elif action == "delete":
-                    delete_internal(app.base_dir, path, sync_tags=False)
-                    app._log(f"deleted: {path}", "info")
-                    removed_paths.append(path)
-                elif action == "deworktree":
-                    deworktree_internal(app.base_dir, path)
-                    app._log(f"deworktreed: {path.name}", "info")
-                    try:
-                        upsert_rows.append(project_row(path, archived=False))
-                    except row_build_errors:
-                        pass
-                elif action == "review_meta":
-                    ok_review, msg = open_meta_for_review(path)
-                    if not ok_review:
-                        failed += 1
-                        app._log(f"review failed for {path.name}: {msg}", "error")
-                        continue
-                    app._log(f"review opened: {path.name}", "info")
-                elif action == "rename_meta_ext":
-                    ok_rename, msg = rename_legacy_base_yaml(path)
-                    if not ok_rename:
-                        failed += 1
-                        app._log(f"rename failed for {path.name}: {msg}", "error")
-                        continue
-                    app._log(f"renamed metadata extension: {path.name}", "info")
-                    try:
-                        cur = app._find_row(path)
-                        if cur is not None:
-                            rws, ridx = cur
-                            cur_row = rws[ridx]
-                            upsert_rows.append(
-                                project_row(
-                                    path,
-                                    archived=cur_row.archived,
-                                    restore_target=cur_row.restore_target,
-                                    archived_ts=cur_row.archived_ts,
-                                )
-                            )
-                        else:
-                            upsert_rows.append(project_row(path, archived=False))
-                    except (
-                        OSError,
-                        ValueError,
-                        TypeError,
-                        subprocess.SubprocessError,
-                        sqlite3.Error,
-                    ):
-                        pass
-                else:
-                    app._log(f"unknown action: {action}", "error")
-                    failed += 1
-                    continue
-                success += 1
-                app.multi_selected.discard(path)
-            except ValueError as exc:
-                failed += 1
-                app._log(f"{action} failed for {path.name}: {exc}", "error")
+            _run_one(app, action, path, cb, state)
     finally:
         app._busy_stop()
 
-    if removed_paths:
-        app._remove_paths_local(removed_paths)
-    if action in {"archive", "restore"}:
-        app._request_tag_sync(f"{action} update")
-    if action == "delete" and delete_targets:
-        hooks_runtime.dispatch_post(
-            app,
-            event="delete",
-            targets=delete_targets,
-            change={
-                "removed_paths": [target.path for target in delete_targets],
-                "removed_snapshots": removed_snapshots,
-            },
-            view=app.view_mode,
-        )
-    for row in upsert_rows:
-        app._upsert_row_local(row)
-    if removed_paths or upsert_rows:
-        app._touch_rows_cache(upsert_rows, removed=removed_paths)
-        app._start_cache_refresh(f"{action} update", force=False)
-    else:
-        app._refresh_data()
-    app._refresh_table()
-    app._log(f"{action} finished: ok={success}, failed={failed}", "info")
-    app._refresh_side()
+    _finalize_bulk(app, action, state, delete_targets, removed_snapshots)
