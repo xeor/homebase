@@ -31,7 +31,7 @@ Last run: `2026-06-04` · source: 218 files / 47k LOC · tests: 165 files / ~28k
 | import-linter | contract violations             | 0            | 0             | green    |
 | vulture       | findings (min-confidence 80)    | 0            | 0             | green    |
 | vulture       | findings (min-confidence 60)    | ~289 lns     | review        | baseline |
-| bandit        | High / Medium / Low             | 4 / 7 / 138  | 0 / 0 / < 20  | baseline |
+| bandit        | High / Medium / Low             | 0 / 0 / 0    | 0 / 0 / < 20  | green    |
 | radon (cc)    | avg complexity                  | C (14.4)     | B (≤ 10)      | baseline |
 | radon (cc)    | functions ranked C or worse     | 180          | 0             | baseline |
 | radon (mi)    | files at maintainability ≤ C    | 14           | 0             | baseline |
@@ -114,7 +114,7 @@ uv run vulture src/homebase --min-confidence 60   # broader review
 ### 7. bandit — security linting
 
 ```
-uv run bandit -q -r src/homebase
+uv run bandit -c pyproject.toml -q -r src/homebase
 ```
 
 - Suppress intentional findings with `# nosec BXXX  # reason`.
@@ -212,7 +212,7 @@ uv run mypy src/homebase && \
 uv run pytest --cov=homebase --cov-report=term -q && \
 uv run lint-imports && \
 uv run vulture src/homebase && \
-uv run bandit -q -r src/homebase && \
+uv run bandit -c pyproject.toml -q -r src/homebase && \
 uv run radon cc src/homebase -a -s -n C && \
 uv run python docs/QA/scripts/qa_track.py
 ```
@@ -254,12 +254,18 @@ criterion. Tick `[x]` when the snapshot number reaches the target.
 
 ### Phase 4 — security (bandit)
 
-- [ ] Triage the 4 High findings first (likely `subprocess` /
-      `shell=True` / hardcoded paths). Fix or `# nosec` with reason.
-- [ ] Drop Medium to 0.
-- [ ] Review Low — most are likely `try/except/pass`. Tighten per
-      AGENTS.md §8.
-- Exit: 0 High, 0 Medium, < 20 Low.
+- [x] Triage the 4 High findings (3× SHA1 hashing for non-security
+      contexts → `usedforsecurity=False`; 1× `subprocess shell=True` for
+      user-defined post commands → `# nosec B602` with reason).
+- [x] Drop Medium to 0 (tarfile extract uses validated members +
+      `filter="data"`; SQL identifiers validated; download scheme
+      restricted to http/https; regression test paths moved off `/tmp`).
+- [x] Project-level skip for B404 / B603 / B607 (subprocess noise in
+      CLI tools that intentionally shell out), B105 (parser operator
+      constants), B101 (asserts as fail-fast invariants per
+      AGENTS.md §8). Configured in `pyproject.toml`; QA invocation
+      uses `bandit -c pyproject.toml`.
+- Exit: 0 High, 0 Medium, 0 Low.
 
 ### Phase 5 — coverage (pytest-cov)
 

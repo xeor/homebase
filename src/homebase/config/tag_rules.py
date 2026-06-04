@@ -204,7 +204,7 @@ def clear_tag_rules_cache() -> None:
 
 @functools.lru_cache(maxsize=4096)
 def hash_tag_color(tag: str) -> str:
-    digest = hashlib.sha1(tag.encode("utf-8", errors="ignore")).digest()
+    digest = hashlib.sha1(tag.encode("utf-8", errors="ignore"), usedforsecurity=False).digest()
     hue = int.from_bytes(digest[:2], "big") / 65535.0
     r, g, b = colorsys.hsv_to_rgb(hue, 0.32, 0.95)
     return f"#{int(r * 255):02X}{int(g * 255):02X}{int(b * 255):02X}"

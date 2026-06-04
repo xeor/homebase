@@ -122,7 +122,7 @@ def run_post_commands(target_dir: Path, commands: list[str]) -> None:
             result = subprocess.run(
                 cmd,
                 cwd=target_dir,
-                shell=True,
+                shell=True,  # nosec B602  # cmd is a user-configured post-create command; shell expansion is the intended UX
                 check=False,
                 text=True,
                 encoding="utf-8",

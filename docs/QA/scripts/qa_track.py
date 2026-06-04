@@ -185,7 +185,7 @@ TOOLS: dict[str, Spec] = {
         "ylabel": "violations",
     },
     "bandit": {
-        "cmd": ["uv", "run", "bandit", "-q", "-r", "src/homebase"],
+        "cmd": ["uv", "run", "bandit", "-c", "pyproject.toml", "-r", "src/homebase"],
         "parse": parse_bandit,
         "title": "bandit findings",
         "ylabel": "count",

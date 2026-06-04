@@ -75,7 +75,7 @@ def workspace_quick_signature(
             if p.is_dir() and not p.name.startswith(".") and not p.name.startswith("_")
         ]
         base_names.sort()
-        h = hashlib.sha1()
+        h = hashlib.sha1(usedforsecurity=False)
         for name in base_names:
             h.update(name.encode("utf-8", errors="ignore"))
             h.update(b"\0")
@@ -92,7 +92,7 @@ def workspace_quick_signature(
                 if p.is_dir() or p.name.endswith(packed_archive_suffix)
             ]
             roots.sort()
-            h2 = hashlib.sha1()
+            h2 = hashlib.sha1(usedforsecurity=False)
             for name in roots:
                 h2.update(name.encode("utf-8", errors="ignore"))
                 h2.update(b"\0")

@@ -99,7 +99,7 @@ def cmd_example_generate(path: str, count: int, seed: int | None) -> int:
     if count < 1:
         print(f"count must be >= 1 (got {count})", file=sys.stderr)
         return 2
-    rng = random.Random(seed)
+    rng = random.Random(seed)  # nosec B311  # seeded RNG for example-data variety, not security
     try:
         summary = _generate(target, count, rng)
     except (OSError, ValueError, subprocess.SubprocessError) as exc:

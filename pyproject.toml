@@ -63,6 +63,13 @@ exclude = []
 
 [tool.bandit]
 exclude_dirs = ["tests"]
+# B404/B603/B607: subprocess is used throughout to shell out to git/tar/tmux/
+#   ssh; argv-list form is the safe pattern and partial paths are the standard
+#   way to honor PATH. Per-site nosec would be noise without benefit.
+# B105: filter parser uses operator string literals ("AND", "OR", "(", ")", "|")
+#   that trip the hardcoded-password heuristic.
+# B101: asserts are kept as fail-fast invariants per AGENTS.md §8.
+skips = ["B101", "B105", "B404", "B603", "B607"]
 
 [tool.importlinter]
 root_packages = ["homebase"]

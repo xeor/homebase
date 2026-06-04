@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 import shutil
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -123,6 +124,9 @@ class DownloadSource(Source):
             self._user_hosts(),
             self._rewrites(),
         )
+        scheme = (urllib.parse.urlparse(resolved_url).scheme or "").lower()
+        if scheme not in {"http", "https"}:
+            raise ValueError(f"unsupported download scheme: {scheme or '(none)'}")
         steps = [
             f"mkdir {target}",
             f"fetch {resolved_url}",
@@ -157,7 +161,7 @@ class DownloadSource(Source):
         try:
             try:
                 req = urllib.request.Request(url, headers={"User-Agent": "homebase/b-new"})
-                with urllib.request.urlopen(req) as resp:  # noqa: S310 (user URL)
+                with urllib.request.urlopen(req) as resp:  # noqa: S310  # nosec B310  # scheme validated in plan()
                     filename = _filename_from(url, resp)
                     dest = target / filename
                     with open(dest, "wb") as fh:

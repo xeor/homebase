@@ -1,11 +1,21 @@
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 import time
 from pathlib import Path
 from typing import Any
 from urllib.parse import unquote, urlparse
+
+_SQL_IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
+def _sql_ident(raw: str, fallback: str) -> str:
+    text = raw.strip()
+    if not _SQL_IDENT_RE.match(text):
+        return fallback
+    return text
 
 
 def _sqlite_recent_paths(query: dict[str, object], *, base_dir: Path) -> list[Path]:
@@ -13,10 +23,10 @@ def _sqlite_recent_paths(query: dict[str, object], *, base_dir: Path) -> list[Pa
     if not db_path_raw:
         return []
     db_path = Path(db_path_raw).expanduser()
-    table = str(query.get("table", "ItemTable")).strip() or "ItemTable"
-    value_column = str(query.get("value_column", "value")).strip() or "value"
+    table = _sql_ident(str(query.get("table", "ItemTable")), "ItemTable")
+    value_column = _sql_ident(str(query.get("value_column", "value")), "value")
     where_like = str(query.get("where_like", "%file://%")).strip() or "%file://%"
-    sql = f"select {value_column} from {table} where {value_column} like ?"
+    sql = f"select {value_column} from {table} where {value_column} like ?"  # nosec B608  # identifiers validated by _sql_ident
     out: list[Path] = []
     try:
         con = sqlite3.connect(str(db_path))

@@ -297,13 +297,13 @@ def _regtest_nested_discovery_parity(root: Path) -> tuple[bool, str]:
 
 
 def _regtest_reconcile_queue_priority(root: Path) -> tuple[bool, str]:
-    _ = root
+    fake_root = root / "_regtest_queue"
     q: list[tuple[int, str, str, list[Path]]] = []
-    q = reconcile_queue_push(q, "active", "bg-z", [Path("/tmp/bg-z")], priority=1)
+    q = reconcile_queue_push(q, "active", "bg-z", [fake_root / "bg-z"], priority=1)
     q = reconcile_queue_push(
-        q, "archive", "manual-now", [Path("/tmp/manual")], priority=2
+        q, "archive", "manual-now", [fake_root / "manual"], priority=2
     )
-    q = reconcile_queue_push(q, "active", "bg-a", [Path("/tmp/bg-a")], priority=1)
+    q = reconcile_queue_push(q, "active", "bg-a", [fake_root / "bg-a"], priority=1)
 
     q_after_busy, first_busy = reconcile_queue_pop_next(q, worker_running=True)
     if first_busy is not None:
@@ -328,7 +328,7 @@ def _regtest_reconcile_queue_priority(root: Path) -> tuple[bool, str]:
             q4,
             "active",
             f"bg-{i:02d}",
-            [Path(f"/tmp/bg-{i:02d}")],
+            [fake_root / f"bg-{i:02d}"],
             priority=1,
             limit=40,
         )

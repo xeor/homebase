@@ -296,7 +296,7 @@ def open_shell_in_dir(path: Path) -> int:
         )
     shell = os.environ.get("SHELL", "/bin/sh")
     os.chdir(path)
-    os.execvp(shell, [shell])
+    os.execvp(shell, [shell])  # nosec B606  # intentional shell launch into user's $SHELL
 
 
 def tmux_find_pane_for_cwd(target: Path) -> tuple[str, str] | None:

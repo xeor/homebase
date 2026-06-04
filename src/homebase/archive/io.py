@@ -51,4 +51,8 @@ def validate_tar_archive_members(path: Path) -> list[tarfile.TarInfo]:
 def safe_extract_tar_to_dir(path: Path, target_dir: Path) -> None:
     members = validate_tar_archive_members(path)
     with tarfile.open(path, "r:gz") as tf:
-        tf.extractall(target_dir, members=members)
+        tf.extractall(
+            target_dir,
+            members=members,
+            filter="data",
+        )
