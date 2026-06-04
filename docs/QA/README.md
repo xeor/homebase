@@ -20,14 +20,14 @@ docs/QA/
 
 ## Status snapshot
 
-Last run: `2026-06-04` · source: 218 files / 47k LOC · tests: 165 files / ~28k LOC
+Last run: `2026-06-04` · source: 218 files / 47k LOC · tests: 170 files / ~29k LOC
 
 | Tool          | Metric                          | Baseline     | Target        | Status   |
 |---------------|---------------------------------|--------------|---------------|----------|
-| pytest        | tests passing                   | 1963/1963    | all           | green    |
+| pytest        | tests passing                   | 2038/2038    | all           | green    |
 | ruff          | lint findings                   | 0            | 0             | green    |
 | mypy          | errors / files affected         | 0 / 0        | 0 / 0         | green    |
-| pytest-cov    | branch coverage                 | 62.8 %       | 75 %          | baseline |
+| pytest-cov    | branch coverage                 | 63.8 %       | 75 %          | baseline |
 | import-linter | contract violations             | 0            | 0             | green    |
 | vulture       | findings (min-confidence 80)    | 0            | 0             | green    |
 | vulture       | findings (min-confidence 60)    | ~289 lns     | review        | baseline |
@@ -269,9 +269,13 @@ criterion. Tick `[x]` when the snapshot number reaches the target.
 
 ### Phase 5 — coverage (pytest-cov)
 
-- [ ] Raise branch coverage 51 % → 75 %. Prioritise modules with the
-      lowest coverage that are also in the layering or complexity
-      hotspots above.
+- [ ] Raise branch coverage 63.8 % → 75 %. Non-UI modules are now at
+      ~83 %; remaining gap is dominated by Textual UI code where
+      unit-level coverage requires UI bridges. Prioritise pure
+      helpers and `cmd_*` handlers next.
+- Recent lifts: `workspace/benchmark.py` 36 % → 62 %,
+  `tmux/commands.py` 50 % → 69 %, `workspace/projects.py` 77 % → 86 %,
+  `core/prompting.py` 56 % → 93 %.
 - Exit: ≥ 75 % branch coverage.
 
 ### Phase 6 — dead code (vulture)

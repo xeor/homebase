@@ -137,6 +137,36 @@ def test_sourcehut_clone() -> None:
     assert adapter.to_clone_url(p) == "https://git.sr.ht/~me/repo"
 
 
+def test_sourcehut_tree_url_strips_to_repo() -> None:
+    adapter = adapter_for_host("git.sr.ht")
+    p = parse_url("https://git.sr.ht/~me/repo/tree/main")
+    assert adapter.to_clone_url(p) == "https://git.sr.ht/~me/repo"
+
+
+def test_sourcehut_rejects_path_without_tilde_user() -> None:
+    adapter = adapter_for_host("git.sr.ht")
+    p = parse_url("https://git.sr.ht/me/repo")
+    assert adapter.to_clone_url(p) is None
+
+
+def test_sourcehut_rejects_unrecognized_subpath_length() -> None:
+    adapter = adapter_for_host("git.sr.ht")
+    p = parse_url("https://git.sr.ht/~me/repo/log")
+    assert adapter.to_clone_url(p) is None
+
+
+def test_sourcehut_project_name_strips_git_suffix() -> None:
+    adapter = adapter_for_host("git.sr.ht")
+    p = parse_url("https://git.sr.ht/~me/repo.git")
+    assert adapter.project_name(p) == "repo"
+
+
+def test_sourcehut_project_name_none_for_non_user_path() -> None:
+    adapter = adapter_for_host("git.sr.ht")
+    p = parse_url("https://git.sr.ht/me/repo")
+    assert adapter.project_name(p) is None
+
+
 # ------------- user-configured self-hosted --------------
 
 
