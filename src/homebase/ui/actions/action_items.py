@@ -798,9 +798,9 @@ def _build_log_dialog_side_info(
 
 def _validate_existing_note(
     app: Any, row: ProjectRow, note_path: Path
-) -> str | None | str:
-    """Return the existing note text on success, None if file does not exist,
-    or the sentinel string ``_NOTE_INVALID`` when the file is unusable."""
+) -> str | object:
+    """Return the existing note text on success, or the sentinel
+    ``_NOTE_INVALID`` when the file is unusable."""
     try:
         if not note_path.is_file():
             _notify_skip(app, row, "note path is not a regular file")
@@ -849,7 +849,7 @@ def _collect_valid_note_targets(
             valid.append((row, note_path, None))
             continue
         result = _validate_existing_note(app, row, note_path)
-        if result is _NOTE_INVALID:
+        if result is _NOTE_INVALID or not isinstance(result, str):
             continue
         valid.append((row, note_path, result))
     return valid

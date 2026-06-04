@@ -297,7 +297,6 @@ def open_shell_in_dir(path: Path) -> int:
     shell = os.environ.get("SHELL", "/bin/sh")
     os.chdir(path)
     os.execvp(shell, [shell])
-    return 0
 
 
 def tmux_find_pane_for_cwd(target: Path) -> tuple[str, str] | None:

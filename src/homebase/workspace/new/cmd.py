@@ -13,7 +13,7 @@ from ...metadata.api import resolve_project_repo
 from ..projects import cmd_new as legacy_cmd_new
 from .adapters import adapter_for_host, parse_url
 from .archive_mod import apply_archive_modifier
-from .base import NewContext, NewPlan, NewResult
+from .base import NewContext, NewOptions, NewPlan, NewResult, Source
 from .config_loader import NewConfigError, load_new_sources
 from .detect import classify_input
 from .options import resolve_options
@@ -43,8 +43,6 @@ def _debug_log(message: str) -> None:
 def _local_move_contains_cwd(plan: NewPlan, ctx: NewContext) -> bool:
     if plan.source_key != "local":
         return False
-    if not isinstance(plan.log_payload, dict):
-        return False
     source = plan.log_payload.get("source")
     if not isinstance(source, str) or not source.strip():
         return False
@@ -60,8 +58,6 @@ def _local_move_contains_cwd(plan: NewPlan, ctx: NewContext) -> bool:
 
 def _local_move_handoff_target(plan: NewPlan, ctx: NewContext) -> Path | None:
     if plan.source_key != "local":
-        return None
-    if not isinstance(plan.log_payload, dict):
         return None
     source = plan.log_payload.get("source")
     if not isinstance(source, str) or not source.strip():
@@ -287,7 +283,7 @@ def _build_source_and_options(
     sources_cfg: dict[str, dict],
     source_key: str,
     ctx: NewContext,
-) -> tuple[object, object]:
+) -> tuple[Source, NewOptions]:
     source_config, child_cfg = _build_source_config(source_key, base_key, sources_cfg)
     source = construct_source(base_key, source_config)
     options = resolve_options(base_key, ns, source_cfg=child_cfg)
@@ -299,7 +295,7 @@ def _build_source_and_options(
 
 
 def _normalize_inputs_for_source(
-    source: object,
+    source: Source,
     base_key: str,
     raw_input: str | None,
     explicit_name: str | None,
@@ -320,8 +316,8 @@ def _normalize_inputs_for_source(
 
 
 def _maybe_ask_name(
-    options: object,
-    source: object,
+    options: NewOptions,
+    source: Source,
     base_key: str,
     raw_input: str | None,
     explicit_name: str | None,
@@ -348,7 +344,7 @@ def _maybe_ask_name(
 
 
 def _maybe_confirm(
-    plan: NewPlan, options: object
+    plan: NewPlan, options: NewOptions
 ) -> tuple[bool, int]:
     """Return (proceed, rc). rc != 0 only when an error was reported."""
     if not (options.confirm and not options.yes):

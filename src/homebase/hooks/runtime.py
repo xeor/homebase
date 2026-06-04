@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import getpass
 import io
-import os
+import sys
 import threading
 import time
 import traceback
@@ -189,7 +189,8 @@ def _build_tui_ask(app: Any):
                 app.push_screen(input_cls(prompt_text, "value", seed), lambda value: _set_response(value))
                 return
             if kind == "choice":
-                choices = kwargs.get("choices", [])
+                raw_choices = kwargs.get("choices", [])
+                choices = raw_choices if isinstance(raw_choices, (list, tuple)) else ()
                 options = [str(item) for item in choices if str(item).strip()]
                 choice_cls = getattr(app, "_single_choice_screen_cls", None)
                 if choice_cls is None:
@@ -257,7 +258,7 @@ def dispatch_post_cli(
         slow_timer: threading.Timer | None = None
         running = threading.Event()
         running.set()
-        print(f"[hook] {spec_id} ... running", file=os.sys.stderr)
+        print(f"[hook] {spec_id} ... running", file=sys.stderr)
         hook_error = ""
 
         def _warn_slow() -> None:
@@ -266,7 +267,7 @@ def dispatch_post_cli(
             elapsed = max(0.0, time.time() - started)
             print(
                 f"[hook] {spec_id} still running ({elapsed:.1f}s)",
-                file=os.sys.stderr,
+                file=sys.stderr,
             )
             nonlocal slow_timer
             slow_timer = threading.Timer(max(0.05, float(spec.slow_warn_s)), _warn_slow)
@@ -295,7 +296,7 @@ def dispatch_post_cli(
             )
         except HOOK_RUN_ERRORS as exc:
             hook_error = str(exc)
-            print(f"[hook] {spec_id} failed: {hook_error}", file=os.sys.stderr)
+            print(f"[hook] {spec_id} failed: {hook_error}", file=sys.stderr)
         finally:
             running.clear()
             if slow_timer is not None:
@@ -314,7 +315,7 @@ def dispatch_post_cli(
                     },
                 )
             if not hook_error:
-                print(f"[hook] {spec_id} done in {duration:.1f}s", file=os.sys.stderr)
+                print(f"[hook] {spec_id} done in {duration:.1f}s", file=sys.stderr)
 
 
 def _run_cli_module(
@@ -346,10 +347,10 @@ def _run_cli_module(
         append_base_log(path, kind, payload)
 
     def _notify(text: str, level: str = "info") -> None:
-        print(f"[hook] {level}: {text}", file=os.sys.stderr)
+        print(f"[hook] {level}: {text}", file=sys.stderr)
 
     def _status_update(text: str, level: str = "info") -> None:
-        print(f"[hook] status {level}: {text}", file=os.sys.stderr)
+        print(f"[hook] status {level}: {text}", file=sys.stderr)
 
     def _log(text: str, level: str = "info") -> None:
         print(f"[hook] {level}: {text}")
@@ -401,7 +402,7 @@ def dispatch_pre_cli(
         return PreOutcome(cancelled=False, reason="", change=running_change)
     for spec in selected:
         spec_id = f"pre/{event}/{spec.name}"
-        print(f"[hook] {spec_id} ... running", file=os.sys.stderr)
+        print(f"[hook] {spec_id} ... running", file=sys.stderr)
         try:
             module = resolve_hook_module(spec, base_dir)
             result = _run_cli_pre_module(
@@ -416,20 +417,20 @@ def dispatch_pre_cli(
             if isinstance(result, PreResult):
                 if result.decision == "cancel":
                     reason = str(result.reason or "cancelled by hook")
-                    print(f"[hook] {spec_id} cancelled: {reason}", file=os.sys.stderr)
+                    print(f"[hook] {spec_id} cancelled: {reason}", file=sys.stderr)
                     return PreOutcome(cancelled=True, reason=reason, change=running_change)
                 if result.decision == "mutate" and isinstance(result.mutated_change, dict):
                     _apply_pre_mutation(
                         event=event,
                         running_change=running_change,
                         mutated=result.mutated_change,
-                        notify=lambda text: print(f"[hook] warn: {text}", file=os.sys.stderr),
+                        notify=lambda text: print(f"[hook] warn: {text}", file=sys.stderr),
                     )
         except HOOK_RUN_ERRORS as exc:
             reason = str(exc)
-            print(f"[hook] {spec_id} failed: {reason}", file=os.sys.stderr)
+            print(f"[hook] {spec_id} failed: {reason}", file=sys.stderr)
             return PreOutcome(cancelled=True, reason=reason, change=running_change)
-        print(f"[hook] {spec_id} done", file=os.sys.stderr)
+        print(f"[hook] {spec_id} done", file=sys.stderr)
     return PreOutcome(cancelled=False, reason="", change=running_change)
 
 
@@ -462,10 +463,10 @@ def _run_cli_pre_module(
         append_base_log(path, kind, payload)
 
     def _notify(text: str, level: str = "info") -> None:
-        print(f"[hook] {level}: {text}", file=os.sys.stderr)
+        print(f"[hook] {level}: {text}", file=sys.stderr)
 
     def _status_update(text: str, level: str = "info") -> None:
-        print(f"[hook] status {level}: {text}", file=os.sys.stderr)
+        print(f"[hook] status {level}: {text}", file=sys.stderr)
 
     def _log(text: str, level: str = "info") -> None:
         print(f"[hook] {level}: {text}")
@@ -476,7 +477,9 @@ def _run_cli_pre_module(
         default = kwargs.get("default")
         if kind == "yes_no":
             default_bool = bool(default) if isinstance(default, bool) else False
-            ok = prompting.prompt_yes_no(prompt_text, default=default_bool)
+            ok = prompting.prompt_yes_no(
+                prompt_text, default=default_bool, read=prompting.prompt_readline
+            )
             return "yes" if ok else None
         if kind == "text":
             response = input(f"{prompt_text} ")
@@ -485,7 +488,8 @@ def _run_cli_pre_module(
                 return str(default)
             return text or None
         if kind == "choice":
-            choices = kwargs.get("choices", [])
+            raw_choices = kwargs.get("choices", [])
+            choices = raw_choices if isinstance(raw_choices, (list, tuple)) else ()
             options = [str(item) for item in choices if str(item).strip()]
             if not options:
                 return None

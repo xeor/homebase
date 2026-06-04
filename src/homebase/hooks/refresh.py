@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import getpass
 import io
-import os
+import sys
 import threading
 import time
 import traceback
 from contextlib import redirect_stderr, redirect_stdout
 from datetime import datetime, timezone
 from pathlib import Path
+from types import ModuleType
 from typing import Any, Callable
 
 from .. import __version__ as homebase_version
@@ -216,7 +217,7 @@ def _run_refresh_one_tui(
     *,
     app: Any,
     spec: HookSpec,
-    module: object,
+    module: ModuleType,
     target: HookTarget,
     view: str,
     source: str,
@@ -293,7 +294,7 @@ def _run_refresh_one_cli(
     *,
     base_dir: Path,
     spec: HookSpec,
-    module: object,
+    module: ModuleType,
     target: HookTarget,
     view: str,
     source: str,
@@ -306,10 +307,10 @@ def _run_refresh_one_cli(
         append_base_log(path, kind, payload)
 
     def _notify(text: str, level: str = "info") -> None:
-        print(f"[hook] {level}: {text}", file=os.sys.stderr)
+        print(f"[hook] {level}: {text}", file=sys.stderr)
 
     def _status_update(text: str, level: str = "info") -> None:
-        print(f"[hook] status {level}: {text}", file=os.sys.stderr)
+        print(f"[hook] status {level}: {text}", file=sys.stderr)
 
     def _log(text: str, level: str = "info") -> None:
         print(f"[hook] {level}: {text}")
@@ -326,7 +327,7 @@ def _run_refresh_one_cli(
         log=_log,
     )
 
-    print(f"[hook] {spec_id} on {target.path.name} ... running", file=os.sys.stderr)
+    print(f"[hook] {spec_id} on {target.path.name} ... running", file=sys.stderr)
     _add_event(
         target.path,
         "hook_refresh_started",
@@ -346,7 +347,7 @@ def _run_refresh_one_cli(
             _notify(f"hook {spec.name} stderr: {err_text}", "warn")
     except HOOK_RUN_ERRORS as exc:
         hook_error = str(exc)
-        print(f"[hook] {spec_id} failed: {hook_error}", file=os.sys.stderr)
+        print(f"[hook] {spec_id} failed: {hook_error}", file=sys.stderr)
     finally:
         duration = max(0.0, time.time() - started)
         _add_event(
@@ -361,4 +362,4 @@ def _run_refresh_one_cli(
             },
         )
         if not hook_error:
-            print(f"[hook] {spec_id} on {target.path.name} done in {duration:.1f}s", file=os.sys.stderr)
+            print(f"[hook] {spec_id} on {target.path.name} done in {duration:.1f}s", file=sys.stderr)

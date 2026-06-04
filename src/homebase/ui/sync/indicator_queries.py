@@ -59,9 +59,11 @@ def evaluate_query_paths(app: Any, query: dict[str, object]) -> set[Path]:
     if qtype == "tmux_open_panes":
         return {p for p, n in app.open_pane_count_by_project.items() if int(n) > 0}
     if qtype == "tmux_editor_commands":
+        raw_commands = query.get("commands", [])
+        commands_iter = raw_commands if isinstance(raw_commands, (list, tuple, set)) else ()
         commands = {
             str(cmd).strip().lower()
-            for cmd in query.get("commands", [])
+            for cmd in commands_iter
             if str(cmd).strip()
         }
         out: set[Path] = set()
@@ -74,7 +76,7 @@ def evaluate_query_paths(app: Any, query: dict[str, object]) -> set[Path]:
         return out
     if qtype == "sqlite_recent_paths":
         roots = {row.path.resolve() for row in (app.active_rows + app.archived_rows)}
-        out: set[Path] = set()
+        out = set()
         for candidate in _sqlite_recent_paths(query, base_dir=app.base_dir):
             try:
                 resolved = candidate.resolve()

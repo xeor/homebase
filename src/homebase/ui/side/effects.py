@@ -81,7 +81,7 @@ def handle_side_markdown_link(
     side_readme_source_path: Path | None,
     side_notes_source_path: Path | None,
     show_runtime_error: Callable[[str, Exception], None],
-    set_runtime_status: Callable[[str, str], None] | Callable[..., None],
+    set_runtime_status: Callable[..., None],
     level_warn: str,
 ) -> None:
     href = str(href).strip()

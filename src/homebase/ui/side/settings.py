@@ -55,8 +55,10 @@ def _set_notes_height(notes_widget: Static, value: int) -> None:
 
 
 def _set_cursor_coordinate(table: DataTable, coord: tuple[int, int]) -> None:
+    from textual.coordinate import Coordinate
+
     try:
-        table.cursor_coordinate = coord
+        table.cursor_coordinate = Coordinate(*coord)
     except WIDGET_API_ERRORS:
         pass
 

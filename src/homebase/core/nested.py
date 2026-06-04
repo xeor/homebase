@@ -148,9 +148,7 @@ def scan_nested_markers_all(
         has_ancestor = _has_ancestor_marker(path, base_res, marker_set)
         active_subfolder = zone == "active" and zone_depth > 1
         if in_archive:
-            discoverable = discovery_marker_allowed(
-                base_dir, path, include_nested=False
-            )
+            discoverable = discovery_marker_allowed(base_dir, path, False)
             nested, reason = _classify_archive_marker(
                 path, has_ancestor, zone_depth, discoverable, counts
             )

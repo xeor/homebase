@@ -12,7 +12,7 @@ from typing import Any
 from ...hooks import runtime as hooks_runtime
 from ...hooks.snapshot import snapshot_target
 from ...metadata.api import load_base_data
-from ...workspace.new.base import NewContext
+from ...workspace.new.base import NewContext, NewPlan, NewResult
 from ...workspace.new.cmd import format_summary, plan_and_apply_one
 from ...workspace.new.config_loader import NewConfigError, load_new_sources
 from ...workspace.new.registry import builtin_keys
@@ -119,19 +119,17 @@ def _pre_hook_change(
     explicit_name: str | None,
     after_create: str,
 ) -> dict[str, object]:
+    raw_tags = payload.get("tags") or []
+    tags_iter = raw_tags if isinstance(raw_tags, (list, tuple)) else ()
+    raw_post = payload.get("post_commands") or []
+    post_iter = raw_post if isinstance(raw_post, (list, tuple)) else ()
     return {
         "source": str(ns.mode or ns.child_key or "auto"),
         "template": (
             str(ns.template).strip() if str(ns.template).strip() else None
         ),
-        "initial_tags": [
-            str(tag) for tag in (payload.get("tags") or []) if str(tag).strip()
-        ],
-        "post_commands": [
-            str(cmd)
-            for cmd in (payload.get("post_commands") or [])
-            if str(cmd).strip()
-        ],
+        "initial_tags": [str(tag) for tag in tags_iter if str(tag).strip()],
+        "post_commands": [str(cmd) for cmd in post_iter if str(cmd).strip()],
         "after_create": after_create,
         "inputs": {
             "raw_input": raw_input,
@@ -157,7 +155,7 @@ def _run_plan_and_apply(
     explicit_name: str | None,
     sources_cfg,
     ctx: NewContext,
-) -> tuple[int, object | None, object | None, str]:
+) -> tuple[int, NewResult | None, NewPlan | None, str]:
     """Returns (rc, result, plan_obj, captured_err_text)."""
     captured_err = io.StringIO()
     app._busy_start("creating project")
@@ -324,10 +322,16 @@ def on_new_project_submit(
     app._refresh_side()
 
 
+def _iter_payload_list(value: object) -> tuple[object, ...]:
+    if isinstance(value, (list, tuple)):
+        return tuple(value)
+    return ()
+
+
 def _to_plain(value: object) -> object:
     if isinstance(value, Path):
         return str(value)
-    if is_dataclass(value):
+    if is_dataclass(value) and not isinstance(value, type):
         return _to_plain(asdict(value))
     if isinstance(value, Namespace):
         return {key: _to_plain(val) for key, val in vars(value).items()}
@@ -398,8 +402,12 @@ def _dispatch_new_project_hook(
             "created_path": created,
             "source": str(ns.mode or ns.child_key or "auto"),
             "template": (str(ns.template).strip() if str(ns.template).strip() else None),
-            "initial_tags": [str(tag) for tag in (payload.get("tags") or []) if str(tag).strip()],
-            "post_commands": [str(cmd) for cmd in (payload.get("post_commands") or []) if str(cmd).strip()],
+            "initial_tags": [
+                str(tag) for tag in _iter_payload_list(payload.get("tags")) if str(tag).strip()
+            ],
+            "post_commands": [
+                str(cmd) for cmd in _iter_payload_list(payload.get("post_commands")) if str(cmd).strip()
+            ],
             "after_create": after_create,
             "inputs": {
                 "raw_input": raw_input,

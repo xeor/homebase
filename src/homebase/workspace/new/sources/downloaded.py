@@ -5,6 +5,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from typing import Callable
 
 from ....metadata.api import append_base_log, ensure_base_marker, save_base_tags
 from ....workspace.projects import cache_upsert_project_fast
@@ -185,7 +186,7 @@ def _read_key() -> str:
 def _interactive_choose(
     files: list[Path],
     *,
-    picker_override: object = None,
+    picker_override: Callable[[list[Path]], int] | None = None,
 ) -> Path | None:
     """Interactive picker. Returns the chosen Path, or None if the
     user cancelled (Esc / Ctrl-C / no choice). ``picker_override`` is
@@ -268,7 +269,7 @@ class DownloadedSource(Source):
     # bypassed without touching termios / sys.stdin. Returns the
     # selected index (0 = newest); ``None`` means "no choice, use
     # default".
-    _picker_override: object = None
+    _picker_override: Callable[[list[Path]], int] | None = None
 
     def _folder(self) -> Path:
         raw = self.config.get("folder") or _DEFAULT_FOLDER

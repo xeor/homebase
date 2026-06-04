@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 import re
 import sys
-from datetime import datetime
+from datetime import datetime, tzinfo
 from pathlib import Path
 from typing import Callable
 
@@ -401,7 +401,7 @@ def _ask_for_archive_date(
     yes: bool,
     archive_tz,
     read_line: Callable[[str], str | None],
-    parse_user_date: Callable[[str, object], int | None],
+    parse_user_date: Callable[[str, tzinfo], int | None],
     max_attempts: int = 3,
 ) -> tuple[int, str] | None:
     """Resolve a date when detection has failed. Returns (ts, source)
@@ -435,9 +435,9 @@ def _fix_archive_entry(
     yes: bool,
     archive_tz,
     parse_archive_timestamp: Callable[[str], int],
-    archive_iso_from_ts: Callable[[int, object], str],
+    archive_iso_from_ts: Callable[[int, tzinfo], str],
     detect_folder_date,
-    parse_user_date: Callable[[str, object], int | None],
+    parse_user_date: Callable[[str, tzinfo], int | None],
     strip_date_prefix: Callable[[str], str],
     prompt_yes_no: Callable[[str, bool], bool],
     read_line: Callable[[str], str | None],
@@ -682,9 +682,9 @@ def _process_target(
     yes: bool,
     archive_tz,
     parse_archive_timestamp: Callable[[str], int],
-    archive_iso_from_ts: Callable[[int, object], str],
+    archive_iso_from_ts: Callable[[int, tzinfo], str],
     detect_folder_date,
-    parse_user_date: Callable[[str, object], int | None],
+    parse_user_date: Callable[[str, tzinfo], int | None],
     strip_date_prefix: Callable[[str], str],
     prompt_yes_no: Callable[[str, bool], bool],
     base_marker_file: str,
@@ -750,9 +750,9 @@ def cmd_fix(
     base_marker_file: str,
     prompt_yes_no: Callable[[str, bool], bool],
     parse_archive_timestamp: Callable[[str], int],
-    archive_iso_from_ts: Callable[[int, object], str],
+    archive_iso_from_ts: Callable[[int, tzinfo], str],
     detect_folder_date,
-    parse_user_date: Callable[[str, object], int | None],
+    parse_user_date: Callable[[str, tzinfo], int | None],
     strip_date_prefix: Callable[[str], str],
     ensure_base_marker: Callable[[Path], None],
     read_line: Callable[[str], str | None],
@@ -789,7 +789,7 @@ def cmd_fix(
             flat.append(("noop", reason or "skipped"))
             continue
         if kind == "sweep":
-            entries = payload or []
+            entries = payload if isinstance(payload, list) else []
             if not entries:
                 flat.append(("noop", "nothing to fix under _archive"))
                 continue
@@ -802,14 +802,14 @@ def cmd_fix(
     _print_top_header(base_dir, total, all_targets)
 
     counts = {"ok": 0, "changed": 0, "skipped": 0, "failed": 0}
-    for idx, (kind, payload) in enumerate(flat, start=1):
+    for idx, (kind, item) in enumerate(flat, start=1):
         if kind == "noop":
             _print_item_header(idx, total, _dim("(skipped)"), "")
-            _print_skip(str(payload))
+            _print_skip(str(item))
             counts["skipped"] += 1
             continue
-        target = payload
-        assert isinstance(target, Path)
+        assert isinstance(item, Path)
+        target = item
         location = _fmt_location(target, base_dir)
         _print_item_header(idx, total, target.name, location)
         result = _process_target(

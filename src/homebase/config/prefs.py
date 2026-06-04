@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
+from typing import Mapping, Sequence
 
 from ..core.constants import (
     CACHE_PROFILE_CONFIG,
@@ -33,7 +34,7 @@ from ..core.constants import (
     TABLE_SIDE_WIDTH_PRESETS,
     WIP_OPEN_SYMBOL_MAP,
 )
-from ..core.models import PostCommandOption
+from ..core.models import Action, HotbarEntry, KeyEntry, PostCommandOption
 from ..core.utils import normalize_filter_expression
 from . import cache_profile as cache_profile_config
 from . import open_mode as open_mode_config
@@ -92,8 +93,6 @@ def load_post_command_options(base_dir: Path) -> list[PostCommandOption]:
 
 def load_archive_timezone_name(base_dir: Path) -> str:
     raw = load_global_config_dict(base_dir)
-    if not isinstance(raw, dict):
-        return DEFAULT_ARCHIVE_TZ_NAME
     archive_conf = raw.get("archive", {})
     if not isinstance(archive_conf, dict):
         return DEFAULT_ARCHIVE_TZ_NAME
@@ -103,8 +102,6 @@ def load_archive_timezone_name(base_dir: Path) -> str:
 
 def load_wip_symbol_map(base_dir: Path) -> dict[str, int]:
     raw = load_global_config_dict(base_dir)
-    if not isinstance(raw, dict):
-        return dict(WIP_OPEN_SYMBOL_MAP)
     wip_conf = raw.get("wip", {})
     if not isinstance(wip_conf, dict):
         return dict(WIP_OPEN_SYMBOL_MAP)
@@ -144,18 +141,18 @@ def load_file_view_exclude_patterns(base_dir: Path) -> list[str]:
     )
 
 
-def load_actions(base_dir: Path, *, builtins) -> dict[str, object]:
+def load_actions(base_dir: Path, *, builtins) -> dict[str, Action]:
     return workspace_settings.load_actions(
         load_global_config_dict(base_dir),
         builtins=builtins,
     )
 
 
-def load_hotbar(base_dir: Path, *, actions) -> list[object]:
+def load_hotbar(base_dir: Path, *, actions) -> list[HotbarEntry]:
     return workspace_settings.load_hotbar(load_global_config_dict(base_dir), actions=actions)
 
 
-def load_keys(base_dir: Path, *, actions) -> dict[str, object]:
+def load_keys(base_dir: Path, *, actions) -> dict[str, KeyEntry]:
     return workspace_settings.load_keys(load_global_config_dict(base_dir), actions=actions)
 
 
@@ -213,7 +210,7 @@ def _serialize_hotbar_item(item: object) -> object | None:
     return payload
 
 
-def save_hotbar(base_dir: Path, hotbar: list[dict[str, object] | object]) -> None:
+def save_hotbar(base_dir: Path, hotbar: Sequence[object]) -> None:
     data = load_global_config_dict(base_dir)
     out: list[object] = []
     for item in hotbar:
@@ -224,7 +221,7 @@ def save_hotbar(base_dir: Path, hotbar: list[dict[str, object] | object]) -> Non
     save_global_config_dict(base_dir, data)
 
 
-def save_keys(base_dir: Path, keys_map: dict[str, dict[str, object] | object]) -> None:
+def save_keys(base_dir: Path, keys_map: Mapping[str, object]) -> None:
     data = load_global_config_dict(base_dir)
     out: dict[str, object] = {}
     for hotkey, value in keys_map.items():
@@ -397,7 +394,9 @@ def save_new_project_defaults(base_dir: Path, conf: dict[str, object]) -> None:
 def _table_catalog_for_view(view_mode: str) -> list[dict[str, object]]:
     out: list[dict[str, object]] = []
     for col in TABLE_COLUMN_CATALOG:
-        views = [str(v) for v in col.get("views", []) if str(v).strip()]
+        raw_views = col.get("views", [])
+        views_iter = raw_views if isinstance(raw_views, (list, tuple)) else ()
+        views = [str(v) for v in views_iter if str(v).strip()]
         if not views:
             views = list(TABLE_COLUMN_VIEWS)
         if view_mode in views:
@@ -416,8 +415,6 @@ def _merge_table_columns_for_view(
     out: list[dict[str, object]] = []
 
     for raw in raw_cols:
-        if not isinstance(raw, dict):
-            continue
         cid = str(raw.get("id", "")).strip()
         if not cid or cid not in by_id or cid in seen:
             continue
@@ -425,11 +422,9 @@ def _merge_table_columns_for_view(
         base = dict(by_id[cid])
         enabled = bool(raw.get("enabled", base.get("default", True)))
         base["enabled"] = enabled
-        try:
-            width = int(raw.get("width", base.get("width", 12)))
-            base["width"] = max(1, width)
-        except (TypeError, ValueError):
-            pass
+        default_width = _as_int(base.get("width", 12), 12)
+        width = _as_int(raw.get("width", default_width), default_width)
+        base["width"] = max(1, width)
         out.append(base)
 
     for col in catalog:
@@ -471,8 +466,6 @@ def save_table_columns_config(
         cols = columns_by_view.get(view, [])
         view_out: list[dict[str, object]] = []
         for col in cols:
-            if not isinstance(col, dict):
-                continue
             cid = str(col.get("id", "")).strip()
             if not cid:
                 continue
@@ -480,7 +473,7 @@ def save_table_columns_config(
                 {
                     "id": cid,
                     "enabled": bool(col.get("enabled", True)),
-                    "width": max(1, int(col.get("width", 12))),
+                    "width": max(1, _as_int(col.get("width", 12), 12)),
                 }
             )
         serialized[view] = view_out
@@ -491,19 +484,15 @@ def save_table_columns_config(
 
 
 def _normalize_side_width_pct(value: object) -> int:
-    try:
-        n = int(value)
-    except (TypeError, ValueError):
-        n = int(TABLE_BEHAVIOR_CONFIG["side_width_pct"])
+    default = _as_int(TABLE_BEHAVIOR_CONFIG["side_width_pct"], 33)
+    n = _as_int(value, default)
     presets = list(TABLE_SIDE_WIDTH_PRESETS) or [n]
     return min(presets, key=lambda p: abs(p - n))
 
 
 def _normalize_preview_entries_limit(value: object) -> int:
-    try:
-        n = int(value)
-    except (TypeError, ValueError):
-        n = int(TABLE_BEHAVIOR_CONFIG["preview_entries_limit"])
+    default = _as_int(TABLE_BEHAVIOR_CONFIG["preview_entries_limit"], 8)
+    n = _as_int(value, default)
     return max(PREVIEW_ENTRIES_LIMIT_MIN, min(PREVIEW_ENTRIES_LIMIT_MAX, n))
 
 
@@ -549,8 +538,6 @@ def save_archive_timezone_name(base_dir: Path, name: str) -> None:
     if not cleaned:
         cleaned = DEFAULT_ARCHIVE_TZ_NAME
     data = load_global_config_dict(base_dir)
-    if not isinstance(data, dict):
-        data = {}
     archive = data.get("archive", {})
     if not isinstance(archive, dict):
         archive = {}
@@ -560,6 +547,28 @@ def save_archive_timezone_name(base_dir: Path, name: str) -> None:
 
 
 _HEX_COLOR_PATTERN = re.compile(r"#[0-9A-Fa-f]{6}")
+
+
+def _as_int(value: object, default: int) -> int:
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, (int, float, str)):
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return default
+    return default
+
+
+def _as_float(value: object, default: float) -> float:
+    if isinstance(value, bool):
+        return float(value)
+    if isinstance(value, (int, float, str)):
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return default
+    return default
 
 
 def _extract_date_ranges_raw(table_raw: dict) -> object:
@@ -585,7 +594,7 @@ def _parse_numeric_scale(row: dict) -> list[dict[str, object]] | None:
         stops.append({"days": days, "color": color})
     if not stops:
         return None
-    return sorted(stops, key=lambda item: float(item.get("days", 0.0)))
+    return sorted(stops, key=lambda item: _as_float(item.get("days", 0.0), 0.0))
 
 
 def _parse_scale_dict(scale_raw: object) -> list[dict[str, object]]:
@@ -601,7 +610,7 @@ def _parse_scale_dict(scale_raw: object) -> list[dict[str, object]]:
         if not _HEX_COLOR_PATTERN.fullmatch(color):
             continue
         stops.append({"days": days, "color": color})
-    return sorted(stops, key=lambda item: float(item.get("days", 0.0)))
+    return sorted(stops, key=lambda item: _as_float(item.get("days", 0.0), 0.0))
 
 
 def _parse_from_to_color(row: dict) -> list[dict[str, object]] | None:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Any, Callable
 
 import yaml
@@ -10,7 +11,7 @@ def action_toggle_wip(
     app: Any,
     *,
     mode_active: str,
-    save_base_wip: Callable[[object, bool], None],
+    save_base_wip: Callable[[Path, bool], None],
 ) -> None:
     row = app._selected_row()
     if not row:

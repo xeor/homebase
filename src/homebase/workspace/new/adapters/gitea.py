@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import ClassVar
+
 from .base import ParsedUrl, UrlAdapter, strip_git_suffix
 
 
@@ -8,7 +10,7 @@ class GiteaAdapter(UrlAdapter):
     self-hosted users must add their host to git.config.hosts."""
 
     key = "gitea"
-    canonical_hosts = ()
+    canonical_hosts: ClassVar[tuple[str, ...]] = ()
 
     def _host(self, parsed: ParsedUrl) -> str:
         return parsed.host

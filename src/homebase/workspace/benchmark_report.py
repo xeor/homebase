@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 from pathlib import Path
+from typing import Sequence
 
 import yaml
 
@@ -55,7 +56,7 @@ def metric_featuresets() -> dict[str, str]:
     return out
 
 
-def default_score_metric_profile(metrics: list[dict[str, object]]) -> list[str]:
+def default_score_metric_profile(metrics: Sequence[object]) -> list[str]:
     out: list[str] = []
     for metric in metrics:
         if not isinstance(metric, dict):
@@ -163,14 +164,12 @@ def composite_score(
     Falls back to whichever component is available if the other is
     missing. Returns None when neither is available.
     """
-    has_warm = isinstance(warm, (int, float))
-    has_cold = isinstance(cold, (int, float))
-    if has_warm and has_cold:
-        return warm_weight * float(warm) + cold_weight * float(cold)
-    if has_warm:
-        return float(warm)
-    if has_cold:
-        return float(cold)
+    if warm is not None and cold is not None:
+        return warm_weight * warm + cold_weight * cold
+    if warm is not None:
+        return warm
+    if cold is not None:
+        return cold
     return None
 
 

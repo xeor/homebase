@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import tzinfo
 from pathlib import Path
-from zoneinfo import ZoneInfo
 
 from ..config.workspace import load_actions
 from ..core.constants import BUILTIN_ACTIONS, discover_tab_actions
-from ..core.models import Action, PropertyDef
+from ..core.models import Action, HookSpec, PropertyDef
 
 
 @dataclass(frozen=True)
@@ -14,7 +14,7 @@ class UIContext:
     """Runtime config snapshot passed to the textual TUI."""
 
     base_dir: Path
-    archive_tz: ZoneInfo
+    archive_tz: tzinfo
     archive_tz_name: str
     property_defs: list[PropertyDef] = field(default_factory=list)
     wip_open_symbol_map: dict[str, int] = field(default_factory=dict)
@@ -33,7 +33,7 @@ class UIContext:
     cache_profile_table: dict[str, dict[str, dict[str, object]]] = field(
         default_factory=dict
     )
-    hook_specs: dict[tuple[str, str], list[object]] = field(default_factory=dict)
+    hook_specs: dict[tuple[str, str], list[HookSpec]] = field(default_factory=dict)
     hook_refresh_config: object | None = None
 
 

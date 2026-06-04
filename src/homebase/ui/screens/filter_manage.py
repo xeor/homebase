@@ -440,7 +440,7 @@ class FilterManageScreen(ModalScreen[str | None]):
         self.index = (self.index + 1) % len(self.names)
         self._refresh()
 
-    def action_toggle(self) -> None:
+    def action_toggle(self) -> None:  # type: ignore[override]  # screen-local binding, distinct from DOMNode attr toggle
         if self.focus_section != 1:
             return
         if not self.names:

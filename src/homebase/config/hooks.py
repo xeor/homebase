@@ -31,8 +31,6 @@ def load_hook_specs(base_dir: Path) -> dict[tuple[str, str], list[HookSpec]]:
         (timing, event): [] for timing in HOOK_TIMINGS for event in HOOK_EVENTS
     }
     out.update(_default_post_specs())
-    if not isinstance(raw, dict):
-        return out
     for timing in HOOK_TIMINGS:
         key = f"hooks_{timing}"
         section = raw.get(key, {})
@@ -185,8 +183,6 @@ def _parse_spec(timing: str, event: str, idx: int, item: object) -> HookSpec:
 
 def load_hook_refresh_config(base_dir: Path) -> HookRefreshConfig:
     raw = load_global_config_dict(base_dir)
-    if not isinstance(raw, dict):
-        return HookRefreshConfig()
     section = raw.get("hooks_refresh")
     if section is None:
         return HookRefreshConfig()

@@ -80,10 +80,12 @@ class PropertyDef:
         if isinstance(self.cache_profiles_by_view, dict):
             profile = self.cache_profiles_by_view.get(view, {})
             if isinstance(profile, dict):
-                try:
-                    return max(1.0, float(profile.get("cache_ttl_s", self.cache_ttl_s)))
-                except (TypeError, ValueError):
-                    return max(1.0, float(self.cache_ttl_s))
+                raw = profile.get("cache_ttl_s", self.cache_ttl_s)
+                if isinstance(raw, (int, float, str)):
+                    try:
+                        return max(1.0, float(raw))
+                    except (TypeError, ValueError):
+                        return max(1.0, float(self.cache_ttl_s))
         return max(1.0, float(self.cache_ttl_s))
 
     def matches(self, root: Path) -> bool:

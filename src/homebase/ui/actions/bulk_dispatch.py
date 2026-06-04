@@ -24,7 +24,7 @@ def _archive_note_sync_with_rollback(
     *,
     source_path: Path,
     archived_path: Path,
-    archive_restore_internal: Callable[[Path, Path, bool], Path],
+    archive_restore_internal: Callable[..., Path],
 ) -> bool:
     resolve_notes = getattr(app, "_resolve_notes_path_for_row", None)
     if not callable(resolve_notes):
@@ -122,11 +122,11 @@ def _archive_note_sync_with_rollback(
 
 @dataclass
 class _BulkCallbacks:
-    archive_move_internal: Callable[[Path, Path, bool], Path]
-    archive_restore_internal: Callable[[Path, Path, bool], Path]
+    archive_move_internal: Callable[..., Path]
+    archive_restore_internal: Callable[..., Path]
     archive_pack_internal: Callable[[Path, Path], Path]
     archive_unpack_internal: Callable[[Path, Path], Path]
-    delete_internal: Callable[[Path, Path, bool], None]
+    delete_internal: Callable[..., None]
     is_packed_archive_path: Callable[[Path], bool]
     open_meta_for_review: Callable[[Path], tuple[bool, str]]
     rename_legacy_base_yaml: Callable[[Path], tuple[bool, str]]
@@ -427,11 +427,11 @@ def on_confirm_bulk(
     action: str,
     paths: list[Path],
     *,
-    archive_move_internal: Callable[[Path, Path, bool], Path],
-    archive_restore_internal: Callable[[Path, Path, bool], Path],
+    archive_move_internal: Callable[..., Path],
+    archive_restore_internal: Callable[..., Path],
     archive_pack_internal: Callable[[Path, Path], Path],
     archive_unpack_internal: Callable[[Path, Path], Path],
-    delete_internal: Callable[[Path, Path, bool], None],
+    delete_internal: Callable[..., None],
     is_packed_archive_path: Callable[[Path], bool],
     open_meta_for_review: Callable[[Path], tuple[bool, str]],
     rename_legacy_base_yaml: Callable[[Path], tuple[bool, str]],

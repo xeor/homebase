@@ -117,10 +117,12 @@ def _resolve_cache_profiles(
         raise ValueError(
             f"invalid cache profile for property {token}: {exc}"
         ) from exc
-    try:
-        cache_ttl_s = float(active_profile.get("cache_ttl_s", cache_ttl_s))
-    except (TypeError, ValueError):
-        pass
+    raw_ttl = active_profile.get("cache_ttl_s", cache_ttl_s)
+    if isinstance(raw_ttl, (int, float, str)):
+        try:
+            cache_ttl_s = float(raw_ttl)
+        except (TypeError, ValueError):
+            pass
     return (
         {"active": active_profile, "archive": archive_profile},
         cache_ttl_s,

@@ -12,7 +12,7 @@ def run(ctx: HookContext) -> None:
     old_raw = ctx.change.get("old_note_path")
     new_raw = ctx.change.get("new_note_path")
     cmd_raw = ctx.change.get("rendered_note_cmd")
-    if old_raw is None or new_raw is None:
+    if not isinstance(old_raw, (str, Path)) or not isinstance(new_raw, (str, Path)):
         return
     old_note_path = Path(old_raw)
     new_note_path = Path(new_raw)

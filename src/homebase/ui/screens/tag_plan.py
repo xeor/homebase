@@ -95,7 +95,7 @@ class TagPlanScreen(LargeModalScreen[dict[str, str] | None]):
         return rows
 
     def _build_rows(self) -> list[tag_tree_view.TreeRow]:
-        if self._tree is None:
+        if self._tree is None or self.base_dir is None:
             # Defensive: no base_dir, fall back to a flat unfiltered
             # view of the explicit tag list.
             q = self.filter_text.strip().lower()
@@ -431,6 +431,8 @@ class TagPlanScreen(LargeModalScreen[dict[str, str] | None]):
             self._set_status("[dim]rename skipped: unchanged[/]")
             self._refresh_body()
             return
+        if self.on_rename_tag is None:
+            return
         ok, msg, existed = self.on_rename_tag(old_tag, new_tag)
         if existed:
             self._set_status(f"[yellow]warning:[/] {msg}")
@@ -461,6 +463,8 @@ class TagPlanScreen(LargeModalScreen[dict[str, str] | None]):
         if not ok:
             self._set_status("[dim]delete cancelled[/]")
             self._refresh_body()
+            return
+        if self.on_delete_tag is None:
             return
         ok2, msg = self.on_delete_tag(tag)
         self._set_status(f"[green]{msg}[/]" if ok2 else f"[red]{msg}[/]")

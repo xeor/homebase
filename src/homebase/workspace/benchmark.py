@@ -60,6 +60,17 @@ from .tag_sync import sync_tag_symlinks
 ArchiveOp = Callable[[Path, Path], Path]
 
 
+def _as_float(value: object, default: float) -> float:
+    if isinstance(value, bool):
+        return float(value)
+    if isinstance(value, (int, float, str)):
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return default
+    return default
+
+
 def archive_iso_from_ts(ts: int) -> str:
     return core_utils.archive_iso_from_ts(ts, ARCHIVE_TZ)
 
@@ -148,7 +159,7 @@ def _benchmark_seed_dataset(
     base_dir: Path,
     *,
     archive_pack_internal: ArchiveOp | None = None,
-) -> dict[str, int]:
+) -> dict[str, object]:
     active_count, archived_dir_count, archived_pack_count = _benchmark_dataset_counts()
     return _seed_benchmark_dataset(
         base_dir,
@@ -166,7 +177,7 @@ def _seed_benchmark_dataset(
     archived_dir_count: int,
     archived_pack_count: int,
     archive_pack_internal: ArchiveOp | None = None,
-) -> dict[str, int]:
+) -> dict[str, object]:
     """Parameterized variant used by the production seeder above and by
     the small-dataset regression test. The shape of the returned dict
     is part of the bench report contract — don't reshape without
@@ -587,13 +598,15 @@ def _bench_tag_metrics(
     bench_root: Path, active_rows: list
 ) -> list[dict[str, object]]:
     tag_targets = [r.path for r in active_rows[:420]]
+
+    def _write_tags() -> None:
+        for i, p in enumerate(tag_targets):
+            save_base_tags(bench_root, p, ["bench", "perf", f"g{(i % 9)}"])
+
     return [
         _benchmark_timeit(
             "tags_write_420",
-            lambda: [
-                save_base_tags(bench_root, p, ["bench", "perf", f"g{(i % 9)}"])
-                for i, p in enumerate(tag_targets)
-            ],
+            _write_tags,
             repeat=2,
             warmup=0,
         ),
@@ -878,9 +891,9 @@ def cmd_benchmark_run(
         print(
             "- "
             f"{m['name']:<18} "
-            f"min={float(m['min_s']):.4f}s "
-            f"avg={float(m['avg_s']):.4f}s "
-            f"max={float(m['max_s']):.4f}s"
+            f"min={_as_float(m['min_s'], 0.0):.4f}s "
+            f"avg={_as_float(m['avg_s'], 0.0):.4f}s "
+            f"max={_as_float(m['max_s'], 0.0):.4f}s"
         )
 
     total_avg_s = _benchmark_total_avg({"metrics": metrics})
@@ -1178,10 +1191,12 @@ def _print_latest_git_context(latest: dict) -> None:
 
 
 def _best_score(scored: list[dict], key: str) -> float:
-    return max(
-        [float(r.get(key)) for r in scored if isinstance(r.get(key), (int, float))]
-        or [0.0]
-    )
+    values: list[float] = []
+    for r in scored:
+        raw = r.get(key)
+        if isinstance(raw, (int, float)):
+            values.append(float(raw))
+    return max(values or [0.0])
 
 
 def _trend_bar(value: float, best: float, ch: str, bar_w: int = 28) -> str:
@@ -1330,9 +1345,9 @@ def cmd_test(
         print(
             "- "
             f"{m['name']:<26} PASS  "
-            f"min={float(m['min_s']):.4f}s "
-            f"avg={float(m['avg_s']):.4f}s "
-            f"max={float(m['max_s']):.4f}s"
+            f"min={_as_float(m['min_s'], 0.0):.4f}s "
+            f"avg={_as_float(m['avg_s'], 0.0):.4f}s "
+            f"max={_as_float(m['max_s'], 0.0):.4f}s"
         )
     print(
         f"test phases: seed={seed_elapsed_s:.2f}s suite={suite_elapsed_s:.2f}s cleanup={cleanup_elapsed_s:.2f}s total={elapsed_s:.2f}s"

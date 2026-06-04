@@ -940,7 +940,7 @@ class NewProjectScreen(ModalScreen[dict[str, object] | None]):
             return "\n".join(lines)
 
         base = self._resolve_base_key(key)
-        lines: list[str] = [f"[bold cyan]source: {key}[/]"]
+        lines = [f"[bold cyan]source: {key}[/]"]
         if base and base != key:
             lines.append(f"[dim](child of {base})[/]")
         try:
@@ -1354,7 +1354,7 @@ class NewProjectScreen(ModalScreen[dict[str, object] | None]):
                 return
         self.action_next_section()
 
-    def action_toggle(self) -> None:
+    def action_toggle(self) -> None:  # type: ignore[override]  # screen-local binding, distinct from DOMNode attr toggle
         if self.focus_section == SECTION_TOGGLES:
             spec = _TOGGLES[self.toggle_index]
             self.toggle_values[spec.key] = not self.toggle_values[spec.key]

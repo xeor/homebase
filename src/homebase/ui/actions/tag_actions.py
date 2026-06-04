@@ -236,7 +236,7 @@ def _apply_tag_writes(
     plan: dict[str, str],
     base_dir: Path,
     is_packed_archive_path: Callable[[Path], bool],
-    load_base_meta: Callable[[Path], tuple[list[str], str, bool, int]],
+    load_base_meta: Callable[[Path], tuple[list[str], str, bool]],
     save_base_tags: Callable[[Path, Path, list[str]], None],
 ) -> tuple[int, int, set[Path]]:
     success = 0
@@ -322,7 +322,7 @@ def on_pick_tags(
     *,
     base_dir: Path,
     is_packed_archive_path: Callable[[Path], bool],
-    load_base_meta: Callable[[Path], tuple[list[str], str, bool, int]],
+    load_base_meta: Callable[[Path], tuple[list[str], str, bool]],
     save_base_tags: Callable[[Path, Path, list[str]], None],
 ) -> None:
     if plan is None:

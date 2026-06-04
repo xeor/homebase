@@ -10,6 +10,8 @@ from pathlib import Path
 
 import yaml
 
+from ..core.models import ProjectRow
+
 # A single malformed project shouldn't abort the entire workspace
 # scan — that would leave fresh_active/fresh_archived empty in the
 # cache-refresh worker and cause the TUI to cold-start on every
@@ -27,11 +29,11 @@ _ROW_SCAN_ERRORS: tuple[type[BaseException], ...] = (
 
 
 def _safe_project_row(
-    project_row: Callable[..., object],
+    project_row: Callable[..., ProjectRow],
     path: Path,
     /,
     **kwargs: object,
-) -> object | None:
+) -> ProjectRow | None:
     try:
         return project_row(path, **kwargs)
     except _ROW_SCAN_ERRORS as exc:
@@ -147,11 +149,11 @@ def _size_cache_lookup(
 
 
 def _safe_project_row_for(
-    project_row: Callable[..., object],
+    project_row: Callable[..., ProjectRow],
     path: Path,
     size_cache: dict[Path, tuple[int, int]] | None,
     include_git_dirty: bool,
-) -> object | None:
+) -> ProjectRow | None:
     prev_size, prev_count = _size_cache_lookup(size_cache, path)
     return _safe_project_row(
         project_row,
@@ -168,9 +170,9 @@ def _collect_top_level_projects(
     seen: set[Path],
     size_cache: dict[Path, tuple[int, int]] | None,
     include_git_dirty: bool,
-    project_row: Callable[..., object],
-) -> list[object]:
-    rows: list[object] = []
+    project_row: Callable[..., ProjectRow],
+) -> list[ProjectRow]:
+    rows: list[ProjectRow] = []
     for p in sorted(base_dir.iterdir()):
         try:
             if not p.is_dir():
@@ -203,9 +205,9 @@ def _collect_nested_projects(
     base_marker_file: str,
     skip_active_walk_path: Callable[[Path, Path, Path], bool],
     prune_walk_dirnames: Callable[[list[str]], None],
-    project_row: Callable[..., object],
-) -> list[object]:
-    rows: list[object] = []
+    project_row: Callable[..., ProjectRow],
+) -> list[ProjectRow]:
+    rows: list[ProjectRow] = []
     for dirpath, dirnames, filenames in os.walk(base_dir, topdown=True):
         cur = Path(dirpath).resolve()
         if skip_active_walk_path(base_dir, archive_root, cur):
@@ -238,8 +240,8 @@ def collect_projects(
     resolve_include_nested_fn: Callable[[Path, bool | None], bool],
     skip_active_walk_path: Callable[[Path, Path, Path], bool],
     prune_walk_dirnames: Callable[[list[str]], None],
-    project_row: Callable[..., object],
-) -> list[object]:
+    project_row: Callable[..., ProjectRow],
+) -> list[ProjectRow]:
     seen: set[Path] = set()
     archive_root = (base_dir / archive_dir_name).resolve()
     base_res = base_dir.resolve()
@@ -279,11 +281,11 @@ def collect_archived(
     has_marker_ancestor: Callable[[Path, Path], bool],
     split_archive_entry_name: Callable[[Path], tuple[str, int]],
     archived_restore_target: Callable[[Path, Path], Path],
-    project_row: Callable[..., object],
+    project_row: Callable[..., ProjectRow],
     classify_name: Callable[[str], tuple[bool, bool, str | None]],
-    refresh_row_caches: Callable[[object], None],
-) -> list[object]:
-    rows: list[object] = []
+    refresh_row_caches: Callable[[ProjectRow], None],
+) -> list[ProjectRow]:
+    rows: list[ProjectRow] = []
     root = base_dir / archive_dir_name
     if not root.is_dir():
         return rows

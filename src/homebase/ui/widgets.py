@@ -33,7 +33,7 @@ class SafeDataTable(DataTable):
             count = 0
         return max(0, min(count, self.row_count))
 
-    def get_row_height(self, row_key):  # type: ignore[override]
+    def get_row_height(self, row_key):
         if row_key is None:
             return 0
         try:
@@ -65,7 +65,7 @@ class TokenFilterSuggester(Suggester):
         self.get_candidates = get_candidates
 
     async def get_suggestion(self, value: str) -> str | None:
-        if value is None:
+        if not value:
             return None
         start, end, token = token_bounds(value)
         if end != len(value):

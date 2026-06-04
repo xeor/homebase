@@ -43,9 +43,8 @@ def _zone_depth_simple(base: Path, path: Path) -> tuple[str, int]:
 
 
 def _marker_allowed_when_top_level(
-    _base: Path, _marker: Path, *, include_nested: bool | None
+    _base: Path, _marker: Path, _include_nested: bool | None
 ) -> bool:
-    del include_nested
     return True
 
 

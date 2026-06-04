@@ -75,7 +75,8 @@ def query_completion_candidates(app: Any, token: str) -> list[str]:
             except (OSError, ValueError):
                 return False
     else:
-        def _is_group_only(_name: str) -> bool:
+        def _is_group_only(name: str) -> bool:
+            del name
             return False
     tags = [f"#{x}" for x, _ in tag_rank if not _is_group_only(x)]
     # ``##X`` completions: only group/parent names. A ``##X`` filter

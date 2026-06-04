@@ -35,6 +35,6 @@ class AppEventsMixin:
             self,
             event,
             widget_projects="#projects",
-            wip_open_symbol_map=self.ctx.wip_open_symbol_map,
-            custom_hotkey_targets=self._custom_hotkey_target_map(),
+            wip_open_symbol_map=self.ctx.wip_open_symbol_map,  # type: ignore[attr-defined]  # mixin: provided by BApp
+            custom_hotkey_targets=self._custom_hotkey_target_map(),  # type: ignore[attr-defined]  # mixin: provided by BApp
         )

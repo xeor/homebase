@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 from ..archive import ops as archive_ops
 from ..cache import queue as queue_utils
@@ -118,7 +119,7 @@ def collect_projects(
 ) -> list[ProjectRow]:
     opened_map = opened_ts_map if opened_ts_map is not None else cache_load_opened_map(base_dir)
 
-    def _project_row_with_opened(path: Path, **kwargs: object) -> ProjectRow:
+    def _project_row_with_opened(path: Path, **kwargs: Any) -> ProjectRow:
         opened_ts = int(opened_map.get(path, 0))
         if opened_ts <= 0:
             try:
@@ -172,7 +173,7 @@ def collect_archived(
 ) -> list[ProjectRow]:
     opened_map = opened_ts_map if opened_ts_map is not None else cache_load_opened_map(base_dir)
 
-    def _project_row_with_opened(path: Path, **kwargs: object) -> ProjectRow:
+    def _project_row_with_opened(path: Path, **kwargs: Any) -> ProjectRow:
         opened_ts = int(opened_map.get(path, 0))
         if opened_ts <= 0:
             try:
@@ -254,7 +255,9 @@ def _sort_modes_for_view(view_mode: str) -> list[tuple[str, str]]:
     for spec in SORT_MODE_SPECS:
         sid = str(spec.get("id", "")).strip()
         label = str(spec.get("label", sid)).strip() or sid
-        views = [str(v) for v in spec.get("views", [])]
+        raw_views = spec.get("views", [])
+        views_iter = raw_views if isinstance(raw_views, (list, tuple)) else ()
+        views = [str(v) for v in views_iter]
         if sid and vm in views:
             out.append((sid, label))
     return out

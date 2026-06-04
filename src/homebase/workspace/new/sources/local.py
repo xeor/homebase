@@ -33,7 +33,7 @@ def _debug_enabled() -> bool:
 def _debug_log(message: str) -> None:
     if not _debug_enabled():
         return
-    print(f"[debug] local: {message}", file=os.sys.stderr)
+    print(f"[debug] local: {message}", file=sys.stderr)
 
 
 def _decide_repo_wrap(src: Path, options: NewOptions) -> bool:

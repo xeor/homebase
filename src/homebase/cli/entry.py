@@ -112,7 +112,12 @@ def _parse_args(argv: list[str], parser):
     try:
         return parser.parse_args(argv), 0
     except SystemExit as exc:
-        return None, int(exc.code)
+        code = exc.code
+        if code is None:
+            return None, 0
+        if isinstance(code, int):
+            return None, code
+        return None, 1
 
 
 def _handle_fast_path_commands(ns, base_dir: Path, parser) -> int | None:

@@ -88,7 +88,7 @@ class MultiChoiceScreen(LargeModalScreen[set[str] | None]):
         self.index = (self.index + 1) % len(self.options)
         self._refresh_body()
 
-    def action_toggle(self) -> None:
+    def action_toggle(self) -> None:  # type: ignore[override]  # screen-local binding, distinct from DOMNode attr toggle
         if not self.options:
             return
         key = self.options[self.index][0]

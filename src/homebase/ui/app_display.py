@@ -1,6 +1,13 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, Any
+
 from textual.widgets import DataTable
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from .context import UIContext
 
 from ..core.constants import (
     COLOR_ACCENT_HEX,
@@ -21,6 +28,19 @@ from .table.layout import solve_visible_column_widths
 
 
 class AppDisplayMixin:
+    # Provided by BApp (the class this mixin is mixed into).
+    if TYPE_CHECKING:
+        ctx: UIContext
+        view_mode: str
+        base_dir: Path
+        table_date_color_ranges: dict[str, dict[str, dict[str, object]]]
+        _table_column_signature: tuple[object, ...] | None
+        _table_render_signature: tuple[object, ...] | None
+
+        def query_one(self, *args: Any, **kwargs: Any) -> Any: ...
+        def _table_visible_columns_for_view(self, view: str) -> list[dict[str, object]]: ...
+        def _table_columns_for_view(self, view: str) -> list[dict[str, object]]: ...
+
     def _build_side_git_text(self, row) -> str:
         from .side import content as textual_ui_side_content
 
@@ -68,9 +88,13 @@ class AppDisplayMixin:
                 ]
         base_widths: list[int] = []
         for col in visible:
-            try:
-                width = int(col.get("width", 12))
-            except (TypeError, ValueError):
+            raw_width = col.get("width", 12)
+            if isinstance(raw_width, (int, float, str)) and not isinstance(raw_width, bool):
+                try:
+                    width = int(raw_width)
+                except (TypeError, ValueError):
+                    width = 12
+            else:
                 width = 12
             base_widths.append(max(4, min(80, width)))
 

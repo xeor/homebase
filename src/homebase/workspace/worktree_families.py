@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import subprocess
 from pathlib import Path
+from typing import Callable
 
 from ..metadata.api import (
     append_base_log,
@@ -27,7 +28,7 @@ def archive_family_together(
     parent: Path,
     worktrees: list[Path],
     *,
-    archive_move: callable,
+    archive_move: Callable[[Path, Path], Path],
 ) -> tuple[Path, list[Path]]:
     """Archive the worktrees first (so the parent's archive preflight
     no longer sees active siblings), then archive the parent, then re-

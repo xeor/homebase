@@ -20,18 +20,18 @@ docs/QA/
 
 ## Status snapshot
 
-Last run: `2026-06-03` · source: 218 files / 47k LOC · tests: 165 files / ~28k LOC
+Last run: `2026-06-04` · source: 218 files / 47k LOC · tests: 165 files / ~28k LOC
 
 | Tool          | Metric                          | Baseline     | Target        | Status   |
 |---------------|---------------------------------|--------------|---------------|----------|
 | pytest        | tests passing                   | 1963/1963    | all           | green    |
 | ruff          | lint findings                   | 0            | 0             | green    |
-| mypy          | errors / files affected         | 236 / 45     | 0 / 0         | baseline |
-| pytest-cov    | branch coverage                 | 61.9 %       | 75 %          | baseline |
+| mypy          | errors / files affected         | 0 / 0        | 0 / 0         | green    |
+| pytest-cov    | branch coverage                 | 62.8 %       | 75 %          | baseline |
 | import-linter | contract violations             | 0            | 0             | green    |
 | vulture       | findings (min-confidence 80)    | 0            | 0             | green    |
 | vulture       | findings (min-confidence 60)    | ~289 lns     | review        | baseline |
-| bandit        | High / Medium / Low             | 4 / 7 / 141  | 0 / 0 / < 20  | baseline |
+| bandit        | High / Medium / Low             | 4 / 7 / 138  | 0 / 0 / < 20  | baseline |
 | radon (cc)    | avg complexity                  | C (14.4)     | B (≤ 10)      | baseline |
 | radon (cc)    | functions ranked C or worse     | 180          | 0             | baseline |
 | radon (mi)    | files at maintainability ≤ C    | 14           | 0             | baseline |
@@ -246,7 +246,7 @@ criterion. Tick `[x]` when the snapshot number reaches the target.
 
 ### Phase 3 — typing (mypy)
 
-- [ ] Fix the 233 errors module-by-module. Start with `cli/`,
+- [x] Fix the 233 errors module-by-module. Start with `cli/`,
       `commands/`, `core/`, then domain modules, then `ui/`.
 - [ ] Add return-type annotations to all public functions in `core/`,
       `config/`, `metadata/`, `cache/`, `workspace/`.

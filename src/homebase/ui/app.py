@@ -123,6 +123,8 @@ from ..core.models import (
     Action,
     ArchiveActionOutcome,
     CacheRefreshOutcome,
+    HookSpec,
+    HookTarget,
     ManagedProcess,
     PaneRef,
     ProjectRow,
@@ -246,6 +248,29 @@ _ROW_BUILD_ERRORS = (
 
 _HOTBAR_PALETTE_TAG = f" \\[[{COLOR_ERROR_HEX}]@hotbar[/]]"
 
+
+def _as_int(value: object, default: int) -> int:
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, (int, float, str)):
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return default
+    return default
+
+
+def _as_float(value: object, default: float) -> float:
+    if isinstance(value, bool):
+        return float(value)
+    if isinstance(value, (int, float, str)):
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return default
+    return default
+
+
 def _build_view_config_default() -> dict[str, dict[str, list[tuple[str, str]]]]:
     ordered_ids = {
         "active": (
@@ -274,13 +299,13 @@ _VIEW_CONFIG_DEFAULT: dict[str, dict[str, list[tuple[str, str]]]] = _build_view_
 
 
 def _collect_hook_refresh_candidates(
-    rows: list,
+    rows: list[ProjectRow],
     now: float,
-    hook_specs: dict,
+    hook_specs: dict[tuple[str, str], list[HookSpec]],
     view_mode: str,
-    hook_refresh_last: dict,
-) -> list[tuple[object, object]]:
-    candidates: list[tuple[object, object]] = []
+    hook_refresh_last: dict[tuple[Path, str], float],
+) -> list[tuple[ProjectRow, HookSpec]]:
+    candidates: list[tuple[ProjectRow, HookSpec]] = []
     for (timing, _event), specs in hook_specs.items():
         if timing != "post":
             continue
@@ -463,12 +488,12 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
         self._rows_cache_query = ""
         self._rows_cache: list[ProjectRow] = []
         self._rows_index_by_path: dict[Path, int] = {}
-        self.view_mode = persisted.get("view", "active")
+        self.view_mode = str(persisted.get("view", "active"))
         self.sort_mode = _normalize_sort_mode_for_view(
-            self.view_mode, persisted.get("sort", "last")
+            self.view_mode, str(persisted.get("sort", "last"))
         )
-        self.query = initial_filter or persisted.get("query", "")
-        self.query_cursor = len(self.query)
+        self.query = initial_filter or str(persisted.get("query", ""))  # type: ignore[method-assign,assignment]  # shadows App.query CSS selector method
+        self.query_cursor = len(self.query)  # type: ignore[arg-type]  # see self.query shadow above
         self.filter_expr = initial_filter
         self.cache_last_refresh_ts = cache_refreshed
 
@@ -497,10 +522,7 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
             self.side_info_tab = info_default
         if self.side_settings_tab not in valid_settings:
             self.side_settings_tab = settings_default
-        try:
-            hotbar_idx = int(persisted.get(STATE_KEY_HOTBAR_SELECTED_INDEX, 0) or 0)
-        except (TypeError, ValueError):
-            hotbar_idx = 0
+        hotbar_idx = _as_int(persisted.get(STATE_KEY_HOTBAR_SELECTED_INDEX, 0), 0)
         self.hotbar_selected_index = max(0, hotbar_idx)
         self.side_detail_row: Path | None = None
         self.side_git_text = ""
@@ -520,7 +542,7 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
             return Path(value) if value else None
 
         def persisted_int(key: str) -> int:
-            return int(persisted.get(key, 0) or 0)
+            return _as_int(persisted.get(key, 0), 0)
 
         self._view_selected_path: dict[str, Path | None] = {
             "active": persisted_path("selected_path_active"),
@@ -698,7 +720,7 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
         }
         now_ts = time.time()
         self.reconcile_next_due: dict[str, float] = {
-            mode: now_ts + float(self.reconcile_config[mode].get("interval_s", 5.0))
+            mode: now_ts + _as_float(self.reconcile_config[mode].get("interval_s", 5.0), 5.0)
             for mode in ("active", "archive")
         }
         self.reconcile_worker_running = False
@@ -720,7 +742,7 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
             "archive": [],
         }
 
-    def _log(self, msg: str, level: str = "info") -> None:
+    def _log(self, msg: str, level: str = "info") -> None:  # type: ignore[override]  # textual.App._log is internal logging unused here
         textual_ui_runtime_feedback.log(self, msg, level=level)
 
     def _log_error_counted(self, key: str, msg: str, level: str = "warn") -> None:
@@ -1246,7 +1268,7 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
                 )
 
     def action_command_palette(self) -> None:
-        if not CommandPalette.is_open(self):
+        if not CommandPalette.is_open(self):  # type: ignore[arg-type]  # App[T] generic variance, fine at runtime
             self.push_screen(BCommandPalette(id="--command-palette"))
 
     def _dispatch_hotkey_target(self, target: str) -> None:
@@ -1502,10 +1524,7 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
         return textual_ui_side_content.preview_entries(path, limit=limit)
 
     def _preview_entries_limit(self) -> int:
-        try:
-            raw = int(self.table_behavior.get("preview_entries_limit", 8))
-        except (TypeError, ValueError):
-            raw = 8
+        raw = _as_int(self.table_behavior.get("preview_entries_limit", 8), 8)
         return max(PREVIEW_ENTRIES_LIMIT_MIN, min(PREVIEW_ENTRIES_LIMIT_MAX, raw))
 
     @staticmethod
@@ -1644,15 +1663,10 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
             if not isinstance(pdef.cache_profiles_by_view, dict):
                 continue
             profile = pdef.cache_profiles_by_view.get(view, {})
-            if not isinstance(profile, dict):
-                continue
-            try:
-                batch_size = max(
-                    batch_size,
-                    max(1, int(profile.get("update_batch_size", batch_size))),
-                )
-            except (TypeError, ValueError):
-                continue
+            batch_size = max(
+                batch_size,
+                max(1, _as_int(profile.get("update_batch_size", batch_size), batch_size)),
+            )
         return batch_size
 
     def _dynamic_property_refresh_interval_s(self) -> float:
@@ -1664,13 +1678,8 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
             if not isinstance(pdef.cache_profiles_by_view, dict):
                 continue
             profile = pdef.cache_profiles_by_view.get(view, {})
-            if not isinstance(profile, dict):
-                continue
-            try:
-                candidate = max(0.05, float(profile.get("update_interval_s", 0.25)))
-                interval_s = candidate if interval_s is None else min(interval_s, candidate)
-            except (TypeError, ValueError):
-                continue
+            candidate = max(0.05, _as_float(profile.get("update_interval_s", 0.25), 0.25))
+            interval_s = candidate if interval_s is None else min(interval_s, candidate)
         return interval_s if interval_s is not None else 0.25
 
     def _find_row(self, path: Path) -> tuple[list[ProjectRow], int] | None:
@@ -1981,7 +1990,7 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
                 (rs[0].path, rs[1].name), 0.0
             )
         )
-        grouped: dict[tuple[str, str], list[object]] = {}
+        grouped: dict[tuple[str, str], list[HookTarget]] = {}
         for row, spec in candidates[:batch_size]:
             key = (spec.name, spec.event)
             grouped.setdefault(key, []).append(
@@ -2050,27 +2059,16 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
 
     def _git_refresh_interval_s(self) -> float:
         profile = self._git_refresh_profile()
-        try:
-            return max(0.05, float(profile.get("update_interval_s", 0.8)))
-        except (TypeError, ValueError):
-            return 0.8
+        return max(0.05, _as_float(profile.get("update_interval_s", 0.8), 0.8))
 
     def _git_refresh_min_interval_s(self) -> float:
         profile = self._git_refresh_profile()
-        try:
-            return max(
-                0.05,
-                float(profile.get("min_interval_s", profile.get("update_interval_s", 0.5))),
-            )
-        except (TypeError, ValueError):
-            return 0.5
+        fallback = _as_float(profile.get("update_interval_s", 0.5), 0.5)
+        return max(0.05, _as_float(profile.get("min_interval_s", fallback), fallback))
 
     def _git_refresh_batch_size(self) -> int:
         profile = self._git_refresh_profile()
-        try:
-            return max(1, int(profile.get("update_batch_size", 8)))
-        except (TypeError, ValueError):
-            return 8
+        return max(1, _as_int(profile.get("update_batch_size", 8), 8))
 
     def _metadata_health_profile_name(self) -> str:
         return (
@@ -2091,34 +2089,20 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
 
     def _metadata_health_interval_s(self) -> float:
         profile = self._metadata_health_profile()
-        try:
-            return max(0.05, float(profile.get("update_interval_s", 1.0)))
-        except (TypeError, ValueError):
-            return 1.0
+        return max(0.05, _as_float(profile.get("update_interval_s", 1.0), 1.0))
 
     def _metadata_health_min_interval_s(self) -> float:
         profile = self._metadata_health_profile()
-        try:
-            return max(
-                0.05,
-                float(profile.get("min_interval_s", profile.get("update_interval_s", 0.4))),
-            )
-        except (TypeError, ValueError):
-            return 0.4
+        fallback = _as_float(profile.get("update_interval_s", 0.4), 0.4)
+        return max(0.05, _as_float(profile.get("min_interval_s", fallback), fallback))
 
     def _metadata_health_batch_size(self) -> int:
         profile = self._metadata_health_profile()
-        try:
-            return max(1, int(profile.get("update_batch_size", 12)))
-        except (TypeError, ValueError):
-            return 12
+        return max(1, _as_int(profile.get("update_batch_size", 12), 12))
 
     def _metadata_health_ttl_s(self) -> float:
         profile = self._metadata_health_profile()
-        try:
-            return max(0.2, float(profile.get("cache_ttl_s", 8.0)))
-        except (TypeError, ValueError):
-            return 8.0
+        return max(0.2, _as_float(profile.get("cache_ttl_s", 8.0), 8.0))
 
     def _maybe_refresh_metadata_health(self) -> None:
         textual_ui_metadata_health.maybe_refresh_metadata_health(
@@ -2224,7 +2208,7 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
 
     def _on_metadata_health_refresh_done(
         self,
-        updated: list[tuple[Path, str, float]],
+        updated: list[tuple[Path, str, str, float]],
     ) -> None:
         textual_ui_metadata_health.on_metadata_health_refresh_done(self, updated)
 
@@ -2264,32 +2248,16 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
 
     def _pane_probe_project_scan_limit(self) -> int:
         profile = self._pane_probe_profile()
-        try:
-            return max(1, int(profile.get("update_batch_size", 400)))
-        except (TypeError, ValueError):
-            return 400
+        return max(1, _as_int(profile.get("update_batch_size", 400), 400))
 
     def _pane_probe_profile_min_interval_s(self) -> float:
         probe_profile = self._pane_probe_profile()
-        try:
-            return max(
-                0.05,
-                float(
-                    probe_profile.get(
-                        "min_interval_s",
-                        probe_profile.get("update_interval_s", 0.5),
-                    )
-                ),
-            )
-        except (TypeError, ValueError):
-            return 0.5
+        fallback = _as_float(probe_profile.get("update_interval_s", 0.5), 0.5)
+        return max(0.05, _as_float(probe_profile.get("min_interval_s", fallback), fallback))
 
     def _pane_probe_profile_slow_interval_s(self) -> float:
         probe_profile = self._pane_probe_profile()
-        try:
-            return max(0.05, float(probe_profile.get("update_interval_s", 6.0)))
-        except (TypeError, ValueError):
-            return 6.0
+        return max(0.05, _as_float(probe_profile.get("update_interval_s", 6.0), 6.0))
 
     def _pane_probe_profile_fast_interval_s(self) -> float:
         min_interval_s = self._pane_probe_profile_min_interval_s()
@@ -2610,10 +2578,7 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
         return bool(self.table_behavior.get("pin_wip_top", False))
 
     def _table_side_width_pct(self) -> int:
-        try:
-            raw = int(self.table_behavior.get("side_width_pct", 33))
-        except (TypeError, ValueError):
-            raw = 33
+        raw = _as_int(self.table_behavior.get("side_width_pct", 33), 33)
         presets = list(TABLE_SIDE_WIDTH_PRESETS) or [raw]
         return min(presets, key=lambda pct: abs(pct - raw))
 
@@ -2758,7 +2723,7 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
             parent_name=parent_name,
         )
 
-    def _on_new_project_submit(self, payload: dict[str, str | None] | None) -> None:
+    def _on_new_project_submit(self, payload: dict[str, object] | None) -> None:
         textual_ui_project_create.on_new_project_submit(
             self,
             payload,
@@ -3549,12 +3514,12 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
             )
             return
         if self._critical_job_active():
-            details = (
+            critical_details = (
                 f"[cyan]critical job[/]: {self._esc(self._critical_job_label())}\n"
                 "[bold red]warning[/]: exiting now may interrupt this operation"
             )
             self.push_screen(
-                ConfirmScreen("Quit while critical job is running?", details),
+                ConfirmScreen("Quit while critical job is running?", critical_details),
                 self._on_quit_while_busy,
             )
             return
@@ -3567,7 +3532,7 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
         self.fast_exit_requested = True
         self.exit(("quit", None, []))
 
-    def _on_quit_while_busy(self, ok: bool) -> None:
+    def _on_quit_while_busy(self, ok: bool | None) -> None:
         if not ok:
             self._log("quit cancelled", "warn")
             self._refresh_side()

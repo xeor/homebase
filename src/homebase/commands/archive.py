@@ -669,7 +669,7 @@ def cmd_rm(
             view="archive" if delete_target.archived else "active",
         )
         if pre_outcome.cancelled:
-            print(f"delete cancelled by hook: {pre_outcome.reason}", file=os.sys.stderr)
+            print(f"delete cancelled by hook: {pre_outcome.reason}", file=sys.stderr)
             return 1
     rc = commands_workspace.cmd_rm(
         path,

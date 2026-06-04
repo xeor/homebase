@@ -189,9 +189,14 @@ def resolve_named_filters_for_display(
 
 
 def _as_nonneg_int(value: object, default: int = 0) -> int:
-    try:
+    if isinstance(value, bool):
         n = int(value)
-    except (TypeError, ValueError):
+    elif isinstance(value, (int, float, str)):
+        try:
+            n = int(value)
+        except (TypeError, ValueError):
+            return default
+    else:
         return default
     return n if n >= 0 else default
 
@@ -360,11 +365,7 @@ def save_ui_state_to_data(
     out: dict[str, object] = dict(data) if isinstance(data, dict) else {}
 
     def as_nonneg_int(value: object, default: int = 0) -> int:
-        try:
-            n = int(value)
-        except (TypeError, ValueError):
-            return default
-        return n if n >= 0 else default
+        return _as_nonneg_int(value, default)
 
     out["state"] = {
         "view": state.get("view", "active"),

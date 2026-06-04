@@ -78,16 +78,12 @@ def _resolve_date_rule(
     col_id: str,
 ) -> dict[str, object]:
     ranges = table_date_color_ranges or {}
-    if not isinstance(ranges, dict):
-        return {}
     view_table = ranges.get(view_mode, {})
     all_table = ranges.get("all", {})
-    rule = view_table.get(col_id, {}) if isinstance(view_table, dict) else {}
-    if not rule and isinstance(all_table, dict):
+    rule = view_table.get(col_id, {})
+    if not rule:
         rule = all_table.get(col_id, {})
-    if not isinstance(rule, dict):
-        return {}
-    return rule
+    return rule if isinstance(rule, dict) else {}
 
 
 def _parse_color_stops(stops_raw: object) -> list[tuple[float, tuple[int, int, int]]]:
@@ -225,14 +221,22 @@ def _row_status_mark(
 def _col_sig(visible_cols: list[dict[str, object]]) -> tuple[tuple[object, ...], ...]:
     parts: list[tuple[object, ...]] = []
     for col in visible_cols:
-        try:
-            col_width = int(col.get("width", 12) or 12)
-        except (TypeError, ValueError):
-            col_width = 12
+        col_width = _col_int(col.get("width", 12), 12)
         cid = str(col.get("id", "")).strip()
         label = str(col.get("label", "")) if "label" in col else cid.upper()
         parts.append((cid, label, bool(col.get("enabled", True)), col_width))
     return tuple(parts)
+
+
+def _col_int(value: object, default: int) -> int:
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, (int, float, str)):
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return default
+    return default
 
 
 def _compute_render_signature(
@@ -276,10 +280,7 @@ def _compute_width_by_id(
     width_by_id: dict[str, int] = {}
     for col in visible_cols:
         cid = str(col.get("id", "")).strip()
-        try:
-            width = int(col.get("width", 12))
-        except (TypeError, ValueError):
-            width = 12
+        width = _col_int(col.get("width", 12), 12)
         configured = max(4, min(80, width))
         effective = int(effective_widths.get(cid, 0) or 0)
         width_by_id[cid] = max(configured, effective)
@@ -506,9 +507,11 @@ def _row_values(
 def _row_keys_match(
     table: DataTable, table_rows: list[tuple[str, list[object]]]
 ) -> bool:
+    from textual.coordinate import Coordinate
+
     for idx, (row_key, _vals) in enumerate(table_rows):
         try:
-            existing_key, _ = table.coordinate_to_cell_key((idx, 0))
+            existing_key, _ = table.coordinate_to_cell_key(Coordinate(idx, 0))
             existing_key_text = str(getattr(existing_key, "value", existing_key))
         except WIDGET_API_ERRORS:
             return False
@@ -520,10 +523,12 @@ def _row_keys_match(
 def _patch_cells_in_place(
     table: DataTable, table_rows: list[tuple[str, list[object]]]
 ) -> bool:
+    from textual.coordinate import Coordinate
+
     for idx, (_row_key, vals) in enumerate(table_rows):
         for col_idx, value in enumerate(vals):
             try:
-                table.update_cell_at((idx, col_idx), value)
+                table.update_cell_at(Coordinate(idx, col_idx), value)
             except WIDGET_API_ERRORS:
                 return False
     return True
@@ -606,8 +611,10 @@ def _apply_cursor_and_scroll(
     if not rows:
         app.selected_path = None
         return
+    from textual.coordinate import Coordinate
+
     idx = _resolve_cursor_index(app, rows, prev_cursor_row)
-    table.cursor_coordinate = (idx, 0)
+    table.cursor_coordinate = Coordinate(idx, 0)
     apply_saved_scroll = bool(
         app._restore_pending.get(app.view_mode, False)
         or app._restore_apply_scroll.get(app.view_mode, False)

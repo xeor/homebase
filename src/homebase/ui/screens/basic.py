@@ -181,7 +181,7 @@ class InputScreen(BaseModalScreen[str | None]):
 
     def compose(self) -> ComposeResult:
         with Vertical(id="modal_box"):
-            yield Static(self.title)
+            yield Static(self.title or "")
             yield Input(
                 placeholder=self.placeholder, value=self.value, id="value_input"
             )

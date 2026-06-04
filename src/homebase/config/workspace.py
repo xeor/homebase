@@ -1,10 +1,15 @@
 from __future__ import annotations
 
 import re
+from typing import Literal, cast
 
 from ..core.constants import reserved_hotkeys
 from ..core.models import Action, BuiltinActionMeta, HotbarEntry, KeyEntry
 from . import cache_profile as cache_profile_config
+
+ActionKind = Literal["builtin", "shell", "filepicker", "note", "tab"]
+ActionScope = Literal["target", "workspace", "tab"]
+ActionSource = Literal["builtin", "config", "overridden"]
 
 _VAR_RE = re.compile(r"\{\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}\}")
 _HEX_COLOR_RE = re.compile(r"^#[0-9A-Fa-f]{6}$")
@@ -231,7 +236,7 @@ def _parse_action_definition(
     return Action(
         id=aid,
         label=label,
-        kind=kind,
+        kind=cast(ActionKind, kind),
         scope="workspace" if scope == "workspace" else "target",
         multi="per_row" if multi == "per_row" else "joined",
         command=command or None,
@@ -399,7 +404,7 @@ def merge_actions(
     for action_id, meta in builtins.items():
         override = override_map.get(action_id, {})
         label = str(override.get("label", meta.default_label)).strip() or meta.default_label
-        source = "overridden" if "label" in override else "builtin"
+        source: ActionSource = "overridden" if "label" in override else "builtin"
         merged[action_id] = Action(
             id=action_id,
             label=label,
@@ -475,7 +480,7 @@ def merge_actions(
                 id=cid,
                 label=label,
                 kind="shell",
-                scope=scope,
+                scope=cast(ActionScope, scope),
                 multi="per_row" if loop_on_multi else "joined",
                 command=command,
                 source="config",
@@ -653,34 +658,61 @@ def _apply_profile_to_mode(
     profile_name = str(mode_data.get("cache_profile", "")).strip()
     if not profile_name:
         return
+    raw_overrides = mode_data.get("cache_profile_overrides", None)
+    overrides = raw_overrides if isinstance(raw_overrides, dict) else None
     resolved = cache_profile_config.resolve_cache_profile(
         profile_name=profile_name,
         view=mode,
         profile_table=profile_table,
         explicit_fields={},
-        profile_overrides=mode_data.get("cache_profile_overrides", None),
+        profile_overrides=overrides,
     )
     out_mode["interval_s"] = max(
-        1.0, float(resolved.get("update_interval_s", 5.0))
+        1.0, _as_float(resolved.get("update_interval_s", 5.0), 5.0)
     )
-    out_mode["batch_size"] = max(1, int(resolved.get("update_batch_size", 1)))
-    out_mode["parallelism"] = max(1, int(resolved.get("max_parallelism", 1)))
+    out_mode["batch_size"] = max(1, _as_int(resolved.get("update_batch_size", 1), 1))
+    out_mode["parallelism"] = max(1, _as_int(resolved.get("max_parallelism", 1), 1))
     out_mode["use_usage_score"] = bool(resolved.get("use_usage_score", True))
-    out_mode["usage_weight"] = max(0.0, float(resolved.get("usage_weight", 1.0)))
+    out_mode["usage_weight"] = max(0.0, _as_float(resolved.get("usage_weight", 1.0), 1.0))
     out_mode["stale_boost"] = bool(resolved.get("stale_boost", True))
+
+
+def _as_int(value: object, default: int) -> int:
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, (int, float, str)):
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return default
+    return default
+
+
+def _as_float(value: object, default: float) -> float:
+    if isinstance(value, bool):
+        return float(value)
+    if isinstance(value, (int, float, str)):
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return default
+    return default
 
 
 def _coerce_setting(
     raw_value: object, fallback: object, *, kind: type, floor: float | int
 ) -> object:
-    try:
-        value = raw_value if raw_value is not None else fallback
-        if kind is float:
-            return max(floor, float(value))
-        if kind is int:
-            return max(floor, int(value))
-    except (TypeError, ValueError):
-        return None
+    value = raw_value if raw_value is not None else fallback
+    if kind is float:
+        try:
+            return max(floor, float(value))  # type: ignore[arg-type]  # config value, caught below
+        except (TypeError, ValueError):
+            return None
+    if kind is int:
+        try:
+            return max(floor, int(value))  # type: ignore[call-overload]  # config value, caught below
+        except (TypeError, ValueError):
+            return None
     return None
 
 

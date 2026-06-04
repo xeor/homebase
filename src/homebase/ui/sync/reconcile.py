@@ -7,6 +7,28 @@ from typing import Any, Callable
 from ...core.models import ProjectRow
 
 
+def _as_int(value: object, default: int) -> int:
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, (int, float, str)):
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return default
+    return default
+
+
+def _as_float(value: object, default: float) -> float:
+    if isinstance(value, bool):
+        return float(value)
+    if isinstance(value, (int, float, str)):
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return default
+    return default
+
+
 def mode_has_stale_rows(app: Any, mode: str) -> bool:
     rows = app.active_rows if mode == "active" else app.archived_rows
     return any(bool(row.stale) for row in rows)
@@ -22,9 +44,9 @@ def effective_reconcile_wait_s(
     mode: str,
 ) -> float:
     cfg = _reconcile_mode_cfg(app, mode)
-    base_wait = max(1.0, float(cfg.get("interval_s", 5.0)))
+    base_wait = max(1.0, _as_float(cfg.get("interval_s", 5.0), 5.0))
     if mode_has_stale_rows(app, mode) and bool(cfg.get("stale_boost", True)):
-        return max(0.05, float(cfg.get("stale_interval_s", base_wait)))
+        return max(0.05, _as_float(cfg.get("stale_interval_s", base_wait), base_wait))
     return base_wait
 
 
@@ -33,9 +55,9 @@ def effective_reconcile_parallelism(
     mode: str,
 ) -> int:
     cfg = _reconcile_mode_cfg(app, mode)
-    base_parallelism = max(1, int(cfg.get("parallelism", 1)))
+    base_parallelism = max(1, _as_int(cfg.get("parallelism", 1), 1))
     if mode_has_stale_rows(app, mode) and bool(cfg.get("stale_boost", True)):
-        return max(base_parallelism, int(cfg.get("stale_parallelism", base_parallelism)))
+        return max(base_parallelism, _as_int(cfg.get("stale_parallelism", base_parallelism), base_parallelism))
     return base_parallelism
 
 
@@ -44,9 +66,9 @@ def effective_reconcile_batch_size(
     mode: str,
 ) -> int:
     cfg = _reconcile_mode_cfg(app, mode)
-    base_batch = max(1, int(cfg.get("batch_size", 1)))
+    base_batch = max(1, _as_int(cfg.get("batch_size", 1), 1))
     if mode_has_stale_rows(app, mode) and bool(cfg.get("stale_boost", True)):
-        return max(base_batch, int(cfg.get("stale_batch_size", base_batch)))
+        return max(base_batch, _as_int(cfg.get("stale_batch_size", base_batch), base_batch))
     return base_batch
 
 
@@ -108,7 +130,7 @@ def pick_reconcile_candidates(
     stale_rows = [row for row in rows if row.stale]
     cfg = _reconcile_mode_cfg(app, mode)
     use_usage_score = bool(cfg.get("use_usage_score", True))
-    usage_weight = max(0.0, float(cfg.get("usage_weight", 1.0)))
+    usage_weight = max(0.0, _as_float(cfg.get("usage_weight", 1.0), 1.0))
     stale_boost = bool(cfg.get("stale_boost", True))
     pool = stale_rows if stale_rows else list(rows)
     out: list[ProjectRow] = []

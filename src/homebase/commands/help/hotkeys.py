@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import string
-from typing import Iterable
+from typing import Iterable, Sequence
 
 from ...core.constants import BUILTIN_HOTKEYS, CONTEXT_RESERVED_HOTKEYS
 from ...core.models import KeyEntry
@@ -16,7 +16,7 @@ RECOMMENDED_PATTERNS: tuple[tuple[str, tuple[str, ...]], ...] = (
 )
 
 
-def _fmt_rows(rows: list[tuple[str, ...]], headers: tuple[str, ...]) -> Iterable[str]:
+def _fmt_rows(rows: Sequence[tuple[str, ...]], headers: tuple[str, ...]) -> Iterable[str]:
     widths = [len(h) for h in headers]
     for row in rows:
         for i, col in enumerate(row):

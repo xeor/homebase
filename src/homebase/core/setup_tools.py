@@ -997,9 +997,7 @@ def _base_folder_fix(ctx: SetupContext) -> SetupFix:
         currently_correct=base_present,
         required=True,
         recommended=True,
-        apply_create=(
-            lambda p=base_dir_local: p.mkdir(parents=True, exist_ok=True)
-        ),
+        apply_create=lambda: base_dir_local.mkdir(parents=True, exist_ok=True),
         apply_remove=None,  # NEVER auto-remove the user's workspace
         preview_create=(
             f"current: {ctx.base_dir} (missing)",
@@ -1027,10 +1025,8 @@ def _homebase_dir_fix(ctx: SetupContext) -> SetupFix:
         currently_correct=hb_present,
         required=True,
         recommended=True,
-        apply_create=(
-            lambda p=hb_dir_local: p.mkdir(parents=True, exist_ok=True)
-        ),
-        apply_remove=(lambda p=hb_dir_local: _remove_dir_if_exists(p)),
+        apply_create=lambda: hb_dir_local.mkdir(parents=True, exist_ok=True),
+        apply_remove=lambda: _remove_dir_if_exists(hb_dir_local),
         requires=("base_folder",),
         preview_create=(
             f"current: {ctx.homebase_dir} (missing)",
@@ -1135,9 +1131,7 @@ def _local_bin_fix(ctx: SetupContext) -> SetupFix:
         currently_correct=bin_present,
         required=True,
         recommended=True,
-        apply_create=(
-            lambda p=dest_dir_local: p.mkdir(parents=True, exist_ok=True)
-        ),
+        apply_create=lambda: dest_dir_local.mkdir(parents=True, exist_ok=True),
         apply_remove=None,  # Shared with many tools; never auto-remove.
         preview_create=(
             f"current: {ctx.dest_dir} (missing)",

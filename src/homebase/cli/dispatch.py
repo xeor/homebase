@@ -287,7 +287,7 @@ def _build_dispatch_table(
             base_dir, str(getattr(ns, "path", ".") or ".")
         ),
         "fix-worktrees": lambda: handlers["cmd_fix_worktrees"](
-            base_dir, bool(getattr(ns, "apply", False))
+            base_dir, apply=bool(getattr(ns, "apply", False))
         ),
         "fix": lambda: _dispatch_fix(ns, handlers["cmd_fix"]),
         "archive": lambda: _dispatch_archive(
@@ -337,7 +337,7 @@ def dispatch_command(
     cmd_rm: Callable[..., int],
     cmd_fix: Callable[..., int],
     cmd_deworktree: Callable[[Path, str], int],
-    cmd_fix_worktrees: Callable[[Path, bool], int],
+    cmd_fix_worktrees: Callable[..., int],
     cmd_archive_ls: Callable[[Path, str], int],
     cmd_archive_undo: Callable[[Path, str], int],
     cmd_archive_restore_entry: Callable[[Path, str], int],

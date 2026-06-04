@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from datetime import timezone
+from datetime import timezone, tzinfo
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from .models import BuiltinActionMeta, BuiltinHotkey, PropertyDef
@@ -13,6 +13,7 @@ ARCHIVE_YEAR_PREFIX_RE = re.compile(r"^\d{4}")
 
 DEFAULT_ARCHIVE_TZ_NAME = "Europe/Oslo"
 ARCHIVE_TZ_NAME = DEFAULT_ARCHIVE_TZ_NAME
+ARCHIVE_TZ: tzinfo
 try:
     ARCHIVE_TZ = ZoneInfo(ARCHIVE_TZ_NAME)
 except ZoneInfoNotFoundError:

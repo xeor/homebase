@@ -108,9 +108,9 @@ def _apply_profile_overrides(
         raise ValueError("cache_profile_overrides.all must be a mapping")
     if override_view and not isinstance(override_view, Mapping):
         raise ValueError(f"cache_profile_overrides.{view} must be a mapping")
-    return _merge_profile_layers(
-        [resolved, dict(override_all or {}), dict(override_view or {})]
-    )
+    all_part = dict(override_all) if isinstance(override_all, Mapping) else {}
+    view_part = dict(override_view) if isinstance(override_view, Mapping) else {}
+    return _merge_profile_layers([resolved, all_part, view_part])
 
 
 def _validate_resolved_keys(resolved: dict[str, object]) -> None:
