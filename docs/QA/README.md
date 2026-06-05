@@ -20,14 +20,14 @@ docs/QA/
 
 ## Status snapshot
 
-Last run: `2026-06-05` · source: 218 files / 47k LOC · tests: 173 files / ~29k LOC
+Last run: `2026-06-05` · source: 219 files / 47k LOC · tests: 179 files / ~30k LOC
 
 | Tool          | Metric                          | Baseline     | Target        | Status   |
 |---------------|---------------------------------|--------------|---------------|----------|
-| pytest        | tests passing                   | 2060/2060    | all           | green    |
+| pytest        | tests passing                   | 2172/2172    | all           | green    |
 | ruff          | lint findings                   | 0            | 0             | green    |
 | mypy          | errors / files affected         | 0 / 0        | 0 / 0         | green    |
-| pytest-cov    | branch coverage                 | 66.4 %       | 75 %          | baseline |
+| pytest-cov    | branch coverage                 | 65.8 %       | 75 %          | baseline |
 | import-linter | contract violations             | 0            | 0             | green    |
 | vulture       | findings (min-confidence 80)    | 0            | 0             | green    |
 | vulture       | findings (min-confidence 60)    | ~289 lns     | review        | baseline |
@@ -56,18 +56,40 @@ uv run pytest
 - TUI / Textual screens are tested through Textual's `Pilot`
   harness with `pytest-asyncio` (`asyncio_mode = "auto"` in
   `pyproject.toml`). Reference:
-  https://textual.textualize.io/guide/testing/. Pattern:
+  https://textual.textualize.io/guide/testing/.
+- **Recommended pattern for modal screens** — minimal harness App
+  pushes one screen and stashes the dismiss value:
 
   ```python
-  async def test_screen() -> None:
-      app = BApp(tmp_path, ctx=ctx)
+  class _Harness(App[None]):
+      def __init__(self, factory):
+          super().__init__()
+          self._factory = factory
+          self.result = "__unset__"
+      def compose(self):
+          yield Static("harness")
+      async def on_mount(self):
+          self.push_screen(self._factory(), lambda v: setattr(self, "result", v))
+
+  async def test_modal() -> None:
+      app = _Harness(lambda: ConfirmScreen("ok?"))
       async with app.run_test() as pilot:
-          await pilot.press("ctrl+q")
+          await pilot.press("y")
           await pilot.pause()
+          assert app.result is True
   ```
 
-  Use a tiny `_Harness(App)` to push a single modal and capture
-  the dismiss value (see `tests/test_ui_pilot_modals.py`).
+  See `tests/test_ui_pilot_modals.py`, `test_ui_pilot_choices.py`,
+  `test_ui_pilot_rename.py`, `test_ui_pilot_restore.py`.
+- **BApp-level Pilot tests are not in the suite.** Booting the full
+  app via `run_test()` schedules many `call_after_refresh`
+  background callbacks (cache refresh, worktree-health scan, pane
+  probe, settings-config boot) that can fire after a test's
+  assertion phase but before `run_test()` finishes tearing the
+  screen down; one of them queries `#projects` and surfaces a
+  `NoMatches` as a flaky failure depending on collection order.
+  Modal-level Pilot tests give the best coverage-per-test ratio
+  without that risk.
 
 ### 2. ruff — lint + import order
 
@@ -284,18 +306,27 @@ criterion. Tick `[x]` when the snapshot number reaches the target.
 
 ### Phase 5 — coverage (pytest-cov)
 
-- [ ] Raise branch coverage 66.4 % → 75 %. Pilot harness now covers
-      BApp boot + modal dismiss flows; remaining gap is the big UI
-      mixins (`app_actions.py`, `app_events.py`) and the screens that
-      need a populated row table to exercise.
-- Pilot pattern (Textual): `pytest-asyncio` is configured
-  (`asyncio_mode = "auto"`). Add Pilot tests in `tests/test_ui_pilot_*.py`
-  — boot `BApp(tmp_path, ctx=...)` inside `async with app.run_test()`
-  and drive it with `pilot.press(...) / pilot.click(...) / pilot.pause()`.
-- Recent lifts: BApp boot smoke 36 % → ~60 % on `ui/app.py`,
-  modal screens (`basic.py`) → high coverage,
-  `workspace/benchmark.py` 36 → 62 %, `tmux/commands.py` 50 → 69 %,
-  `workspace/projects.py` 77 → 86 %, `core/prompting.py` 56 → 93 %.
+- [ ] Raise branch coverage 65.8 % → 75 %. Modal screens are now in
+      the 83–95 % range via Pilot; the remaining gap is mostly
+      `ui/app.py` mixins (which need a fully booted BApp without
+      the flaky background work) plus `ui/actions/*` and
+      `ui/side/*`.
+- Pilot pattern (Textual): see the "pytest" tool section above for
+  the recommended modal-harness pattern. Boot-the-full-BApp tests
+  via `run_test()` were tried but were too flaky to keep in the
+  suite — write Pilot tests at the screen / harness-app level.
+- Recent lifts (cumulative across sessions):
+  `ui/screens/choices.py` 16 → 89 %,
+  `ui/screens/rename.py` 82 → 95 %,
+  `ui/screens/restore.py` 58 → 90 %,
+  `ui/screens/basic.py` 15 → 93 %,
+  `ui/screens/actions.py` 15 → 83 %,
+  `ui/actions/hotbar.py` (extracted from `ui/app.py`) → 98 %,
+  `ui/app.py` 36 → 42 %,
+  `workspace/benchmark.py` 36 → 62 %,
+  `tmux/commands.py` 50 → 69 %,
+  `workspace/projects.py` 77 → 86 %,
+  `core/prompting.py` 56 → 93 %.
 - Exit: ≥ 75 % branch coverage.
 
 ### Phase 6 — dead code (vulture)

@@ -59,8 +59,6 @@ from ..config.prefs import (
     load_table_date_column_styles,
     load_ui_state,
     resolve_filter_expression,
-    save_hotbar,
-    save_keys,
     save_ui_state,
 )
 from ..core import utils as core_utils
@@ -173,6 +171,7 @@ from .actions import bulk_dispatch as textual_ui_bulk_dispatch
 from .actions import bulk_preflight as textual_ui_bulk_preflight
 from .actions import catalog as textual_ui_action_catalog
 from .actions import dispatch as textual_ui_action_dispatch
+from .actions import hotbar as textual_ui_hotbar
 from .actions import item_edits as textual_ui_item_edits
 from .actions import note_sync as textual_ui_note_sync
 from .actions import pick_actions as textual_ui_pick_actions
@@ -325,44 +324,6 @@ def _collect_hook_refresh_candidates(
                     continue
                 candidates.append((row, spec))
     return candidates
-
-
-def _parse_style_rule(raw_rule: object) -> dict[str, object] | None:
-    if not isinstance(raw_rule, dict):
-        return None
-    bg_color = str(raw_rule.get("bg_color", "")).strip()
-    fg_color = str(raw_rule.get("fg_color", "")).strip()
-    when = str(raw_rule.get("when", "")).strip()
-    bold = bool(raw_rule.get("bold", False))
-    underline = bool(raw_rule.get("underline", False))
-    italic = bool(raw_rule.get("italic", False))
-    if not when:
-        return None
-    if not bg_color and not fg_color and not (bold or underline or italic):
-        return None
-    rule: dict[str, object] = {"when": when}
-    if bg_color:
-        rule["bg_color"] = bg_color
-    if fg_color:
-        rule["fg_color"] = fg_color
-    if bold:
-        rule["bold"] = True
-    if underline:
-        rule["underline"] = True
-    if italic:
-        rule["italic"] = True
-    return rule
-
-
-def _parse_style_rules(raw_style: object) -> list[dict[str, object]]:
-    if not isinstance(raw_style, list) or not raw_style:
-        return []
-    out: list[dict[str, object]] = []
-    for raw_rule in raw_style:
-        rule = _parse_style_rule(raw_rule)
-        if rule is not None:
-            out.append(rule)
-    return out
 
 
 class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path | None, list[str]]]):
@@ -1278,176 +1239,34 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
         textual_ui_action_dispatch.dispatch_action(self, normalized)
 
     def _bindings_from_ctx(self) -> list[dict[str, object]]:
-        if not self.ctx.hotbar and not self.ctx.keys and self.ctx.custom_hotkeys:
-            return [dict(item) for item in self.ctx.custom_hotkeys]
-        bindings: list[dict[str, object]] = []
-        for idx, item in enumerate(self.ctx.hotbar, start=1):
-            action_id = str(item.get("action", "")).strip()
-            if not action_id:
-                continue
-            row: dict[str, object] = {
-                "id": f"hotbar_{idx}",
-                "target": action_id,
-                "hotbar": True,
-            }
-            label = str(item.get("label", "")).strip()
-            if label:
-                row["label"] = label
-            style_rows = _parse_style_rules(item.get("style", []))
-            if style_rows:
-                row["style"] = style_rows
-            bindings.append(row)
-        for idx, (hotkey, entry) in enumerate(self.ctx.keys.items(), start=1):
-            action_id = str(entry.get("action", "")).strip()
-            if not action_id:
-                continue
-            row = {
-                "id": f"key_{idx}",
-                "target": action_id,
-                "hotkey": str(hotkey).strip().lower(),
-            }
-            label = str(entry.get("label", "")).strip()
-            if label:
-                row["label"] = label
-            bindings.append(row)
-        return bindings
+        return textual_ui_hotbar.bindings_from_ctx(self.ctx)
 
     def _save_bindings(self, bindings: list[dict[str, object]]) -> None:
-        hotbar_payload: list[dict[str, object]] = []
-        keys_payload: dict[str, dict[str, object]] = {}
-        for row in bindings:
-            target = str(row.get("target", "")).strip()
-            if not target:
-                continue
-            label = str(row.get("label", "")).strip()
-            if bool(row.get("hotbar", False)):
-                payload: dict[str, object] = {
-                    "action": target,
-                    **({"label": label} if label else {}),
-                }
-                style_rows = _parse_style_rules(row.get("style", []))
-                if style_rows:
-                    payload["style"] = style_rows
-                hotbar_payload.append(payload)
-            hotkey = str(row.get("hotkey", "")).strip().lower()
-            if hotkey:
-                keys_payload[hotkey] = {
-                    "action": target,
-                    **({"label": label} if label else {}),
-                }
-        save_hotbar(self.base_dir, hotbar_payload)
-        save_keys(self.base_dir, keys_payload)
+        textual_ui_hotbar.save_bindings(self.base_dir, bindings)
 
     def _hotbar_targets(self) -> list[str]:
-        return textual_ui_action_items.hotbar_targets(self)
+        return textual_ui_hotbar.hotbar_targets(self)
 
     def _hotbar_visible(self) -> bool:
-        return bool(self._hotbar_targets())
+        return textual_ui_hotbar.hotbar_visible(self)
 
     def _normalize_hotbar_index(self) -> None:
-        targets = self._hotbar_targets()
-        if not targets:
-            self.hotbar_selected_index = 0
-            return
-        self.hotbar_selected_index = max(0, min(self.hotbar_selected_index, len(targets) - 1))
+        textual_ui_hotbar.normalize_hotbar_index(self)
 
     def _selected_hotbar_target(self) -> str:
-        targets = self._hotbar_targets()
-        if not targets:
-            return ""
-        self._normalize_hotbar_index()
-        return str(targets[self.hotbar_selected_index])
+        return textual_ui_hotbar.selected_hotbar_target(self)
 
     def _cycle_hotbar(self, delta: int) -> bool:
-        targets = self._hotbar_targets()
-        if not targets:
-            return False
-        self._normalize_hotbar_index()
-        self.hotbar_selected_index = (self.hotbar_selected_index + delta) % len(targets)
-        self._mark_state_dirty()
-        self._refresh_search_display()
-        return True
+        return textual_ui_hotbar.cycle_hotbar(self, delta)
 
     def _toggle_hotbar_target_from_palette(self, target: str) -> bool:
-        value = textual_ui_action_dispatch.normalize_action_target(str(target or ""))
-        if not value:
-            return False
-        action = self.actions.get(value)
-        if action is not None and action.scope != "target":
-            self._log(
-                f"{value} cannot be on hotbar: only target-scope actions are eligible",
-                "warn",
-            )
-            return False
-        bindings: list[dict[str, object]] = [dict(row) for row in self.custom_hotkeys]
-        found_idx = -1
-        for i, row in enumerate(bindings):
-            if str(row.get("target", "")).strip() == value:
-                found_idx = i
-                break
-        if found_idx >= 0:
-            row = dict(bindings[found_idx])
-            hotbar = not bool(row.get("hotbar", False))
-            if hotbar:
-                row["hotbar"] = True
-            else:
-                row.pop("hotbar", None)
-                if not str(row.get("hotkey", "")).strip():
-                    bindings.pop(found_idx)
-                    try:
-                        self._save_bindings(bindings)
-                        self.custom_hotkeys = bindings
-                        self._normalize_hotbar_index()
-                        self._mark_state_dirty()
-                        self._refresh_search_display()
-                        return True
-                    except (OSError, TypeError, ValueError) as exc:
-                        self._show_runtime_error("save bindings", exc)
-                        return False
-            bindings[found_idx] = row
-        else:
-            bindings.append(
-                {
-                    "id": f"hotbar_{len(bindings) + 1}",
-                    "target": value,
-                    "hotbar": True,
-                }
-            )
-        try:
-            self._save_bindings(bindings)
-            self.custom_hotkeys = bindings
-        except (OSError, TypeError, ValueError) as exc:
-            self._show_runtime_error("save bindings", exc)
-            return False
-        self._normalize_hotbar_index()
-        self._mark_state_dirty()
-        self._refresh_search_display()
-        return True
+        return textual_ui_hotbar.toggle_hotbar_target_from_palette(self, target)
 
     def _target_is_hotbar(self, target: str) -> bool:
-        value = textual_ui_action_dispatch.normalize_action_target(str(target or ""))
-        if not value:
-            return False
-        return value in {textual_ui_action_dispatch.normalize_action_target(t) for t in self._hotbar_targets()}
+        return textual_ui_hotbar.target_is_hotbar(self, target)
 
     def _hotbar_target_label(self, target: str) -> str:
-        value = str(target or "").strip()
-        if not value:
-            return ""
-        custom_label = self._hotbar_target_custom_label_map().get(value, "")
-        if custom_label:
-            return custom_label
-        if value.startswith("tab:"):
-            return value.split(":", 1)[1]
-        if value.startswith("tab."):
-            return value.split(".", 1)[1]
-        action_id = value.split(":", 1)[1] if value.startswith("action:") else value
-        for aid, label in self._valid_action_items():
-            if aid == action_id:
-                return self._label_plain(label)
-        if action_id in self.actions:
-            return self.actions[action_id].label
-        return value
+        return textual_ui_hotbar.hotbar_target_label(self, target)
 
     def _apply_side_tab_state_to_widgets(self) -> None:
         textual_ui_tabs_state.apply_side_tab_state_to_widgets(self)
