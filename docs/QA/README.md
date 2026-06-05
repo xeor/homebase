@@ -20,14 +20,14 @@ docs/QA/
 
 ## Status snapshot
 
-Last run: `2026-06-04` · source: 218 files / 47k LOC · tests: 170 files / ~29k LOC
+Last run: `2026-06-05` · source: 218 files / 47k LOC · tests: 173 files / ~29k LOC
 
 | Tool          | Metric                          | Baseline     | Target        | Status   |
 |---------------|---------------------------------|--------------|---------------|----------|
-| pytest        | tests passing                   | 2038/2038    | all           | green    |
+| pytest        | tests passing                   | 2060/2060    | all           | green    |
 | ruff          | lint findings                   | 0            | 0             | green    |
 | mypy          | errors / files affected         | 0 / 0        | 0 / 0         | green    |
-| pytest-cov    | branch coverage                 | 63.8 %       | 75 %          | baseline |
+| pytest-cov    | branch coverage                 | 66.4 %       | 75 %          | baseline |
 | import-linter | contract violations             | 0            | 0             | green    |
 | vulture       | findings (min-confidence 80)    | 0            | 0             | green    |
 | vulture       | findings (min-confidence 60)    | ~289 lns     | review        | baseline |
@@ -53,6 +53,21 @@ uv run pytest
 - All tests must pass at every commit (AGENTS.md §9).
 - Per-bug-fix: add or update regression test in the same change.
 - No filesystem/sqlite mocking — use `tmp_path`.
+- TUI / Textual screens are tested through Textual's `Pilot`
+  harness with `pytest-asyncio` (`asyncio_mode = "auto"` in
+  `pyproject.toml`). Reference:
+  https://textual.textualize.io/guide/testing/. Pattern:
+
+  ```python
+  async def test_screen() -> None:
+      app = BApp(tmp_path, ctx=ctx)
+      async with app.run_test() as pilot:
+          await pilot.press("ctrl+q")
+          await pilot.pause()
+  ```
+
+  Use a tiny `_Harness(App)` to push a single modal and capture
+  the dismiss value (see `tests/test_ui_pilot_modals.py`).
 
 ### 2. ruff — lint + import order
 
@@ -269,13 +284,18 @@ criterion. Tick `[x]` when the snapshot number reaches the target.
 
 ### Phase 5 — coverage (pytest-cov)
 
-- [ ] Raise branch coverage 63.8 % → 75 %. Non-UI modules are now at
-      ~83 %; remaining gap is dominated by Textual UI code where
-      unit-level coverage requires UI bridges. Prioritise pure
-      helpers and `cmd_*` handlers next.
-- Recent lifts: `workspace/benchmark.py` 36 % → 62 %,
-  `tmux/commands.py` 50 % → 69 %, `workspace/projects.py` 77 % → 86 %,
-  `core/prompting.py` 56 % → 93 %.
+- [ ] Raise branch coverage 66.4 % → 75 %. Pilot harness now covers
+      BApp boot + modal dismiss flows; remaining gap is the big UI
+      mixins (`app_actions.py`, `app_events.py`) and the screens that
+      need a populated row table to exercise.
+- Pilot pattern (Textual): `pytest-asyncio` is configured
+  (`asyncio_mode = "auto"`). Add Pilot tests in `tests/test_ui_pilot_*.py`
+  — boot `BApp(tmp_path, ctx=...)` inside `async with app.run_test()`
+  and drive it with `pilot.press(...) / pilot.click(...) / pilot.pause()`.
+- Recent lifts: BApp boot smoke 36 % → ~60 % on `ui/app.py`,
+  modal screens (`basic.py`) → high coverage,
+  `workspace/benchmark.py` 36 → 62 %, `tmux/commands.py` 50 → 69 %,
+  `workspace/projects.py` 77 → 86 %, `core/prompting.py` 56 → 93 %.
 - Exit: ≥ 75 % branch coverage.
 
 ### Phase 6 — dead code (vulture)
