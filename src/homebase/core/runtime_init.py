@@ -15,8 +15,7 @@ class RuntimeConfig:
     suffixes: list[str]
     file_view_exclude_patterns: list[str]
     actions: dict[str, Any]
-    hotbar: list[Any]
-    keys: dict[str, Any]
+    favorites: list[dict[str, object]]
     open_mode_config: dict[str, str]
     notes_config: dict[str, object]
     reconcile_config: dict[str, dict[str, object]]
@@ -37,8 +36,7 @@ def load_runtime_config(
     load_suffixes: Callable[[Path], list[str]],
     load_file_view_exclude_patterns: Callable[[Path], list[str]],
     load_actions: Callable[[Path], dict[str, Any]],
-    load_hotbar: Callable[[Path, dict[str, Any]], list[Any]],
-    load_keys: Callable[[Path, dict[str, Any]], dict[str, Any]],
+    load_favorites: Callable[[Path, dict[str, Any]], list[dict[str, object]]],
     load_open_mode_config: Callable[[Path], dict[str, str]],
     load_notes_config: Callable[[Path], dict[str, object]],
     load_reconcile_config: Callable[[Path], dict[str, dict[str, object]]],
@@ -67,8 +65,7 @@ def load_runtime_config(
         suffixes=load_suffixes(base_dir),
         file_view_exclude_patterns=load_file_view_exclude_patterns(base_dir),
         actions=actions,
-        hotbar=load_hotbar(base_dir, actions),
-        keys=load_keys(base_dir, actions),
+        favorites=load_favorites(base_dir, actions),
         open_mode_config=load_open_mode_config(base_dir),
         notes_config=load_notes_config(base_dir),
         reconcile_config=load_reconcile_config(base_dir),

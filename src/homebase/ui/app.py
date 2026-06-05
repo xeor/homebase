@@ -99,7 +99,7 @@ from ..core.constants import (
     PROFILE_PANE_PROBE_ARCHIVE,
     SIDE_CHILD_TABS,
     SIDE_TOP_TABS,
-    STATE_KEY_HOTBAR_SELECTED_INDEX,
+    STATE_KEY_HOTBAR_SLOT_INDEX,
     STATE_KEY_SIDE_INFO,
     STATE_KEY_SIDE_MAIN,
     STATE_KEY_SIDE_SELECTED,
@@ -171,7 +171,7 @@ from .actions import bulk_dispatch as textual_ui_bulk_dispatch
 from .actions import bulk_preflight as textual_ui_bulk_preflight
 from .actions import catalog as textual_ui_action_catalog
 from .actions import dispatch as textual_ui_action_dispatch
-from .actions import hotbar as textual_ui_hotbar
+from .actions import favorites as textual_ui_favorites
 from .actions import item_edits as textual_ui_item_edits
 from .actions import note_sync as textual_ui_note_sync
 from .actions import pick_actions as textual_ui_pick_actions
@@ -245,7 +245,7 @@ _ROW_BUILD_ERRORS = (
     sqlite3.Error,
 )
 
-_HOTBAR_PALETTE_TAG = f" \\[[{COLOR_ERROR_HEX}]@hotbar[/]]"
+_FAVORITE_PALETTE_TAG = f" \\[[{COLOR_ERROR_HEX}]@fav[/]]"
 
 
 def _as_int(value: object, default: int) -> int:
@@ -483,7 +483,7 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
             self.side_info_tab = info_default
         if self.side_settings_tab not in valid_settings:
             self.side_settings_tab = settings_default
-        hotbar_idx = _as_int(persisted.get(STATE_KEY_HOTBAR_SELECTED_INDEX, 0), 0)
+        hotbar_idx = _as_int(persisted.get(STATE_KEY_HOTBAR_SLOT_INDEX, 0), 0)
         self.hotbar_selected_index = max(0, hotbar_idx)
         self.side_detail_row: Path | None = None
         self.side_git_text = ""
@@ -543,7 +543,7 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
         self.custom_actions = [
             action for action in self.actions.values() if action.source != "builtin"
         ]
-        self.custom_hotkeys = self._bindings_from_ctx()
+        self.custom_hotkeys = self._favorites_from_ctx()
         self.pending_tag_updates: set[Path] = set()
         self._visible_column_effective_width_by_id: dict[str, int] = {}
         self.managed_processes: list[ManagedProcess] = []
@@ -754,7 +754,7 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
             state_key_side_selected=STATE_KEY_SIDE_SELECTED,
             state_key_side_info=STATE_KEY_SIDE_INFO,
             state_key_side_settings=STATE_KEY_SIDE_SETTINGS,
-            state_key_hotbar_selected_index=STATE_KEY_HOTBAR_SELECTED_INDEX,
+            state_key_hotbar_slot_index=STATE_KEY_HOTBAR_SLOT_INDEX,
         )
 
     def _restore_table_position(self) -> None:
@@ -1117,9 +1117,9 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
                 if not is_top_active
                 else f"Tab: {top_label} (active)"
             )
-            starred = self._target_is_hotbar(command_id)
+            starred = self._target_is_favorite(command_id)
             yield SystemCommand(
-                top_title + (_HOTBAR_PALETTE_TAG if starred else ""),
+                top_title + (_FAVORITE_PALETTE_TAG if starred else ""),
                 f"Go to main tab: {top_label} (id={command_id})",
                 lambda top=top_key: self._jump_to_side_tab(top),
             )
@@ -1134,9 +1134,9 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
                     if not is_active
                     else f"Tab: {top_label} / {child_label} (active)"
                 )
-                starred = self._target_is_hotbar(command_id)
+                starred = self._target_is_favorite(command_id)
                 yield SystemCommand(
-                    title + (_HOTBAR_PALETTE_TAG if starred else ""),
+                    title + (_FAVORITE_PALETTE_TAG if starred else ""),
                     f"Go to tab: {top_label} / {child_label} (id={command_id})",
                     lambda top=top_key, child=child_key: self._jump_to_side_tab(
                         top, child
@@ -1216,9 +1216,9 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
                         "[/]", " (filepicker)[/]"
                     )
                 title = f"{scope_prefix}: {plain}"
-                starred = self._target_is_hotbar(f"action:{action_id}")
+                starred = self._target_is_favorite(f"action:{action_id}")
                 yield SystemCommand(
-                    title + (_HOTBAR_PALETTE_TAG if starred else ""),
+                    title + (_FAVORITE_PALETTE_TAG if starred else ""),
                     f"{self._action_help_text(action_id, label)} "
                     f"(id=action:{action_id})",
                     (
@@ -1238,35 +1238,35 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
             return
         textual_ui_action_dispatch.dispatch_action(self, normalized)
 
-    def _bindings_from_ctx(self) -> list[dict[str, object]]:
-        return textual_ui_hotbar.bindings_from_ctx(self.ctx)
+    def _favorites_from_ctx(self) -> list[dict[str, object]]:
+        return textual_ui_favorites.bindings_from_ctx(self.ctx)
 
     def _save_bindings(self, bindings: list[dict[str, object]]) -> None:
-        textual_ui_hotbar.save_bindings(self.base_dir, bindings)
+        textual_ui_favorites.save_bindings(self.base_dir, bindings)
 
-    def _hotbar_targets(self) -> list[str]:
-        return textual_ui_hotbar.hotbar_targets(self)
+    def _hotbar_slot_targets(self) -> list[str]:
+        return textual_ui_favorites.hotbar_slot_targets(self)
 
-    def _hotbar_visible(self) -> bool:
-        return textual_ui_hotbar.hotbar_visible(self)
+    def _hotbar_bar_visible(self) -> bool:
+        return textual_ui_favorites.hotbar_visible(self)
 
     def _normalize_hotbar_index(self) -> None:
-        textual_ui_hotbar.normalize_hotbar_index(self)
+        textual_ui_favorites.normalize_hotbar_index(self)
 
-    def _selected_hotbar_target(self) -> str:
-        return textual_ui_hotbar.selected_hotbar_target(self)
+    def _selected_hotbar_slot_target(self) -> str:
+        return textual_ui_favorites.selected_hotbar_slot_target(self)
 
-    def _cycle_hotbar(self, delta: int) -> bool:
-        return textual_ui_hotbar.cycle_hotbar(self, delta)
+    def _cycle_hotbar_slot(self, delta: int) -> bool:
+        return textual_ui_favorites.cycle_hotbar_slot(self, delta)
 
-    def _toggle_hotbar_target_from_palette(self, target: str) -> bool:
-        return textual_ui_hotbar.toggle_hotbar_target_from_palette(self, target)
+    def _toggle_favorite_target(self, target: str) -> bool:
+        return textual_ui_favorites.toggle_favorite_target(self, target)
 
-    def _target_is_hotbar(self, target: str) -> bool:
-        return textual_ui_hotbar.target_is_hotbar(self, target)
+    def _target_is_favorite(self, target: str) -> bool:
+        return textual_ui_favorites.target_is_favorite(self, target)
 
-    def _hotbar_target_label(self, target: str) -> str:
-        return textual_ui_hotbar.hotbar_target_label(self, target)
+    def _favorite_target_label(self, target: str) -> str:
+        return textual_ui_favorites.favorite_target_label(self, target)
 
     def _apply_side_tab_state_to_widgets(self) -> None:
         textual_ui_tabs_state.apply_side_tab_state_to_widgets(self)
@@ -2638,14 +2638,14 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
     def _hotkey_target_label_map(self) -> dict[str, str]:
         return textual_ui_action_items.hotkey_target_label_map(self)
 
-    def _hotbar_target_custom_label_map(self) -> dict[str, str]:
-        return textual_ui_action_items.hotbar_target_custom_label_map(self)
+    def _favorite_target_custom_label_map(self) -> dict[str, str]:
+        return textual_ui_action_items.favorite_target_custom_label_map(self)
 
-    def _hotbar_target_style_rules_map(self) -> dict[str, list[dict[str, str]]]:
-        return textual_ui_action_items.hotbar_target_style_rules_map(self)
+    def _favorite_target_style_rules_map(self) -> dict[str, list[dict[str, str]]]:
+        return textual_ui_action_items.favorite_target_style_rules_map(self)
 
-    def _resolve_hotbar_target_style(self, target: str) -> dict[str, str]:
-        rules = self._hotbar_target_style_rules_map().get(str(target), [])
+    def _resolve_favorite_target_style(self, target: str) -> dict[str, str]:
+        rules = self._favorite_target_style_rules_map().get(str(target), [])
         if not rules:
             return {}
         return textual_ui_query_context_rules.resolve_style_rules(
@@ -2747,45 +2747,76 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
     def action_pick_actions(self) -> None:
         hotkey_map = self._hotkey_target_label_map()
 
-        def with_hotkeys(items: list[tuple[str, str]]) -> list[tuple[str, str]]:
+        def decorate(
+            items: list[tuple[str, str]], *, mark_favorites: bool
+        ) -> list[tuple[str, str]]:
             out: list[tuple[str, str]] = []
             for aid, label in items:
+                decorated = label
+                if (
+                    mark_favorites
+                    and aid not in {"noop"}
+                    and not aid.startswith("__hdr__")
+                    and self._target_is_favorite(aid)
+                ):
+                    decorated = decorated + _FAVORITE_PALETTE_TAG
                 hotkey = hotkey_map.get(aid, "")
                 if hotkey:
-                    out.append((aid, f"{label} [dim]({self._esc(hotkey)})[/]"))
-                else:
-                    out.append((aid, label))
+                    decorated = f"{decorated} [dim]({self._esc(hotkey)})[/]"
+                out.append((aid, decorated))
+            return out
+
+        def build_tabs() -> list[tuple[str, str, list[tuple[str, str]]]]:
+            catalog = textual_ui_action_catalog.build_picker_catalog(self)
+            targets = self._target_rows()
+            out: list[tuple[str, str, list[tuple[str, str]]]] = []
+            for key, label in textual_ui_action_catalog.CATEGORY_ORDER:
+                items = catalog.get(key, [])
+                # Notifications and Buttons are removed entirely when empty.
+                # Favorites stays in the tab strip but is disabled when empty.
+                if key in {
+                    textual_ui_action_catalog.CATEGORY_NOTIFICATIONS,
+                    textual_ui_action_catalog.CATEGORY_BUTTONS,
+                } and not items:
+                    continue
+                if (
+                    key == textual_ui_action_catalog.CATEGORY_TARGET
+                    and not targets
+                    and not items
+                ):
+                    items = [("noop", "[dim]No target actions available[/]")]
+                out.append(
+                    (
+                        key,
+                        label,
+                        decorate(
+                            items,
+                            mark_favorites=key
+                            != textual_ui_action_catalog.CATEGORY_FAVORITES,
+                        ),
+                    )
+                )
             return out
 
         catalog = textual_ui_action_catalog.build_picker_catalog(self)
-        targets = self._target_rows()
-
-        tabs: list[tuple[str, str, list[tuple[str, str]]]] = []
-        for key, label in textual_ui_action_catalog.CATEGORY_ORDER:
-            items = catalog.get(key, [])
-            if key in {
-                textual_ui_action_catalog.CATEGORY_NOTIFICATIONS,
-                textual_ui_action_catalog.CATEGORY_BUTTONS,
-            } and not items:
-                continue
-            if (
-                key == textual_ui_action_catalog.CATEGORY_TARGET
-                and not targets
-                and not items
-            ):
-                items = [("noop", "[dim]No target actions available[/]")]
-            tabs.append((key, label, with_hotkeys(items)))
+        tabs = build_tabs()
 
         default_tab: str | None = None
         if catalog.get(textual_ui_action_catalog.CATEGORY_NOTIFICATIONS):
             default_tab = textual_ui_action_catalog.CATEGORY_NOTIFICATIONS
         elif catalog.get(textual_ui_action_catalog.CATEGORY_BUTTONS):
             default_tab = textual_ui_action_catalog.CATEGORY_BUTTONS
+        elif catalog.get(textual_ui_action_catalog.CATEGORY_FAVORITES):
+            default_tab = textual_ui_action_catalog.CATEGORY_FAVORITES
         else:
             default_tab = textual_ui_action_catalog.CATEGORY_TARGET
 
         self.push_screen(
-            ActionPickerScreen(tabs, default_tab=default_tab),
+            ActionPickerScreen(
+                tabs,
+                default_tab=default_tab,
+                rebuild_tabs=build_tabs,
+            ),
             self._on_pick_actions,
         )
 
@@ -3268,8 +3299,8 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
         self._jump_to_tmux_pane(pane)
 
     def action_open_selected(self) -> None:
-        if self._table_is_active_focus() and self._hotbar_visible():
-            target = self._selected_hotbar_target()
+        if self._table_is_active_focus() and self._hotbar_bar_visible():
+            target = self._selected_hotbar_slot_target()
             if target and target not in {"open_selected", "action:open_selected"}:
                 self._dispatch_hotkey_target(target)
                 return
@@ -3304,11 +3335,11 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
         self.fast_exit_requested = True
         self.exit(("open", row.path, []))
 
-    def action_cycle_hotbar(self) -> None:
+    def action_cycle_hotbar_slot(self) -> None:
         if not self._table_is_active_focus():
             return
-        if self._hotbar_visible():
-            self._cycle_hotbar(1)
+        if self._hotbar_bar_visible():
+            self._cycle_hotbar_slot(1)
 
     def action_quit_app(self) -> None:
         running_managed = self._running_terminating_processes()

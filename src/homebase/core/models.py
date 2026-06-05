@@ -33,19 +33,6 @@ class Action:
 
 
 @dataclass(frozen=True)
-class HotbarEntry:
-    action: str
-    label: str = ""
-    style: tuple[dict[str, str], ...] = ()
-
-
-@dataclass(frozen=True)
-class KeyEntry:
-    action: str
-    label: str = ""
-
-
-@dataclass(frozen=True)
 class BuiltinHotkey:
     key: str
     action: str

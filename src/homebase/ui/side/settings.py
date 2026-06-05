@@ -14,9 +14,8 @@ from ...config.prefs import (
     load_actions,
     load_archive_timezone_name,
     load_cache_profile_table,
+    load_favorites,
     load_file_view_exclude_patterns,
-    load_hotbar,
-    load_keys,
     load_notes_config,
     load_open_mode_config,
     load_reconcile_config,
@@ -464,8 +463,7 @@ def reload_global_config(app: Any, *, base_dir: Path) -> None:
             load_suffixes=load_suffixes,
             load_file_view_exclude_patterns=load_file_view_exclude_patterns,
             load_actions=lambda bd: load_actions(bd, builtins=runtime_builtins),
-            load_hotbar=lambda bd, actions: load_hotbar(bd, actions=actions),
-            load_keys=lambda bd, actions: load_keys(bd, actions=actions),
+            load_favorites=lambda bd, actions: load_favorites(bd, actions=actions),
             load_open_mode_config=load_open_mode_config,
             load_notes_config=load_notes_config,
             load_reconcile_config=load_reconcile_config,
@@ -489,18 +487,7 @@ def reload_global_config(app: Any, *, base_dir: Path) -> None:
         suffixes=list(runtime_cfg.suffixes),
         file_view_exclude_patterns=list(runtime_cfg.file_view_exclude_patterns),
         actions=dict(runtime_cfg.actions),
-        hotbar=[
-            {
-                "action": str(item.action),
-                "label": str(item.label),
-                "style": [dict(rule) for rule in item.style],
-            }
-            for item in runtime_cfg.hotbar
-        ],
-        keys={
-            str(key): {"action": str(entry.action), "label": str(entry.label)}
-            for key, entry in runtime_cfg.keys.items()
-        },
+        favorites=[dict(row) for row in runtime_cfg.favorites],
         open_mode_config=dict(runtime_cfg.open_mode_config),
         notes_config=dict(runtime_cfg.notes_config),
         reconcile_config={mode: dict(conf) for mode, conf in runtime_cfg.reconcile_config.items()},
@@ -515,11 +502,11 @@ def reload_global_config(app: Any, *, base_dir: Path) -> None:
     app.custom_actions = [
         action for action in app.actions.values() if action.source != "builtin"
     ]
-    bind_builder = getattr(app, "_bindings_from_ctx", None)
+    bind_builder = getattr(app, "_favorites_from_ctx", None)
     if callable(bind_builder):
         app.custom_hotkeys = bind_builder()
     else:
-        app.custom_hotkeys = list(getattr(app.ctx, "custom_hotkeys", []))
+        app.custom_hotkeys = list(getattr(app.ctx, "favorites", []))
     app.open_mode = dict(app.ctx.open_mode_config)
     app.notes_config = dict(app.ctx.notes_config)
     app.reconcile_config = {

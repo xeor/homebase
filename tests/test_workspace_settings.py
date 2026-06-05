@@ -164,7 +164,9 @@ def test_load_actions_rejects_builtin_non_override_fields() -> None:
         )
 
 
-def test_load_hotbar_rejects_workspace_scope_action() -> None:
+def test_load_favorites_accepts_workspace_scope_action() -> None:
+    """Workspace-scope actions can be favorites (they render in the
+    Favorites list, not the hotbar bar)."""
     actions = workspace_settings.load_actions(
         {
             "actions": {
@@ -174,21 +176,23 @@ def test_load_hotbar_rejects_workspace_scope_action() -> None:
                     "command": "echo {{ base_dir_q }}",
                 }
             },
-            "hotbar": ["open_base"],
         },
         builtins=BUILTIN_ACTIONS,
     )
-    with pytest.raises(ValueError, match="cannot be on the hotbar"):
-        workspace_settings.load_hotbar(
-            {"hotbar": ["open_base"]},
-            actions=actions,
-        )
+    out = workspace_settings.load_favorites(
+        {"favorites": [{"target": "open_base", "favorite": True}]},
+        actions=actions,
+    )
+    assert out[0]["target"] == "open_base"
 
 
-def test_load_keys_rejects_unknown_action_id() -> None:
+def test_load_favorites_rejects_unknown_action_target() -> None:
     actions = workspace_settings.load_actions({}, builtins=BUILTIN_ACTIONS)
     with pytest.raises(ValueError, match="action not found"):
-        workspace_settings.load_keys({"keys": {"f5": "nope"}}, actions=actions)
+        workspace_settings.load_favorites(
+            {"favorites": [{"target": "nope", "hotkey": "f5"}]},
+            actions=actions,
+        )
 
 
 def test_load_reconcile_config_default_profile_overrides_apply() -> None:

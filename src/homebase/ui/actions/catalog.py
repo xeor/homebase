@@ -25,6 +25,7 @@ from ...core.constants import BUILTIN_ACTIONS
 
 CATEGORY_NOTIFICATIONS = "notifications"
 CATEGORY_BUTTONS = "buttons"
+CATEGORY_FAVORITES = "favorites"
 CATEGORY_TARGET = "target"
 CATEGORY_GLOBAL = "global"
 
@@ -32,6 +33,7 @@ CATEGORY_GLOBAL = "global"
 CATEGORY_ORDER: tuple[tuple[str, str], ...] = (
     (CATEGORY_NOTIFICATIONS, "Notifications"),
     (CATEGORY_BUTTONS, "Buttons"),
+    (CATEGORY_FAVORITES, "Favorites"),
     (CATEGORY_TARGET, "Target"),
     (CATEGORY_GLOBAL, "Global"),
 )
@@ -88,21 +90,69 @@ def notification_actions(app: Any) -> list[tuple[str, str]]:
     return out
 
 
+_FAVORITES_PREFIX_TARGET = "[#7DFF9B]Action > Target[/]"
+_FAVORITES_PREFIX_GLOBAL = "[#ffb347]Action > Global[/]"
+_FAVORITES_PREFIX_TAB = "[#4DA3FF]Tab[/]"
+
+
+def favorite_entries(app: Any) -> list[tuple[str, str]]:
+    """Flat (target, rich_label) list for the Favorites tab.
+
+    Each entry mirrors the ctrl+p palette format: a coloured
+    ``Action > Target/Global`` (or ``Tab``) prefix followed by the
+    label, with a trailing ``[dim](hotbar slot N)[/]`` for hotbar-bar
+    favorites so the user can see which slot they occupy.
+    """
+    from . import favorites as favorites_helpers
+
+    actions = dict(getattr(app, "actions", {}) or {})
+    slot_index: dict[str, int] = {
+        target: idx + 1
+        for idx, target in enumerate(favorites_helpers.hotbar_slot_targets(app))
+    }
+    out: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    for binding in getattr(app, "custom_hotkeys", []) or []:
+        if not bool(binding.get("favorite", False)):
+            continue
+        target = str(binding.get("target", "")).strip()
+        if not target or target in seen:
+            continue
+        seen.add(target)
+        surface = favorites_helpers.favorite_surface(target, actions)
+        label = app._favorite_target_label(target) or target
+        if surface == favorites_helpers.SURFACE_HOTBAR:
+            prefix = _FAVORITES_PREFIX_TARGET
+            slot_suffix = f" [dim](hotbar slot {slot_index.get(target, '?')})[/]"
+        elif surface == favorites_helpers.SURFACE_GLOBAL:
+            prefix = _FAVORITES_PREFIX_GLOBAL
+            slot_suffix = ""
+        else:
+            prefix = _FAVORITES_PREFIX_TAB
+            slot_suffix = ""
+        rich_label = f"{prefix}: [white]{app._esc(label)}[/]{slot_suffix}"
+        out.append((target, rich_label))
+    return out
+
+
 def build_picker_catalog(app: Any) -> dict[str, list[tuple[str, str]]]:
     """Build the categorized catalog for the ctrl+a action picker.
 
-    Categories: notifications, buttons, target, global. Each maps to a
-    list of (action_id, rich_label) pairs. Categories may be empty.
+    Categories: notifications, buttons, favorites, target, global. Each
+    maps to a list of (action_id, rich_label) pairs. Categories may be
+    empty.
     """
     out: dict[str, list[tuple[str, str]]] = {
         CATEGORY_NOTIFICATIONS: [],
         CATEGORY_BUTTONS: [],
+        CATEGORY_FAVORITES: [],
         CATEGORY_TARGET: [],
         CATEGORY_GLOBAL: [],
     }
 
     out[CATEGORY_NOTIFICATIONS].extend(notification_actions(app))
     out[CATEGORY_BUTTONS].extend(app._visible_button_actions())
+    out[CATEGORY_FAVORITES].extend(favorite_entries(app))
 
     seen_in_picker: set[str] = set()
     for action_id, label in app._valid_action_items():

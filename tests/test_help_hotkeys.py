@@ -3,9 +3,9 @@ from __future__ import annotations
 import pytest
 
 from homebase.commands.help import TOPICS, cmd_help, cmd_help_hotkeys, list_topics
-from homebase.config.workspace import load_keys
+from homebase.config.workspace import load_favorites
 from homebase.core.constants import BUILTIN_HOTKEYS, reserved_hotkeys
-from homebase.core.models import Action, KeyEntry
+from homebase.core.models import Action
 
 
 def _make_actions() -> dict[str, Action]:
@@ -59,8 +59,8 @@ def test_cmd_help_unknown_topic_lists_topics(capsys) -> None:
 
 
 def test_cmd_help_hotkeys_emits_builtin_and_user(capsys) -> None:
-    keys = {"f5": KeyEntry(action="open_code", label="")}
-    rc = cmd_help_hotkeys(keys=keys)
+    favs = [{"id": "fav_1", "target": "open_code", "hotkey": "f5"}]
+    rc = cmd_help_hotkeys(favorites=favs)
     out = capsys.readouterr().out
     assert rc == 0
     assert "BUILT-IN" in out
@@ -73,11 +73,9 @@ def test_cmd_help_hotkeys_emits_builtin_and_user(capsys) -> None:
 
 
 def test_cmd_help_hotkeys_recommended_excludes_used_keys(capsys) -> None:
-    keys = {"f5": KeyEntry(action="open_code")}
-    cmd_help_hotkeys(keys=keys)
+    favs = [{"id": "fav_1", "target": "open_code", "hotkey": "f5"}]
+    cmd_help_hotkeys(favorites=favs)
     out = capsys.readouterr().out
-    # The recommended free function-keys line should NOT advertise f5
-    # (it's taken by the user binding).
     fn_line = next(
         line for line in out.splitlines() if "function keys" in line
     )
@@ -85,8 +83,8 @@ def test_cmd_help_hotkeys_recommended_excludes_used_keys(capsys) -> None:
     assert "f1" in fn_line
 
 
-def test_cmd_help_hotkeys_works_with_empty_user_keys(capsys) -> None:
-    rc = cmd_help_hotkeys(keys={})
+def test_cmd_help_hotkeys_works_with_empty_user_favorites(capsys) -> None:
+    rc = cmd_help_hotkeys(favorites=[])
     out = capsys.readouterr().out
     assert rc == 0
     assert "(none)" in out
@@ -98,20 +96,20 @@ def test_reserved_hotkeys_includes_all_builtins() -> None:
         assert hk.key in reserved
 
 
-def test_load_keys_rejects_collision_with_builtin() -> None:
-    data = {"keys": {"ctrl+l": "open_code"}}
+def test_load_favorites_rejects_collision_with_builtin() -> None:
+    data = {"favorites": [{"target": "open_code", "hotkey": "ctrl+l"}]}
     with pytest.raises(ValueError, match="ctrl\\+l"):
-        load_keys(data, actions=_make_actions())
+        load_favorites(data, actions=_make_actions())
 
 
-def test_load_keys_rejects_collision_with_context_reserved() -> None:
-    # space is reserved by select-mode toggle
-    data = {"keys": {"space": "open_code"}}
+def test_load_favorites_rejects_collision_with_context_reserved() -> None:
+    data = {"favorites": [{"target": "open_code", "hotkey": "space"}]}
     with pytest.raises(ValueError, match="space"):
-        load_keys(data, actions=_make_actions())
+        load_favorites(data, actions=_make_actions())
 
 
-def test_load_keys_accepts_free_slot() -> None:
-    data = {"keys": {"f5": "open_code"}}
-    out = load_keys(data, actions=_make_actions())
-    assert out["f5"].action == "open_code"
+def test_load_favorites_accepts_free_hotkey_slot() -> None:
+    data = {"favorites": [{"target": "open_code", "hotkey": "f5"}]}
+    out = load_favorites(data, actions=_make_actions())
+    assert out[0]["target"] == "open_code"
+    assert out[0]["hotkey"] == "f5"

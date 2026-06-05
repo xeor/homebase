@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import difflib
 import re
+from typing import Callable
 
 from textual.app import ComposeResult
 from textual.containers import Vertical
@@ -23,8 +24,10 @@ class ActionPickerScreen(LargeModalScreen[str | None]):
         ("down", "move_down", "Down"),
         ("left", "prev_tab", "Prev tab"),
         ("right", "next_tab", "Next tab"),
-        ("tab", "next_tab", "Next tab"),
-        ("backtab", "prev_tab", "Prev tab"),
+        ("tab", "toggle_favorite", "Toggle favorite"),
+        ("ctrl+@", "jump_tab_favorites", "Favorites tab"),
+        ("ctrl+t", "jump_tab_target", "Target tab"),
+        ("ctrl+g", "jump_tab_global", "Global tab"),
         ("ctrl+c", "clear_filter", "Clear filter"),
         ("enter", ACTION_ACCEPT, "Accept"),
         ("space", ACTION_ACCEPT, "Accept"),
@@ -37,27 +40,67 @@ class ActionPickerScreen(LargeModalScreen[str | None]):
         tabs: list[tuple[str, str, list[tuple[str, str]]]],
         *,
         default_tab: str | None = None,
+        rebuild_tabs: Callable[
+            [], list[tuple[str, str, list[tuple[str, str]]]]
+        ] | None = None,
     ) -> None:
         super().__init__()
+        self._rebuild_tabs = rebuild_tabs
+        self._apply_tabs(tabs)
+        # Favorites flagged for removal but not yet committed. The user
+        # confirms by closing the dialog (esc/enter); pressing tab again
+        # on a struck-through entry restores it. Scoped to the dialog
+        # session — storage isn't touched until commit on dismiss.
+        self._pending_remove: set[str] = set()
+        if (
+            default_tab
+            and default_tab in self.actions_by_tab
+            and not self._is_tab_disabled(default_tab)
+        ):
+            self.active_tab = default_tab
+        else:
+            self.active_tab = self._first_enabled_tab()
+        self.filter_text = ""
+        self.index = 0
+        self.list_scroll_offset = 0
+
+    def _apply_tabs(
+        self, tabs: list[tuple[str, str, list[tuple[str, str]]]]
+    ) -> None:
         self.tabs: list[tuple[str, str]] = [(key, label) for key, label, _ in tabs]
         self.actions_by_tab: dict[str, list[tuple[str, str]]] = {
             key: list(items) for key, _label, items in tabs
         }
-        if default_tab and default_tab in self.actions_by_tab:
-            self.active_tab = default_tab
-        elif self.tabs:
-            self.active_tab = self.tabs[0][0]
-        else:
-            self.active_tab = ""
-        self.filter_text = ""
-        self.index = 0
-        self.list_scroll_offset = 0
+
+    def _is_tab_disabled(self, key: str) -> bool:
+        return not self.actions_by_tab.get(key, [])
+
+    def _first_enabled_tab(self) -> str:
+        for key, _label in self.tabs:
+            if not self._is_tab_disabled(key):
+                return key
+        return self.tabs[0][0] if self.tabs else ""
+
+    def _sync_tab_disabled_states(self) -> None:
+        try:
+            tabs_widget = self.query_one("#action_picker_tabs", Tabs)
+        except LookupError:
+            return
+        for key, _label in self.tabs:
+            try:
+                tab = tabs_widget.query_one(f"Tab#{key}", Tab)
+            except LookupError:
+                continue
+            tab.disabled = self._is_tab_disabled(key)
 
     def compose(self) -> ComposeResult:
         with Vertical(id="modal_box"):
             yield Static("[bold]Actions[/]")
             yield Tabs(
-                *[Tab(label, id=key) for key, label in self.tabs],
+                *[
+                    Tab(label, id=key, disabled=self._is_tab_disabled(key))
+                    for key, label in self.tabs
+                ],
                 id="action_picker_tabs",
             )
             yield Static("", id="action_picker_filter", markup=False)
@@ -68,12 +111,14 @@ class ActionPickerScreen(LargeModalScreen[str | None]):
                     ("ctrl+c", "clear filter"),
                     ("up/down", "select"),
                     ("left/right", "tab"),
+                    ("tab", "toggle favorite"),
                     ("enter", "select"),
                     ("esc", "cancel"),
                 ]
             )
 
     def on_mount(self) -> None:
+        self._sync_tab_disabled_states()
         self._refresh_body()
 
     def on_resize(self, _event: Resize) -> None:
@@ -85,7 +130,7 @@ class ActionPickerScreen(LargeModalScreen[str | None]):
             return
         tab_id = str(getattr(getattr(event, "tab", None), "id", "") or "")
         keys = {k for k, _l in self.tabs}
-        if tab_id in keys:
+        if tab_id in keys and not self._is_tab_disabled(tab_id):
             self.active_tab = tab_id
             self.index = 0
             self.list_scroll_offset = 0
@@ -157,9 +202,11 @@ class ActionPickerScreen(LargeModalScreen[str | None]):
         self.list_scroll_offset = offset
         self.index = min(max(self.index, 0), len(visible) - 1)
         window = visible[offset : offset + max_rows]
-        for i, (_key, label) in enumerate(window):
+        for i, (key, label) in enumerate(window):
             absolute_i = offset + i
             cursor = ">" if absolute_i == self.index else " "
+            if self.active_tab == "favorites" and key in self._pending_remove:
+                label = f"[strike]{label}[/]"
             lines.append(f"{cursor} {label}")
         hint = overflow_hint(len(visible), offset, len(window))
         if hint is not None:
@@ -193,27 +240,32 @@ class ActionPickerScreen(LargeModalScreen[str | None]):
         self.index = (self.index + 1) % len(visible)
         self._refresh_body()
 
-    def action_next_tab(self) -> None:
+    def _cycle_tab(self, step: int) -> None:
         keys = [k for k, _l in self.tabs]
+        if not keys:
+            return
+        enabled = [k for k in keys if not self._is_tab_disabled(k)]
+        if not enabled:
+            return
         if self.active_tab not in keys:
-            self.active_tab = keys[0]
+            self.active_tab = enabled[0]
         else:
             i = keys.index(self.active_tab)
-            self.active_tab = keys[(i + 1) % len(keys)]
+            n = len(keys)
+            for _ in range(n):
+                i = (i + step) % n
+                if not self._is_tab_disabled(keys[i]):
+                    self.active_tab = keys[i]
+                    break
         self.index = 0
         self.list_scroll_offset = 0
         self._refresh_body()
 
+    def action_next_tab(self) -> None:
+        self._cycle_tab(1)
+
     def action_prev_tab(self) -> None:
-        keys = [k for k, _l in self.tabs]
-        if self.active_tab not in keys:
-            self.active_tab = keys[0]
-        else:
-            i = keys.index(self.active_tab)
-            self.active_tab = keys[(i - 1) % len(keys)]
-        self.index = 0
-        self.list_scroll_offset = 0
-        self._refresh_body()
+        self._cycle_tab(-1)
 
     def action_backspace(self) -> None:
         if not self.filter_text:
@@ -232,9 +284,94 @@ class ActionPickerScreen(LargeModalScreen[str | None]):
     def action_accept(self) -> None:
         visible = self._visible_actions()
         if not visible:
+            self._commit_pending_removes()
             self.dismiss(None)
             return
-        self.dismiss(visible[self.index][0])
+        result = visible[self.index][0]
+        self._commit_pending_removes()
+        self.dismiss(result)
 
     def action_cancel(self) -> None:
+        self._commit_pending_removes()
         self.dismiss(None)
+
+    def _jump_to_tab(self, tab_id: str) -> None:
+        if tab_id not in self.actions_by_tab or self._is_tab_disabled(tab_id):
+            return
+        self.active_tab = tab_id
+        self.index = 0
+        self.list_scroll_offset = 0
+        self._refresh_body()
+
+    def action_jump_tab_favorites(self) -> None:
+        self._jump_to_tab("favorites")
+
+    def action_jump_tab_target(self) -> None:
+        self._jump_to_tab("target")
+
+    def action_jump_tab_global(self) -> None:
+        self._jump_to_tab("global")
+
+    def action_toggle_favorite(self) -> None:
+        visible = self._visible_actions()
+        if not visible:
+            return
+        target = visible[self.index][0]
+        if not target or target == "noop" or target.startswith("__hdr__"):
+            return
+        # In the Favorites tab, tab is a soft-delete with undo: the entry
+        # is kept visible with a strikethrough until the dialog closes,
+        # so an accidental keypress doesn't immediately destroy state.
+        if self.active_tab == "favorites":
+            if target in self._pending_remove:
+                self._pending_remove.discard(target)
+            else:
+                self._pending_remove.add(target)
+            self._refresh_body()
+            return
+        toggle = getattr(self.app, "_toggle_favorite_target", None)
+        if not callable(toggle):
+            return
+        if not bool(toggle(target)):
+            return
+        if self._rebuild_tabs is not None:
+            prev_index = self.index
+            self._apply_tabs(self._rebuild_tabs())
+            self._sync_tab_disabled_states()
+            # Active tab is gone or became empty — jump to a usable tab
+            # (Target preferred, else the first enabled).
+            if (
+                self.active_tab not in self.actions_by_tab
+                or self._is_tab_disabled(self.active_tab)
+            ):
+                if not self._is_tab_disabled("target"):
+                    self.active_tab = "target"
+                else:
+                    self.active_tab = self._first_enabled_tab()
+                self.index = 0
+                self.list_scroll_offset = 0
+            else:
+                # Keep the cursor on the same target if it's still visible,
+                # otherwise stay near the previous row.
+                visible_now = self._visible_actions()
+                same_idx = next(
+                    (i for i, (aid, _) in enumerate(visible_now) if aid == target),
+                    -1,
+                )
+                if same_idx >= 0:
+                    self.index = same_idx
+                else:
+                    self.index = min(prev_index, max(0, len(visible_now) - 1))
+        self._refresh_body()
+
+    def _commit_pending_removes(self) -> None:
+        """Persist soft-deleted favorites to storage on dialog dismiss."""
+        if not self._pending_remove:
+            return
+        toggle = getattr(self.app, "_toggle_favorite_target", None)
+        if not callable(toggle):
+            self._pending_remove.clear()
+            return
+        for target in list(self._pending_remove):
+            toggle(target)
+        self._pending_remove.clear()

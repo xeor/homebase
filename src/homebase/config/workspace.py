@@ -4,7 +4,7 @@ import re
 from typing import Literal, cast
 
 from ..core.constants import reserved_hotkeys
-from ..core.models import Action, BuiltinActionMeta, HotbarEntry, KeyEntry
+from ..core.models import Action, BuiltinActionMeta
 from . import cache_profile as cache_profile_config
 
 ActionKind = Literal["builtin", "shell", "filepicker", "note", "tab"]
@@ -273,9 +273,9 @@ def load_actions(data: object, *, builtins: dict[str, BuiltinActionMeta]) -> dic
     return merged
 
 
-def _parse_hotbar_style_rule(idx: int, raw_rule: object) -> dict[str, str]:
+def _parse_favorite_style_rule(idx: int, raw_rule: object) -> dict[str, str]:
     if not isinstance(raw_rule, dict):
-        raise ValueError(f"hotbar style rule #{idx} must be a map")
+        raise ValueError(f"favorite style rule #{idx} must be a map")
     bg_color = str(raw_rule.get("bg_color", "")).strip()
     fg_color = str(raw_rule.get("fg_color", "")).strip()
     when = str(raw_rule.get("when", "")).strip()
@@ -284,18 +284,18 @@ def _parse_hotbar_style_rule(idx: int, raw_rule: object) -> dict[str, str]:
     italic = bool(raw_rule.get("italic", False))
     if not bg_color and not fg_color and not (bold or underline or italic):
         raise ValueError(
-            f"hotbar style rule #{idx} must set at least one style field"
+            f"favorite style rule #{idx} must set at least one style field"
         )
     if bg_color and not _HEX_COLOR_RE.fullmatch(bg_color):
         raise ValueError(
-            f"hotbar style rule #{idx} bg_color must be #RRGGBB"
+            f"favorite style rule #{idx} bg_color must be #RRGGBB"
         )
     if fg_color and not _HEX_COLOR_RE.fullmatch(fg_color):
         raise ValueError(
-            f"hotbar style rule #{idx} fg_color must be #RRGGBB"
+            f"favorite style rule #{idx} fg_color must be #RRGGBB"
         )
     if not when:
-        raise ValueError(f"hotbar style rule #{idx} missing when")
+        raise ValueError(f"favorite style rule #{idx} missing when")
     rule: dict[str, str] = {"when": when}
     if bg_color:
         rule["bg_color"] = bg_color
@@ -310,87 +310,84 @@ def _parse_hotbar_style_rule(idx: int, raw_rule: object) -> dict[str, str]:
     return rule
 
 
-def _parse_hotbar_style_list(raw_style: object) -> list[dict[str, str]]:
+def _parse_favorite_style_list(raw_style: object) -> list[dict[str, str]]:
     if raw_style in (None, ""):
         return []
     if not isinstance(raw_style, list):
-        raise ValueError("hotbar style must be a list")
+        raise ValueError("favorite style must be a list")
     return [
-        _parse_hotbar_style_rule(idx, raw_rule)
+        _parse_favorite_style_rule(idx, raw_rule)
         for idx, raw_rule in enumerate(raw_style, start=1)
     ]
 
 
-def _parse_hotbar_item(item: object) -> tuple[str, str, list[dict[str, str]]]:
-    if isinstance(item, str):
-        return item.strip(), "", []
-    if not isinstance(item, dict):
-        return "", "", []
-    if "key" in item:
-        raise ValueError("hotbar entries cannot contain `key` field")
-    action_id = str(item.get("action", "")).strip()
-    label = str(item.get("label", "")).strip()
-    style_rules = _parse_hotbar_style_list(item.get("style", []))
-    return action_id, label, style_rules
+def _is_action_target(target: str) -> bool:
+    if not target:
+        return False
+    if target.startswith("tab:") or target.startswith("tab."):
+        return False
+    return True
 
 
-def load_hotbar(data: object, *, actions: dict[str, Action]) -> list[HotbarEntry]:
+def load_favorites(
+    data: object, *, actions: dict[str, Action]
+) -> list[dict[str, object]]:
+    """Load the unified favorites table from the global config.
+
+    Each entry shape::
+
+        {id, target, favorite?: bool, hotkey?: str, label?: str, style?: list}
+
+    ``target`` may be an action id or a ``tab:top/child`` / ``tab.x``
+    nav prefix. Action targets must reference a known action. Hotkeys
+    must be free of reserved bindings.
+    """
     if not isinstance(data, dict):
         return []
-    raw = data.get("hotbar", [])
+    raw = data.get("favorites", [])
+    if raw in (None, ""):
+        return []
     if not isinstance(raw, list):
-        raise ValueError("`hotbar` must be a list")
-    out: list[HotbarEntry] = []
-    for item in raw:
-        action_id, label, style_rules = _parse_hotbar_item(item)
-        if not action_id:
-            continue
-        action = actions.get(action_id)
-        if action is None:
-            raise ValueError(f"hotbar action not found: {action_id!r}")
-        if action.scope != "target":
-            raise ValueError(
-                f"{action_id!r} cannot be on the hotbar — only target-scope "
-                f"actions are eligible. Bind it via `keys:` instead."
-            )
-        out.append(
-            HotbarEntry(action=action_id, label=label, style=tuple(style_rules))
-        )
-    return out
-
-
-def load_keys(data: object, *, actions: dict[str, Action]) -> dict[str, KeyEntry]:
-    if not isinstance(data, dict):
-        return {}
-    raw = data.get("keys", {})
-    if not isinstance(raw, dict):
-        raise ValueError("`keys` must be a map")
+        raise ValueError("`favorites` must be a list")
     reserved = reserved_hotkeys()
-    out: dict[str, KeyEntry] = {}
-    for key_name, value in raw.items():
-        hotkey = str(key_name).strip().lower()
-        if not hotkey:
+    out: list[dict[str, object]] = []
+    used_hotkeys: dict[str, str] = {}
+    for idx, item in enumerate(raw, start=1):
+        if not isinstance(item, dict):
+            raise ValueError(f"favorite #{idx} must be a map")
+        target = str(item.get("target", "")).strip()
+        if not target:
             continue
-        if hotkey in out:
-            raise ValueError(f"duplicate key binding: {hotkey!r}")
-        if hotkey in reserved:
-            raise ValueError(
-                f"key binding collision: {hotkey!r} is reserved by {reserved[hotkey]}. "
-                f"Run `b help hotkeys` to see all bindings and free slots."
-            )
-        if isinstance(value, str):
-            action_id = value.strip()
-            label = ""
-        elif isinstance(value, dict):
-            action_id = str(value.get("action", "")).strip()
-            label = str(value.get("label", "")).strip()
-        else:
-            raise ValueError(f"key binding {hotkey!r} must be string or map")
-        if not action_id:
-            continue
-        if action_id not in actions:
-            raise ValueError(f"key binding action not found: {action_id!r}")
-        out[hotkey] = KeyEntry(action=action_id, label=label)
+        if _is_action_target(target) and target not in actions:
+            raise ValueError(f"favorite action not found: {target!r}")
+        row: dict[str, object] = {
+            "id": str(item.get("id", "")).strip() or f"fav_{idx}",
+            "target": target,
+        }
+        if bool(item.get("favorite", False)):
+            row["favorite"] = True
+        label = str(item.get("label", "")).strip()
+        if label:
+            row["label"] = label
+        hotkey = str(item.get("hotkey", "")).strip().lower()
+        if hotkey:
+            if hotkey in reserved:
+                raise ValueError(
+                    f"favorite hotkey {hotkey!r} is reserved by {reserved[hotkey]}. "
+                    f"Run `b help hotkeys` to see all bindings and free slots."
+                )
+            prior = used_hotkeys.get(hotkey)
+            if prior is not None:
+                raise ValueError(
+                    f"duplicate favorite hotkey: {hotkey!r} used by both "
+                    f"{prior!r} and {row['id']!r}"
+                )
+            used_hotkeys[hotkey] = str(row["id"])
+            row["hotkey"] = hotkey
+        style_rules = _parse_favorite_style_list(item.get("style", []))
+        if style_rules:
+            row["style"] = style_rules
+        out.append(row)
     return out
 
 

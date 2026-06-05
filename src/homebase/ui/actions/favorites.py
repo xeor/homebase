@@ -1,4 +1,12 @@
-"""Hotbar + custom-binding helpers.
+"""Favorite / custom-binding helpers.
+
+A **Favorite** is a starred target. Its visual surface is derived from
+the target prefix and (for action targets) the action's scope:
+
+- target-scope action  → bottom hotbar bar slot
+- workspace-scope action → entry in the Favorites list
+- ``tab:``/``tab.`` nav target → entry in the Favorites list
+- unknown → entry in the Favorites list
 
 Pure functions that operate on a UIContext snapshot or on a BApp-like
 stub (anything exposing ``ctx``, ``custom_hotkeys``, ``actions`` and a
@@ -11,9 +19,14 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Callable
 
-from ...config.prefs import save_hotbar, save_keys
+from ...config.prefs import save_favorites
 from . import action_items as textual_ui_action_items
 from . import dispatch as textual_ui_action_dispatch
+
+SURFACE_HOTBAR = "hotbar"
+SURFACE_GLOBAL = "global"
+SURFACE_NAV = "nav"
+
 
 # ---- style rules ----------------------------------------------------
 
@@ -56,93 +69,61 @@ def parse_style_rules(raw_style: object) -> list[dict[str, object]]:
     return out
 
 
+# ---- surface derivation ---------------------------------------------
+
+
+def favorite_surface(target: str, actions: dict[str, Any]) -> str:
+    """Return which UI surface a favorite renders on.
+
+    Why: a single ``favorite: true`` flag drives three different
+    placements (bottom hotbar bar, Favorites list, nav jump entry).
+    The target prefix + action scope decide.
+    """
+    value = str(target or "").strip()
+    if not value:
+        return SURFACE_NAV
+    if value.startswith("tab:") or value.startswith("tab."):
+        return SURFACE_NAV
+    action_id = value.split(":", 1)[1] if value.startswith("action:") else value
+    action = actions.get(action_id)
+    if action is not None and getattr(action, "scope", "") == "target":
+        return SURFACE_HOTBAR
+    if action is not None and getattr(action, "scope", "") == "workspace":
+        return SURFACE_GLOBAL
+    return SURFACE_NAV
+
+
 # ---- binding extraction / persistence -------------------------------
 
 
 def bindings_from_ctx(ctx: Any) -> list[dict[str, object]]:
-    """Build the ``custom_hotkeys`` table from a UIContext snapshot.
-
-    Why: BApp loads three different shapes from the global config —
-    ``hotbar`` (positional), ``keys`` (hotkey-bound), and
-    ``custom_hotkeys`` (already-normalised legacy entries) — and they
-    all collapse into one list internally.
-    """
-    if not ctx.hotbar and not ctx.keys and ctx.custom_hotkeys:
-        return [dict(item) for item in ctx.custom_hotkeys]
-    bindings: list[dict[str, object]] = []
-    for idx, item in enumerate(ctx.hotbar, start=1):
-        action_id = str(item.get("action", "")).strip()
-        if not action_id:
-            continue
-        row: dict[str, object] = {
-            "id": f"hotbar_{idx}",
-            "target": action_id,
-            "hotbar": True,
-        }
-        label = str(item.get("label", "")).strip()
-        if label:
-            row["label"] = label
-        style_rows = parse_style_rules(item.get("style", []))
-        if style_rows:
-            row["style"] = style_rows
-        bindings.append(row)
-    for idx, (hotkey, entry) in enumerate(ctx.keys.items(), start=1):
-        action_id = str(entry.get("action", "")).strip()
-        if not action_id:
-            continue
-        row = {
-            "id": f"key_{idx}",
-            "target": action_id,
-            "hotkey": str(hotkey).strip().lower(),
-        }
-        label = str(entry.get("label", "")).strip()
-        if label:
-            row["label"] = label
-        bindings.append(row)
-    return bindings
+    """Return the unified favorites table from a UIContext snapshot."""
+    return [dict(item) for item in getattr(ctx, "favorites", []) or []]
 
 
 def save_bindings(base_dir: Path, bindings: list[dict[str, object]]) -> None:
-    """Split the unified binding table back into hotbar + keys YAML."""
-    hotbar_payload: list[dict[str, object]] = []
-    keys_payload: dict[str, dict[str, object]] = {}
-    for row in bindings:
-        target = str(row.get("target", "")).strip()
-        if not target:
-            continue
-        label = str(row.get("label", "")).strip()
-        if bool(row.get("hotbar", False)):
-            payload: dict[str, object] = {
-                "action": target,
-                **({"label": label} if label else {}),
-            }
-            style_rows = parse_style_rules(row.get("style", []))
-            if style_rows:
-                payload["style"] = style_rows
-            hotbar_payload.append(payload)
-        hotkey = str(row.get("hotkey", "")).strip().lower()
-        if hotkey:
-            keys_payload[hotkey] = {
-                "action": target,
-                **({"label": label} if label else {}),
-            }
-    save_hotbar(base_dir, hotbar_payload)
-    save_keys(base_dir, keys_payload)
+    """Persist the unified favorites table to the global config YAML."""
+    save_favorites(base_dir, bindings)
 
 
-# ---- hotbar index / cycle -------------------------------------------
+# ---- hotbar bar (slot) index / cycle --------------------------------
 
 
-def hotbar_targets(app: Any) -> list[str]:
-    return textual_ui_action_items.hotbar_targets(app)
+def hotbar_slot_targets(app: Any) -> list[str]:
+    """Targets that render on the bottom hotbar bar.
+
+    Filters favorites to those whose surface is ``hotbar``
+    (i.e. target-scope action favorites only).
+    """
+    return textual_ui_action_items.hotbar_slot_targets(app)
 
 
 def hotbar_visible(app: Any) -> bool:
-    return bool(hotbar_targets(app))
+    return bool(hotbar_slot_targets(app))
 
 
 def normalize_hotbar_index(app: Any) -> None:
-    targets = hotbar_targets(app)
+    targets = hotbar_slot_targets(app)
     if not targets:
         app.hotbar_selected_index = 0
         return
@@ -151,16 +132,16 @@ def normalize_hotbar_index(app: Any) -> None:
     )
 
 
-def selected_hotbar_target(app: Any) -> str:
-    targets = hotbar_targets(app)
+def selected_hotbar_slot_target(app: Any) -> str:
+    targets = hotbar_slot_targets(app)
     if not targets:
         return ""
     normalize_hotbar_index(app)
     return str(targets[app.hotbar_selected_index])
 
 
-def cycle_hotbar(app: Any, delta: int) -> bool:
-    targets = hotbar_targets(app)
+def cycle_hotbar_slot(app: Any, delta: int) -> bool:
+    targets = hotbar_slot_targets(app)
     if not targets:
         return False
     normalize_hotbar_index(app)
@@ -170,26 +151,36 @@ def cycle_hotbar(app: Any, delta: int) -> bool:
     return True
 
 
-def toggle_hotbar_target_from_palette(
+def favorite_targets(app: Any) -> list[str]:
+    """All favorited targets, regardless of surface, in stored order."""
+    out: list[str] = []
+    seen: set[str] = set()
+    for binding in getattr(app, "custom_hotkeys", []) or []:
+        if not bool(binding.get("favorite", False)):
+            continue
+        target = str(binding.get("target", "")).strip()
+        if not target or target in seen:
+            continue
+        seen.add(target)
+        out.append(target)
+    return out
+
+
+def toggle_favorite_target(
     app: Any,
     target: str,
     *,
     save_bindings_fn: Callable[[list[dict[str, object]]], None] | None = None,
 ) -> bool:
-    """Add/remove a target on the hotbar from the command palette.
+    """Add/remove a target from the favorites list.
 
-    Why: the palette's star toggle and the settings table both need
-    the same add/remove + save semantics, so the logic lives here.
+    Accepts any target — action id, ``action:<id>``, ``tab:...`` — and
+    derives the rendering surface from prefix + scope. There is no
+    eligibility gate; callers are responsible for passing a valid
+    target.
     """
     value = textual_ui_action_dispatch.normalize_action_target(str(target or ""))
     if not value:
-        return False
-    action = app.actions.get(value)
-    if action is not None and action.scope != "target":
-        app._log(
-            f"{value} cannot be on hotbar: only target-scope actions are eligible",
-            "warn",
-        )
         return False
     save_fn = save_bindings_fn or (lambda b: save_bindings(app.base_dir, b))
     bindings: list[dict[str, object]] = [dict(row) for row in app.custom_hotkeys]
@@ -200,11 +191,11 @@ def toggle_hotbar_target_from_palette(
             break
     if found_idx >= 0:
         row = dict(bindings[found_idx])
-        hotbar = not bool(row.get("hotbar", False))
-        if hotbar:
-            row["hotbar"] = True
+        favorite = not bool(row.get("favorite", False))
+        if favorite:
+            row["favorite"] = True
         else:
-            row.pop("hotbar", None)
+            row.pop("favorite", None)
             if not str(row.get("hotkey", "")).strip():
                 bindings.pop(found_idx)
                 try:
@@ -221,9 +212,9 @@ def toggle_hotbar_target_from_palette(
     else:
         bindings.append(
             {
-                "id": f"hotbar_{len(bindings) + 1}",
+                "id": f"fav_{len(bindings) + 1}",
                 "target": value,
-                "hotbar": True,
+                "favorite": True,
             }
         )
     try:
@@ -238,21 +229,21 @@ def toggle_hotbar_target_from_palette(
     return True
 
 
-def target_is_hotbar(app: Any, target: str) -> bool:
+def target_is_favorite(app: Any, target: str) -> bool:
     value = textual_ui_action_dispatch.normalize_action_target(str(target or ""))
     if not value:
         return False
     return value in {
         textual_ui_action_dispatch.normalize_action_target(t)
-        for t in hotbar_targets(app)
+        for t in favorite_targets(app)
     }
 
 
-def hotbar_target_label(app: Any, target: str) -> str:
+def favorite_target_label(app: Any, target: str) -> str:
     value = str(target or "").strip()
     if not value:
         return ""
-    custom_label = app._hotbar_target_custom_label_map().get(value, "")
+    custom_label = app._favorite_target_custom_label_map().get(value, "")
     if custom_label:
         return custom_label
     if value.startswith("tab:"):

@@ -11,7 +11,7 @@ _COMMAND_ID_RE = re.compile(r"\(id=([^\)]+)\)")
 class BCommandPalette(CommandPalette):
     BINDINGS = [
         *CommandPalette.BINDINGS,
-        Binding("tab", "toggle_hotbar", "Toggle hotbar favorite", show=False, priority=True),
+        Binding("tab", "toggle_favorite", "Toggle favorite", show=False, priority=True),
     ]
 
     def __init__(self, *args, **kwargs) -> None:
@@ -35,7 +35,7 @@ class BCommandPalette(CommandPalette):
                     break
         command_list.scroll_to(y=saved_scroll_y, animate=False, immediate=True)
 
-    def action_toggle_hotbar(self) -> None:
+    def action_toggle_favorite(self) -> None:
         command_list = self.query_one(CommandList)
         highlighted = command_list.highlighted
         if highlighted is None:
@@ -53,7 +53,7 @@ class BCommandPalette(CommandPalette):
             return
         self._preferred_command_id = command_id
         app = self.app
-        toggle = getattr(app, "_toggle_hotbar_target_from_palette", None)
+        toggle = getattr(app, "_toggle_favorite_target", None)
         if not callable(toggle):
             return
         if not bool(toggle(command_id)):

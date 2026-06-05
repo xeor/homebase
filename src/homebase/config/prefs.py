@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import Mapping, Sequence
+from typing import Sequence
 
 from ..core.constants import (
     CACHE_PROFILE_CONFIG,
@@ -34,7 +34,7 @@ from ..core.constants import (
     TABLE_SIDE_WIDTH_PRESETS,
     WIP_OPEN_SYMBOL_MAP,
 )
-from ..core.models import Action, HotbarEntry, KeyEntry, PostCommandOption
+from ..core.models import Action, PostCommandOption
 from ..core.utils import normalize_filter_expression
 from . import cache_profile as cache_profile_config
 from . import open_mode as open_mode_config
@@ -148,12 +148,10 @@ def load_actions(base_dir: Path, *, builtins) -> dict[str, Action]:
     )
 
 
-def load_hotbar(base_dir: Path, *, actions) -> list[HotbarEntry]:
-    return workspace_settings.load_hotbar(load_global_config_dict(base_dir), actions=actions)
-
-
-def load_keys(base_dir: Path, *, actions) -> dict[str, KeyEntry]:
-    return workspace_settings.load_keys(load_global_config_dict(base_dir), actions=actions)
+def load_favorites(base_dir: Path, *, actions) -> list[dict[str, object]]:
+    return workspace_settings.load_favorites(
+        load_global_config_dict(base_dir), actions=actions
+    )
 
 
 def _serialize_style_rule(raw_rule: object) -> dict[str, str] | None:
@@ -183,64 +181,45 @@ def _serialize_style_rule(raw_rule: object) -> dict[str, str] | None:
     return rule
 
 
-def _serialize_hotbar_item(item: object) -> object | None:
-    if isinstance(item, str):
-        value = item.strip()
-        return value or None
-    if not isinstance(item, dict):
+def _serialize_favorite_row(idx: int, row: object) -> dict[str, object] | None:
+    if not isinstance(row, dict):
         return None
-    action_id = str(item.get("action", "")).strip()
-    if not action_id:
+    target = str(row.get("target", "")).strip()
+    if not target:
         return None
-    label = str(item.get("label", "")).strip()
-    style = item.get("style", [])
+    payload: dict[str, object] = {
+        "id": str(row.get("id", "")).strip() or f"fav_{idx}",
+        "target": target,
+    }
+    if bool(row.get("favorite", False)):
+        payload["favorite"] = True
+    hotkey = str(row.get("hotkey", "")).strip().lower()
+    if hotkey:
+        payload["hotkey"] = hotkey
+    label = str(row.get("label", "")).strip()
+    if label:
+        payload["label"] = label
+    style = row.get("style", [])
     style_out: list[dict[str, str]] = []
     if isinstance(style, list):
         for raw_rule in style:
             rule = _serialize_style_rule(raw_rule)
             if rule is not None:
                 style_out.append(rule)
-    if not (label or style_out):
-        return action_id
-    payload: dict[str, object] = {"action": action_id}
-    if label:
-        payload["label"] = label
     if style_out:
         payload["style"] = style_out
     return payload
 
 
-def save_hotbar(base_dir: Path, hotbar: Sequence[object]) -> None:
+def save_favorites(base_dir: Path, favorites: Sequence[object]) -> None:
+    """Persist the unified favorites table. Drops any legacy keys."""
     data = load_global_config_dict(base_dir)
-    out: list[object] = []
-    for item in hotbar:
-        serialized = _serialize_hotbar_item(item)
+    out: list[dict[str, object]] = []
+    for idx, item in enumerate(favorites, start=1):
+        serialized = _serialize_favorite_row(idx, item)
         if serialized is not None:
             out.append(serialized)
-    data["hotbar"] = out
-    save_global_config_dict(base_dir, data)
-
-
-def save_keys(base_dir: Path, keys_map: Mapping[str, object]) -> None:
-    data = load_global_config_dict(base_dir)
-    out: dict[str, object] = {}
-    for hotkey, value in keys_map.items():
-        key = str(hotkey).strip().lower()
-        if not key:
-            continue
-        if isinstance(value, str):
-            action_id = value.strip()
-            if action_id:
-                out[key] = action_id
-            continue
-        if not isinstance(value, dict):
-            continue
-        action_id = str(value.get("action", "")).strip()
-        if not action_id:
-            continue
-        label = str(value.get("label", "")).strip()
-        out[key] = {"action": action_id, **({"label": label} if label else {})}
-    data["keys"] = out
+    data["favorites"] = out
     save_global_config_dict(base_dir, data)
 
 
@@ -680,7 +659,7 @@ def load_ui_state(base_dir: Path) -> dict[str, object]:
         state_key_side_selected=STATE_KEY_SIDE_SELECTED,
         state_key_side_info=STATE_KEY_SIDE_INFO,
         state_key_side_settings=STATE_KEY_SIDE_SETTINGS,
-        state_key_hotbar_selected_index="hotbar_selected_index",
+        state_key_hotbar_slot_index="hotbar_selected_index",
         side_tab_selected_default=SIDE_TAB_SELECTED_DEFAULT,
         side_tab_overview_default=SIDE_TAB_OVERVIEW_DEFAULT,
         side_tab_events_default=SIDE_TAB_EVENTS_DEFAULT,
@@ -700,7 +679,7 @@ def save_ui_state(base_dir: Path, state: dict[str, object]) -> None:
         state_key_side_selected=STATE_KEY_SIDE_SELECTED,
         state_key_side_info=STATE_KEY_SIDE_INFO,
         state_key_side_settings=STATE_KEY_SIDE_SETTINGS,
-        state_key_hotbar_selected_index="hotbar_selected_index",
+        state_key_hotbar_slot_index="hotbar_selected_index",
         side_tab_selected_default=SIDE_TAB_SELECTED_DEFAULT,
         side_tab_overview_default=SIDE_TAB_OVERVIEW_DEFAULT,
         side_tab_events_default=SIDE_TAB_EVENTS_DEFAULT,

@@ -24,7 +24,7 @@ Last run: `2026-06-05` · source: 219 files / 47k LOC · tests: 179 files / ~30k
 
 | Tool          | Metric                          | Baseline     | Target        | Status   |
 |---------------|---------------------------------|--------------|---------------|----------|
-| pytest        | tests passing                   | 2172/2172    | all           | green    |
+| pytest        | tests passing                   | 2180/2180    | all           | green    |
 | ruff          | lint findings                   | 0            | 0             | green    |
 | mypy          | errors / files affected         | 0 / 0        | 0 / 0         | green    |
 | pytest-cov    | branch coverage                 | 65.8 %       | 75 %          | baseline |

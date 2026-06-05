@@ -371,19 +371,19 @@ def refresh_search_display(
         )
     disp_left.update(text)
 
-    targets = app._hotbar_targets()
+    targets = app._hotbar_slot_targets()
     if not targets:
         disp_right.update("")
         return
     app._normalize_hotbar_index()
     parts: list[str] = [f"[bold {color_nav_hex}]HOTBAR[/] [dim]^@[/]:"]
     for i, target in enumerate(targets):
-        label = app._hotbar_target_label(target)
+        label = app._favorite_target_label(target)
         rendered_label = _esc_bracket(label)
         if app.select_mode and target in {"open_selected", "action:open_selected"}:
             rendered_label = f"{rendered_label} [1]"
         cell = f" {rendered_label} "
-        style = app._resolve_hotbar_target_style(target)
+        style = app._resolve_favorite_target_style(target)
         if i == app.hotbar_selected_index:
             parts.append(f"[{_CURSOR_STYLE}]{cell}[/]")
         else:

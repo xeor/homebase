@@ -588,26 +588,32 @@ actions:
     scope: target
     op: add_log
 
-hotbar:
-  - action: open_selected
+favorites:
+  - id: fav_open
+    target: open_selected
+    favorite: true
     label: open
-  - action: notes_create
+  - id: fav_notes
+    target: notes_create
+    favorite: true
     label: notes
     style:
       - bg_color: "#d8e9ff"
         fg_color: "#1b3558"
         underline: true
         when: "!n"
-  - action: add_log_to_note
+  - id: fav_log
+    target: add_log_to_note
+    favorite: true
     label: log
     style:
       - bg_color: "#ffe9b8"
         fg_color: "#5a4200"
         italic: true
         when: "#wip"
-
-keys:
-  "f5": open_in_editor
+  - id: hk_editor
+    target: open_in_editor
+    hotkey: f5
 
 notes:
   path_template: "{{ PROJECT_PATH }}/NOTES.md"

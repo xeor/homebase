@@ -354,7 +354,7 @@ BUILTIN_HOTKEYS: tuple[BuiltinHotkey, ...] = (
     BuiltinHotkey(
         "ctrl+y", "dismiss_cache_concurrency", "Dismiss cache drift banner", show=False
     ),
-    BuiltinHotkey("ctrl+@", "cycle_hotbar", "Next hotbar", show=False, priority=True),
+    BuiltinHotkey("ctrl+@", "cycle_hotbar_slot", "Next hotbar slot", show=False, priority=True),
     BuiltinHotkey("enter", "open_selected", "Open"),
     BuiltinHotkey("ctrl+q", "quit_app", "Quit"),
 )
@@ -397,7 +397,7 @@ STATE_KEY_SIDE_MAIN = "side_main"
 STATE_KEY_SIDE_SELECTED = "side_selected"
 STATE_KEY_SIDE_INFO = "side_info"
 STATE_KEY_SIDE_SETTINGS = "side_settings"
-STATE_KEY_HOTBAR_SELECTED_INDEX = "hotbar_selected_index"
+STATE_KEY_HOTBAR_SLOT_INDEX = "hotbar_selected_index"
 
 SIDE_TAB_SELECTED_DEFAULT = "selected"
 SIDE_TAB_OVERVIEW_DEFAULT = "overview"

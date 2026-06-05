@@ -172,7 +172,7 @@ def test_state_snapshot_includes_view_fields() -> None:
         state_key_side_selected="side_selected",
         state_key_side_info="side_info",
         state_key_side_settings="side_settings",
-        state_key_hotbar_selected_index="hotbar_idx",
+        state_key_hotbar_slot_index="hotbar_idx",
     )
     assert snap["view"] == "active"
     assert snap["sort"] == "last"

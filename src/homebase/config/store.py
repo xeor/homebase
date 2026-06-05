@@ -212,7 +212,7 @@ def _build_initial_ui_state(
     state_key_side_selected: str,
     state_key_side_info: str,
     state_key_side_settings: str,
-    state_key_hotbar_selected_index: str,
+    state_key_hotbar_slot_index: str,
     side_tab_selected_default: str,
     side_tab_overview_default: str,
     side_tab_events_default: str,
@@ -251,8 +251,8 @@ def _build_initial_ui_state(
         "row_offset_archive": _as_nonneg_int(
             state.get("row_offset_archive", 0)
         ),
-        state_key_hotbar_selected_index: _as_nonneg_int(
-            state.get(state_key_hotbar_selected_index, 0)
+        state_key_hotbar_slot_index: _as_nonneg_int(
+            state.get(state_key_hotbar_slot_index, 0)
         ),
     }
 
@@ -300,7 +300,7 @@ def load_ui_state_from_data(
     state_key_side_selected: str,
     state_key_side_info: str,
     state_key_side_settings: str,
-    state_key_hotbar_selected_index: str = "hotbar_selected_index",
+    state_key_hotbar_slot_index: str = "hotbar_selected_index",
     side_tab_selected_default: str,
     side_tab_overview_default: str,
     side_tab_events_default: str,
@@ -318,7 +318,7 @@ def load_ui_state_from_data(
         state_key_side_selected=state_key_side_selected,
         state_key_side_info=state_key_side_info,
         state_key_side_settings=state_key_side_settings,
-        state_key_hotbar_selected_index=state_key_hotbar_selected_index,
+        state_key_hotbar_slot_index=state_key_hotbar_slot_index,
         side_tab_selected_default=side_tab_selected_default,
         side_tab_overview_default=side_tab_overview_default,
         side_tab_events_default=side_tab_events_default,
@@ -356,7 +356,7 @@ def save_ui_state_to_data(
     state_key_side_selected: str,
     state_key_side_info: str,
     state_key_side_settings: str,
-    state_key_hotbar_selected_index: str = "hotbar_selected_index",
+    state_key_hotbar_slot_index: str = "hotbar_selected_index",
     side_tab_selected_default: str,
     side_tab_overview_default: str,
     side_tab_events_default: str,
@@ -386,8 +386,8 @@ def save_ui_state_to_data(
         "scroll_y_archive": as_nonneg_int(state.get("scroll_y_archive", 0), 0),
         "row_offset_active": as_nonneg_int(state.get("row_offset_active", 0), 0),
         "row_offset_archive": as_nonneg_int(state.get("row_offset_archive", 0), 0),
-        state_key_hotbar_selected_index: as_nonneg_int(
-            state.get(state_key_hotbar_selected_index, 0),
+        state_key_hotbar_slot_index: as_nonneg_int(
+            state.get(state_key_hotbar_slot_index, 0),
             0,
         ),
     }

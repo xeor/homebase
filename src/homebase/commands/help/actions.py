@@ -6,24 +6,26 @@ from typing import Iterable
 def cmd_help_actions(
     *,
     actions: dict[str, object],
-    hotbar: list[object],
-    keys: dict[str, object],
+    favorites: list[dict[str, object]],
     source_filter: str = "",
     bound_filter: str = "",
     view_filter: str = "",
     show_defaults: bool = False,
 ) -> int:
     _ = show_defaults
-    hotbar_map: dict[str, list[str]] = {}
-    for idx, entry in enumerate(hotbar, start=1):
-        aid = str(getattr(entry, "action", "")).strip()
-        if aid:
-            hotbar_map.setdefault(aid, []).append(f"hotbar:{idx}")
+    fav_map: dict[str, list[str]] = {}
     key_map: dict[str, list[str]] = {}
-    for key, entry in keys.items():
-        aid = str(getattr(entry, "action", "")).strip()
-        if aid:
-            key_map.setdefault(aid, []).append(str(key))
+    for idx, row in enumerate(favorites, start=1):
+        aid = str(row.get("target", "")).strip()
+        if not aid:
+            continue
+        if aid.startswith("action:"):
+            aid = aid.split(":", 1)[1]
+        if bool(row.get("favorite", False)):
+            fav_map.setdefault(aid, []).append(f"fav:{idx}")
+        hotkey = str(row.get("hotkey", "")).strip()
+        if hotkey:
+            key_map.setdefault(aid, []).append(hotkey)
 
     rows: list[tuple[str, str, str, str, str, str, str]] = []
     for aid, action in sorted(actions.items()):
@@ -33,7 +35,7 @@ def cmd_help_actions(
         scope = str(getattr(action, "scope", "-"))
         multi = str(getattr(action, "multi", "-"))
         view_scope = tuple(getattr(action, "view_scope", ("active", "archive")))
-        bound = hotbar_map.get(aid, []) + key_map.get(aid, [])
+        bound = fav_map.get(aid, []) + key_map.get(aid, [])
         bound_text = " ".join(bound) if bound else "-"
 
         if source_filter and source != source_filter:

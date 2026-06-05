@@ -46,6 +46,7 @@ def _make_app(
     button_actions: list[tuple[str, str]] | None = None,
     valid_items: list[tuple[str, str]] | None = None,
     view_mode: str = "active",
+    favorites: list[dict[str, object]] | None = None,
 ) -> SimpleNamespace:
     rows = rows or []
     return SimpleNamespace(
@@ -53,9 +54,13 @@ def _make_app(
         view_mode=view_mode,
         worktree_health_issues=worktree_issues or [],
         worktree_health_dismissed=worktree_dismissed,
+        actions={},
+        custom_hotkeys=list(favorites or []),
         _visible_button_actions=lambda: button_actions or [],
         _valid_action_items=lambda: valid_items or [],
         _target_rows=lambda: rows,
+        _favorite_target_label=lambda target: target,
+        _esc=lambda text: str(text),
     )
 
 
@@ -160,6 +165,55 @@ def test_build_picker_catalog_excludes_palette_only_actions() -> None:
     assert "hooks_refresh" not in all_ids
     assert "hooks_refresh_view" not in all_ids
     assert "refresh_cache" in all_ids
+
+
+def test_favorite_entries_prefix_matches_ctrl_p_format() -> None:
+    """Each favorite entry must carry the same coloured `Action > X` /
+    `Tab` prefix used by the ctrl+p palette, plus a `(hotbar slot N)`
+    suffix for hotbar-bar favorites."""
+    from homebase.core.models import Action
+
+    target_action = Action(
+        id="archive", label="Archive", kind="builtin", scope="target", multi="joined"
+    )
+    workspace_action = Action(
+        id="full_reconcile", label="Full reconcile",
+        kind="builtin", scope="workspace", multi="joined",
+    )
+    app = _make_app(
+        favorites=[
+            {"id": "fav_1", "target": "archive", "favorite": True},
+            {"id": "fav_2", "target": "full_reconcile", "favorite": True},
+            {"id": "fav_3", "target": "tab:projects/log", "favorite": True},
+        ],
+    )
+    app.actions = {"archive": target_action, "full_reconcile": workspace_action}
+    entries = catalog.favorite_entries(app)
+    labels = {target: label for target, label in entries}
+    assert "Action > Target" in labels["archive"]
+    assert "hotbar slot 1" in labels["archive"]
+    assert "Action > Global" in labels["full_reconcile"]
+    assert "Tab" in labels["tab:projects/log"]
+
+
+def test_favorites_tab_appears_in_picker_when_starred() -> None:
+    from homebase.core.models import Action
+
+    target_action = Action(
+        id="archive", label="Archive", kind="builtin", scope="target", multi="joined"
+    )
+    app = _make_app(
+        favorites=[{"id": "fav_1", "target": "archive", "favorite": True}],
+    )
+    app.actions = {"archive": target_action}
+    cat = catalog.build_picker_catalog(app)
+    assert any(aid == "archive" for aid, _ in cat[catalog.CATEGORY_FAVORITES])
+
+
+def test_favorites_tab_is_empty_when_nothing_starred() -> None:
+    app = _make_app()
+    cat = catalog.build_picker_catalog(app)
+    assert cat[catalog.CATEGORY_FAVORITES] == []
 
 
 def test_palette_only_extras_emits_workspace_action_always(tmp_path: Path) -> None:

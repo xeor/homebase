@@ -4,7 +4,6 @@ import string
 from typing import Iterable, Sequence
 
 from ...core.constants import BUILTIN_HOTKEYS, CONTEXT_RESERVED_HOTKEYS
-from ...core.models import KeyEntry
 
 LETTERS = string.ascii_lowercase
 FUNCTION_KEYS = tuple(f"f{i}" for i in range(1, 13))
@@ -37,13 +36,16 @@ def _free_keys(taken: set[str], candidates: tuple[str, ...]) -> list[str]:
 
 def cmd_help_hotkeys(
     *,
-    keys: dict[str, KeyEntry] | dict[str, object],
+    favorites: list[dict[str, object]],
 ) -> int:
     user_map: dict[str, tuple[str, str]] = {}
-    for key, entry in keys.items():
-        action = str(getattr(entry, "action", "")).strip()
-        label = str(getattr(entry, "label", "")).strip()
-        user_map[str(key).strip().lower()] = (action, label)
+    for row in favorites:
+        hotkey = str(row.get("hotkey", "")).strip().lower()
+        if not hotkey:
+            continue
+        action = str(row.get("target", "")).strip()
+        label = str(row.get("label", "")).strip()
+        user_map[hotkey] = (action, label)
 
     print("BUILT-IN (cannot be overridden)\n")
     builtin_rows = [
@@ -59,7 +61,7 @@ def cmd_help_hotkeys(
     for line in _fmt_rows(ctx_rows, ("KEY", "MODE", "LABEL")):
         print(line)
 
-    print("\nUSER (from `keys:` in .homebase/config.yaml)\n")
+    print("\nUSER (hotkey-bound entries in `favorites:` in .homebase/config.yaml)\n")
     if user_map:
         user_rows = [
             (key, action, label if label else "-")
@@ -76,7 +78,7 @@ def cmd_help_hotkeys(
     for key, _mode, _label in CONTEXT_RESERVED_HOTKEYS:
         taken.add(key)
 
-    print("\nRECOMMENDED FREE KEYS (good slots for `keys:` overrides)\n")
+    print("\nRECOMMENDED FREE KEYS (good slots for new `favorites:` hotkey rows)\n")
     for name, candidates in RECOMMENDED_PATTERNS:
         free = _free_keys(taken, candidates)
         if not free:

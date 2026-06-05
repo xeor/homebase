@@ -87,6 +87,20 @@ def test_on_pick_actions_dispatches_custom_action() -> None:
     assert app.custom_called == "foo"
 
 
+def test_on_pick_actions_dispatches_tab_target() -> None:
+    """Selecting a ``tab:top/child`` favorite from the picker must
+    jump to that side tab via dispatch_action()."""
+    app = _AppStub()
+    jumps: list[tuple[str, str]] = []
+
+    def _jump(top: str, child_key: str = "") -> None:
+        jumps.append((top, child_key))
+
+    app._jump_to_side_tab = _jump  # type: ignore[attr-defined]
+    pick_actions.on_pick_actions(app, "tab:projects/log")
+    assert jumps == [("projects", "log")]
+
+
 def test_on_pick_actions_dispatches_rename_item() -> None:
     app = _AppStub()
     pick_actions.on_pick_actions(app, "rename_item")

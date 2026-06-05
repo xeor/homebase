@@ -73,21 +73,31 @@ def hotkey_target_label_map(app: Any) -> dict[str, str]:
     return out
 
 
-def hotbar_targets(app: Any) -> list[str]:
+def hotbar_slot_targets(app: Any) -> list[str]:
+    """Favorited targets whose surface is the bottom hotbar bar.
+
+    Only target-scope action favorites render on the bar. Workspace
+    favorites and nav-tab favorites live in the Favorites list only.
+    """
+    from . import favorites as favorites_helpers
+
     out: list[str] = []
     seen: set[str] = set()
+    actions = getattr(app, "actions", {}) or {}
     for binding in app.custom_hotkeys:
-        if not bool(binding.get("hotbar", False)):
+        if not bool(binding.get("favorite", False)):
             continue
         target = str(binding.get("target", "")).strip()
         if not target or target in seen:
+            continue
+        if favorites_helpers.favorite_surface(target, actions) != favorites_helpers.SURFACE_HOTBAR:
             continue
         seen.add(target)
         out.append(target)
     return out
 
 
-def hotbar_target_custom_label_map(app: Any) -> dict[str, str]:
+def favorite_target_custom_label_map(app: Any) -> dict[str, str]:
     out: dict[str, str] = {}
     for binding in app.custom_hotkeys:
         target = str(binding.get("target", "")).strip()
@@ -98,10 +108,10 @@ def hotbar_target_custom_label_map(app: Any) -> dict[str, str]:
     return out
 
 
-def hotbar_target_style_rules_map(app: Any) -> dict[str, list[dict[str, str]]]:
+def favorite_target_style_rules_map(app: Any) -> dict[str, list[dict[str, str]]]:
     out: dict[str, list[dict[str, str]]] = {}
     for binding in app.custom_hotkeys:
-        if not bool(binding.get("hotbar", False)):
+        if not bool(binding.get("favorite", False)):
             continue
         target = str(binding.get("target", "")).strip()
         if not target or target in out:

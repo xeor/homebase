@@ -45,6 +45,11 @@ def _build_set_desc_side_info(app: Any, targets: list[ProjectRow]) -> str:
 def on_pick_actions(app: Any, value: str | None) -> None:
     if not value or value.startswith("__hdr__") or value == "noop":
         return
+    if value.startswith("tab:") or value.startswith("tab."):
+        from .dispatch import normalize_action_target
+
+        dispatch_action(app, normalize_action_target(value))
+        return
     if value.startswith("custom:"):
         dispatch_action(app, value.split(":", 1)[1])
         return

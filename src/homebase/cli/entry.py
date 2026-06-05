@@ -186,9 +186,9 @@ def _config_error_help_response(ns, parser, prefix: str, exc: BaseException) -> 
         print_default_help=parser.print_help,
         handlers={
             "actions": lambda: cmd_help_actions_render(
-                actions={}, hotbar=[], keys={},
+                actions={}, favorites=[],
             ),
-            "hotkeys": lambda: cmd_help_hotkeys_render(keys={}),
+            "hotkeys": lambda: cmd_help_hotkeys_render(favorites=[]),
         },
     )
 
@@ -200,9 +200,8 @@ def main(argv: list[str]) -> int:
         load_actions,
         load_archive_timezone_name,
         load_cache_profile_table,
+        load_favorites,
         load_file_view_exclude_patterns,
-        load_hotbar,
-        load_keys,
         load_notes_config,
         load_open_mode_config,
         load_reconcile_config,
@@ -264,8 +263,7 @@ def main(argv: list[str]) -> int:
             load_suffixes=load_suffixes,
             load_file_view_exclude_patterns=load_file_view_exclude_patterns,
             load_actions=lambda bd: load_actions(bd, builtins=runtime_builtins),
-            load_hotbar=lambda bd, actions: load_hotbar(bd, actions=actions),
-            load_keys=lambda bd, actions: load_keys(bd, actions=actions),
+            load_favorites=lambda bd, actions: load_favorites(bd, actions=actions),
             load_open_mode_config=load_open_mode_config,
             load_notes_config=load_notes_config,
             load_reconcile_config=load_reconcile_config,
@@ -299,18 +297,7 @@ def main(argv: list[str]) -> int:
         suffixes=list(runtime_cfg.suffixes),
         file_view_exclude_patterns=list(runtime_cfg.file_view_exclude_patterns),
         actions=dict(runtime_cfg.actions),
-        hotbar=[
-            {
-                "action": str(item.action),
-                "label": str(item.label),
-                "style": [dict(rule) for rule in item.style],
-            }
-            for item in runtime_cfg.hotbar
-        ],
-        keys={
-            str(key): {"action": str(entry.action), "label": str(entry.label)}
-            for key, entry in runtime_cfg.keys.items()
-        },
+        favorites=[dict(row) for row in runtime_cfg.favorites],
         open_mode_config=dict(runtime_cfg.open_mode_config),
         notes_config=dict(runtime_cfg.notes_config),
         reconcile_config={
@@ -457,15 +444,14 @@ def main(argv: list[str]) -> int:
                 handlers={
                     "actions": lambda: cmd_help_actions_render(
                         actions=runtime_cfg.actions,
-                        hotbar=list(runtime_cfg.hotbar),
-                        keys=dict(runtime_cfg.keys),
+                        favorites=list(runtime_cfg.favorites),
                         source_filter=str(getattr(namespace, "source", "")).strip(),
                         bound_filter=str(getattr(namespace, "bound", "")).strip(),
                         view_filter=str(getattr(namespace, "view", "")).strip(),
                         show_defaults=bool(getattr(namespace, "show_defaults", False)),
                     ),
                     "hotkeys": lambda: cmd_help_hotkeys_render(
-                        keys=dict(runtime_cfg.keys),
+                        favorites=list(runtime_cfg.favorites),
                     ),
                 },
             ),

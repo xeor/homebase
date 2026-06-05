@@ -19,7 +19,7 @@ def test_bapp_uses_passed_ui_context_for_runtime_config(tmp_path) -> None:
         suffixes=[".x"],
         file_view_exclude_patterns=["*.lock"],
         custom_actions=[{"id": "cx", "label": "Custom", "command": "true"}],
-        custom_hotkeys=[{"id": "hk", "hotkey": "f5", "target": "custom:cx"}],
+        favorites=[{"id": "hk", "hotkey": "f5", "target": "custom:cx"}],
         actions={
             "cx": Action(
                 id="cx",
@@ -43,7 +43,7 @@ def test_bapp_uses_passed_ui_context_for_runtime_config(tmp_path) -> None:
 
     assert app.ctx is ctx
     assert [action.id for action in app.custom_actions] == ["cx"]
-    assert app.custom_hotkeys == ctx.custom_hotkeys
+    assert app.custom_hotkeys == ctx.favorites
     assert app.open_mode == ctx.open_mode_config
     assert app.notes_config == ctx.notes_config
     assert app.reconcile_config["active"]["interval_s"] == 11.0
