@@ -15,15 +15,15 @@ def cmd_help_actions(
     _ = show_defaults
     fav_map: dict[str, list[str]] = {}
     key_map: dict[str, list[str]] = {}
-    for idx, row in enumerate(favorites, start=1):
-        aid = str(row.get("target", "")).strip()
+    for idx, fav in enumerate(favorites, start=1):
+        aid = str(fav.get("target", "")).strip()
         if not aid:
             continue
         if aid.startswith("action:"):
             aid = aid.split(":", 1)[1]
-        if bool(row.get("favorite", False)):
+        if bool(fav.get("favorite", False)):
             fav_map.setdefault(aid, []).append(f"fav:{idx}")
-        hotkey = str(row.get("hotkey", "")).strip()
+        hotkey = str(fav.get("hotkey", "")).strip()
         if hotkey:
             key_map.setdefault(aid, []).append(hotkey)
 

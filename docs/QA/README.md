@@ -20,21 +20,21 @@ docs/QA/
 
 ## Status snapshot
 
-Last run: `2026-06-05` · source: 219 files / 47k LOC · tests: 179 files / ~30k LOC
+Last run: `2026-06-06` · source: 219 files / 47k LOC · tests: 179 files / ~30k LOC
 
 | Tool          | Metric                          | Baseline     | Target        | Status   |
 |---------------|---------------------------------|--------------|---------------|----------|
 | pytest        | tests passing                   | 2180/2180    | all           | green    |
 | ruff          | lint findings                   | 0            | 0             | green    |
 | mypy          | errors / files affected         | 0 / 0        | 0 / 0         | green    |
-| pytest-cov    | branch coverage                 | 65.8 %       | 75 %          | baseline |
+| pytest-cov    | branch coverage                 | 65.7 %       | 75 %          | baseline |
 | import-linter | contract violations             | 0            | 0             | green    |
 | vulture       | findings (min-confidence 80)    | 0            | 0             | green    |
-| vulture       | findings (min-confidence 60)    | ~289 lns     | review        | baseline |
+| vulture       | findings (min-confidence 60)    | ~292 lns     | review        | baseline |
 | bandit        | High / Medium / Low             | 0 / 0 / 0    | 0 / 0 / < 20  | green    |
 | radon (cc)    | avg complexity                  | C (14.4)     | B (≤ 10)      | baseline |
 | radon (cc)    | functions ranked C or worse     | 180          | 0             | baseline |
-| radon (mi)    | files at maintainability ≤ C    | 14           | 0             | baseline |
+| radon (mi)    | files at maintainability ≤ C    | 15           | 0             | baseline |
 | benchmark     | latest score / warm / cold      | 168.7 / 170.8 / 163.7 | ↑ over time | tracked  |
 
 Tracked-over-time tools (graphs below): `mypy`, `coverage`,
