@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import ast
+import tomllib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SRC_ROOT = ROOT / "src" / "homebase"
+INTEGRATIONS_ROOT = ROOT / "integrations"
 
 
 ALLOWED_IMPORTS: dict[str, set[str]] = {
@@ -156,3 +158,35 @@ def test_layering_imports_follow_rules() -> None:
         if v not in KNOWN_LAYERING_EXCEPTIONS and _stripped(v) not in known_loose
     )
     assert not unexpected, "Layering violations:\n" + "\n".join(unexpected)
+
+
+def test_main_project_does_not_depend_on_integrations() -> None:
+    offenders: list[str] = []
+
+    for path in SRC_ROOT.rglob("*.py"):
+        text = path.read_text(encoding="utf-8")
+        if "integrations" in text or "homebase_bts" in text:
+            offenders.append(str(path.relative_to(ROOT)))
+
+    pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    dependencies = pyproject["project"].get("dependencies", [])
+    dev_dependencies = pyproject["dependency-groups"].get("dev", [])
+    forbidden_deps = {"homebase-bts", "homebase_bts", "@raycast/api", "@raycast/eslint-config"}
+    for dep in [*dependencies, *dev_dependencies]:
+        dep_name = dep.split("[", 1)[0].split(">=", 1)[0].split("==", 1)[0]
+        if dep_name in forbidden_deps:
+            offenders.append(f"pyproject.toml dependency {dep}")
+
+    wheel_packages = pyproject["tool"]["hatch"]["build"]["targets"]["wheel"]["packages"]
+    if any(str(package).startswith("integrations") for package in wheel_packages):
+        offenders.append("pyproject.toml wheel packages include integrations")
+
+    sdist_include = pyproject["tool"]["hatch"]["build"]["targets"]["sdist"]["include"]
+    if any(str(path).startswith("integrations") for path in sdist_include):
+        offenders.append("pyproject.toml sdist includes integrations")
+    sdist_exclude = pyproject["tool"]["hatch"]["build"]["targets"]["sdist"].get("exclude", [])
+    if "integrations" not in sdist_exclude:
+        offenders.append("pyproject.toml sdist does not exclude integrations")
+
+    assert INTEGRATIONS_ROOT.is_dir()
+    assert not offenders, "Main project depends on integrations:\n" + "\n".join(offenders)

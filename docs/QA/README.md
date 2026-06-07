@@ -1,7 +1,12 @@
 # QA
 
-Code-quality policy for `homebase`. All tools are dev-dependencies in
-`pyproject.toml` (`[dependency-groups] dev`). Run via `uv run`.
+Code-quality policy for the main `homebase` package. All tools are
+dev-dependencies in root `pyproject.toml` (`[dependency-groups] dev`).
+Run via `uv run`.
+
+This QA scope excludes `integrations/`. Integrations are optional
+standalone projects with their own manifests, lockfiles, and local QA
+commands.
 
 This document is **authoritative**. Update the status table and the
 history CSV/SVG after every QA run (see [Recording history](#recording-history)).

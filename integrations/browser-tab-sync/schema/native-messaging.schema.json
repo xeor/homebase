@@ -1,0 +1,139 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/xeor/homebase-bts/schema/native-messaging.schema.json",
+  "title": "HomebaseBtsNativeMessages",
+  "description": "Wire protocol between the Python native host and the extension. Mirrored in cli/src/homebase_bts/protocol.py and extension/src/protocol.ts.",
+  "oneOf": [
+    { "$ref": "#/$defs/ensure_profile" },
+    { "$ref": "#/$defs/health_check" },
+    { "$ref": "#/$defs/focus_profile" },
+    { "$ref": "#/$defs/snapshot_request" },
+    { "$ref": "#/$defs/watch_profile" },
+    { "$ref": "#/$defs/start_watch" },
+    { "$ref": "#/$defs/stop_watch" },
+    { "$ref": "#/$defs/profile_snapshot" },
+    { "$ref": "#/$defs/ensure_result" }
+  ],
+  "$defs": {
+    "ensure_profile": {
+      "type": "object",
+      "required": ["type", "request_id", "profile"],
+      "properties": {
+        "type": { "const": "ensure_profile" },
+        "request_id": { "type": "string", "format": "uuid" },
+        "profile": { "$ref": "profile.schema.json" }
+      }
+    },
+    "focus_profile": {
+      "type": "object",
+      "required": ["type", "request_id", "profile_id", "group_title"],
+      "properties": {
+        "type": { "const": "focus_profile" },
+        "request_id": { "type": "string", "format": "uuid" },
+        "profile_id": { "type": "string" },
+        "group_title": { "type": "string" },
+        "focus": { "type": "string" }
+      }
+    },
+    "health_check": {
+      "type": "object",
+      "required": ["type", "request_id"],
+      "properties": {
+        "type": { "const": "health_check" },
+        "request_id": { "type": "string", "format": "uuid" }
+      }
+    },
+    "snapshot_request": {
+      "type": "object",
+      "required": ["type", "request_id", "profile_id", "group_title"],
+      "properties": {
+        "type": { "const": "snapshot_request" },
+        "request_id": { "type": "string", "format": "uuid" },
+        "profile_id": { "type": "string" },
+        "group_title": { "type": "string" }
+      }
+    },
+    "watch_profile": {
+      "type": "object",
+      "description": "debug=false registers a persistent sync target (file_path). debug=true is a read-only snapshot subscription.",
+      "required": ["type", "request_id", "profile_id", "group_title"],
+      "properties": {
+        "type": { "const": "watch_profile" },
+        "request_id": { "type": "string", "format": "uuid" },
+        "profile_id": { "type": "string" },
+        "group_title": { "type": "string" },
+        "file_path": { "type": "string" },
+        "debug": { "type": "boolean" }
+      }
+    },
+    "start_watch": {
+      "type": "object",
+      "required": ["type", "request_id", "profile_id", "group_title"],
+      "properties": {
+        "type": { "const": "start_watch" },
+        "request_id": { "type": "string", "format": "uuid" },
+        "profile_id": { "type": "string" },
+        "group_title": { "type": "string" }
+      }
+    },
+    "stop_watch": {
+      "type": "object",
+      "required": ["type", "profile_id"],
+      "properties": {
+        "type": { "const": "stop_watch" },
+        "profile_id": { "type": "string" }
+      }
+    },
+    "profile_snapshot": {
+      "type": "object",
+      "required": ["type", "profile_id", "browser", "tabs"],
+      "properties": {
+        "type": { "const": "profile_snapshot" },
+        "request_id": { "type": "string", "format": "uuid" },
+        "profile_id": { "type": "string" },
+        "browser": { "type": "string" },
+        "window_id": { "type": "integer" },
+        "group_id": { "type": "integer" },
+        "group": {
+          "type": "object",
+          "properties": {
+            "title": { "type": "string" },
+            "color": { "type": "string" },
+            "collapsed": { "type": "boolean" }
+          }
+        },
+        "tabs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["browser_tab_id", "url", "index"],
+            "properties": {
+              "browser_tab_id": { "type": "integer" },
+              "url": { "type": "string" },
+              "managed_url": { "type": "string" },
+              "title": { "type": "string" },
+              "active": { "type": "boolean" },
+              "index": { "type": "integer" }
+            }
+          }
+        }
+      }
+    },
+    "ensure_result": {
+      "type": "object",
+      "required": ["type", "request_id", "ok"],
+      "properties": {
+        "type": { "const": "ensure_result" },
+        "request_id": { "type": "string", "format": "uuid" },
+        "ok": { "type": "boolean" },
+        "error": { "type": "string" },
+        "created_tabs": { "type": "integer" },
+        "existing_tabs": { "type": "integer" },
+        "moved_tabs": { "type": "integer" },
+        "removed_tabs": { "type": "integer" },
+        "group_created": { "type": "boolean" },
+        "focused": { "type": "boolean" }
+      }
+    }
+  }
+}

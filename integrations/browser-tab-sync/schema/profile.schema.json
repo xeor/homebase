@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/xeor/homebase-bts/schema/profile.schema.json",
+  "title": "HomebaseBtsProfile",
+  "description": "Desired state for a browser tab-group profile.",
+  "type": "object",
+  "required": ["schema", "id", "tabs"],
+  "additionalProperties": false,
+  "properties": {
+    "schema": { "const": 1 },
+    "id": {
+      "type": "string",
+      "description": "Stable profile identity. Never derived from browser ids.",
+      "pattern": "^[a-z0-9][a-z0-9._-]*$"
+    },
+    "title": { "type": "string" },
+    "browser": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "preferred": {
+          "type": "string",
+          "enum": ["chrome", "vivaldi", "brave", "edge", "firefox"]
+        },
+        "strategy": { "type": "string", "enum": ["tab-group", "window"] },
+        "window": { "type": "string", "enum": ["current", "new"] }
+      }
+    },
+    "group": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "title": { "type": "string" },
+        "color": {
+          "type": "string",
+          "enum": ["grey", "blue", "red", "yellow", "green", "pink", "purple", "cyan", "orange"]
+        },
+        "collapsed": { "type": "boolean" },
+        "focus": {
+          "description": "first, last-active, or a tab URL",
+          "type": "string"
+        }
+      }
+    },
+    "tabs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["url"],
+        "additionalProperties": false,
+        "properties": {
+          "url": { "type": "string", "format": "uri", "pattern": "^https?://" },
+          "title": { "type": "string" }
+        }
+      }
+    },
+    "sync": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "mode": { "type": "string", "enum": ["apply-only", "two-way", "manual"], "default": "two-way" },
+        "delete_missing": { "type": "boolean", "default": false },
+        "adopt_existing": { "type": "boolean", "default": true },
+        "match": {
+          "type": "string",
+          "enum": ["exact-url", "normalized-url", "title-url"],
+          "default": "normalized-url"
+        }
+      }
+    }
+  }
+}

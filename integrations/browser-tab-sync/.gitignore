@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+cli/.venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Node / WXT
+node_modules/
+extension/.wxt/
+extension/.output/
+extension/web-ext.config.ts.timestamp-*
+
+# Persistent dev browser profile (contains the dev native-messaging manifest)
+.dev-profile/
+
+# Local state / runtime
+*.sqlite
+*.sqlite-*
+.browser-manager/
+logs/
+
+tmp/

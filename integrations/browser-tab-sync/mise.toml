@@ -1,0 +1,122 @@
+[tools]
+python = "3.11"
+node = "lts"
+uv = "latest"
+watchexec = "latest"
+
+[settings]
+# Tasks may live in subdirectories and reference each other.
+experimental = true
+
+[env]
+# Persistent dev browser profile (holds the dev native-messaging manifest).
+HBTS_DEV_PROFILE = "{{config_root}}/.dev-profile"
+
+# --- CLI (Python / uv) -------------------------------------------------------
+
+[tasks."cli:sync"]
+description = "Install CLI deps into cli/.venv"
+dir = "cli"
+run = "uv sync"
+
+[tasks."cli:run"]
+description = "Run the homebase-bts CLI from the dev venv (args after --)"
+dir = "cli"
+depends = ["cli:sync"]
+run = "uv run homebase-bts"
+
+[tasks."cli:host"]
+description = "Run the native messaging host from the dev venv"
+dir = "cli"
+depends = ["cli:sync"]
+run = "uv run homebase-bts-host"
+
+[tasks."cli:test"]
+description = "Run CLI tests"
+dir = "cli"
+depends = ["cli:sync"]
+run = "uv run pytest"
+
+[tasks."cli:test:watch"]
+description = "Re-run CLI tests on file change"
+dir = "cli"
+depends = ["cli:sync"]
+run = "watchexec --exts py --restart -- uv run pytest -q"
+
+[tasks."cli:lint"]
+description = "Lint + format check + typecheck the CLI"
+dir = "cli"
+depends = ["cli:sync"]
+run = [
+  "uv run ruff check .",
+  "uv run ruff format --check .",
+  "uv run mypy",
+]
+
+[tasks."cli:fmt"]
+description = "Auto-fix lint + format the CLI"
+dir = "cli"
+depends = ["cli:sync"]
+run = [
+  "uv run ruff check --fix .",
+  "uv run ruff format .",
+]
+
+# --- Extension (WXT / TypeScript) -------------------------------------------
+
+[tasks."ext:install"]
+description = "Install extension deps"
+dir = "extension"
+run = "npm install"
+
+[tasks."host:install-dev"]
+description = "Install native host manifest into the dev profile (auto extension ID)"
+dir = "cli"
+depends = ["cli:sync"]
+run = '''uv run homebase-bts native-host install-dev \
+  --extension-dir "$MISE_PROJECT_ROOT/extension/.output/chrome-mv3-dev" \
+  --manifest-dir "$MISE_PROJECT_ROOT/.dev-profile/NativeMessagingHosts"'''
+
+[tasks."ext:dev"]
+description = "Run the extension in the dev browser with HMR (auto-installs native host)"
+dir = "extension"
+depends = ["ext:install", "host:install-dev"]
+# raw: connect wxt straight to the terminal (TTY + stdin). Without this mise
+# captures stdout and wxt's interactive dev server sees EOF on stdin and exits,
+# which makes web-ext close the browser.
+raw = true
+run = "npm run dev"
+
+[tasks."ext:build"]
+description = "Production build of the extension"
+dir = "extension"
+depends = ["ext:install"]
+run = "npm run build"
+
+[tasks."ext:compile"]
+description = "Typecheck the extension"
+dir = "extension"
+depends = ["ext:install"]
+run = "npm run compile"
+
+# --- Aggregate ---------------------------------------------------------------
+
+[tasks.setup]
+description = "Install everything"
+depends = ["cli:sync", "ext:install"]
+
+[tasks.dev]
+description = "Default dev loop (extension HMR)"
+depends = ["ext:dev"]
+
+[tasks.test]
+description = "Run all tests"
+depends = ["cli:test"]
+
+[tasks.lint]
+description = "Lint/typecheck everything"
+depends = ["cli:lint", "ext:compile"]
+
+[tasks.build]
+description = "Build all deliverables"
+depends = ["ext:build"]

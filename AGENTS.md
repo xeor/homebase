@@ -39,6 +39,8 @@ agents working in this tree must follow these rules.
 
 ## 4. Project layout (must follow)
 
+Main package layout:
+
 ```
 src/homebase/
 ├── cli/         # argparse parser, dispatch, main()
@@ -70,7 +72,13 @@ src/homebase/
 Top-level package contains only `__init__.py` and `__main__.py`.
 Everything else lives in a domain subpackage.
 
+`integrations/` is outside the main package. It contains optional,
+standalone companion projects with their own manifests, dependency
+graphs, build/test commands, and project-local `AGENTS.md` files.
+
 ## 5. Layering (must follow)
+
+Main project layering:
 
 ```
 core/        ← imports nothing else from the package
@@ -90,6 +98,11 @@ cli/         ← everything
 Imports must always go inward. If `core/` ever imports from anywhere
 else in the package, that's a layering violation — fix the design,
 not the import.
+
+`src/homebase/` must never import from, shell out to, package, or test
+against `integrations/` unless the user explicitly asks for integration
+work. Keep integration dependencies out of the root `pyproject.toml`,
+root lockfile, and main QA pipeline.
 
 ## 6. Where things go
 
@@ -198,6 +211,10 @@ not the import.
 - This repo is part of a larger workspace. Subdirectories may have
   their own `AGENTS.md` with more specific rules — those take
   precedence over this file.
+- Treat `integrations/` as optional standalone projects. Do not inspect
+  or modify them during ordinary Homebase work unless the user asks for
+  integration work or the task is explicitly about the repository
+  boundary.
 - Don't modify files outside the current scope without permission.
 - Respect `.gitignore` patterns.
 - Never commit secrets, credentials, or `.env` files.

@@ -66,6 +66,25 @@ for the active shell (`bash`, `zsh`, `fish`).
 `homebase` and `b` are interchangeable; both resolve to
 `homebase.cli:entrypoint`.
 
+## Optional integrations
+
+`integrations/` contains standalone companion projects. They live in
+this repository so they can share Homebase context during development,
+but they are optional and are not part of the main `homebase` package,
+runtime dependencies, build, or QA pipeline.
+
+- `integrations/raycast/`: Raycast extension that shells out to `b ls`
+  and `b cd` for project search/opening. It has its own `package.json`
+  and Raycast build/lint commands.
+- `integrations/browser-tab-sync/`: browser tab-group desired-state
+  tool. It has a standalone Python CLI/native host under `cli/`, a
+  standalone WXT browser extension under `extension/`, and its own
+  schemas/docs/tooling.
+
+Do not treat integrations as Homebase internals. Main `src/homebase/`
+code must not import from `integrations/`, and integration dependencies
+must stay in their own manifests.
+
 ## Common Commands
 
 ```sh
@@ -687,6 +706,7 @@ pyproject.toml      # build config (hatchling), deps, scripts, ruff, pytest
 src/homebase/       # package
 tests/              # pytest scaffold
 docs/               # technical reference docs
+integrations/       # optional standalone companion projects
 TODO.md             # active follow-ups + feature backlog
 README.md           # this file
 AGENTS.md           # AI agent rules + project conventions

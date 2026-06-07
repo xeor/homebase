@@ -1,0 +1,26 @@
+{
+  "schema": 1,
+  "id": "vacation",
+  "title": "Vacation",
+  "browser": {
+    "preferred": "chrome",
+    "strategy": "tab-group",
+    "window": "current"
+  },
+  "group": {
+    "title": "Vacation",
+    "color": "cyan",
+    "collapsed": false,
+    "focus": "first"
+  },
+  "tabs": [
+    { "url": "https://maps.google.com/", "title": "Maps" },
+    { "url": "https://www.google.com/travel/flights", "title": "Flights" }
+  ],
+  "sync": {
+    "mode": "two-way",
+    "delete_missing": false,
+    "adopt_existing": true,
+    "match": "normalized-url"
+  }
+}

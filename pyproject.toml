@@ -101,6 +101,9 @@ include = [
   ".cursorrules",
   ".windsurfrules",
 ]
+exclude = [
+  "integrations",
+]
 
 [dependency-groups]
 dev = [

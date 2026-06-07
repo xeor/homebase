@@ -1,0 +1,51 @@
+{
+  "name": "homebase-raycast",
+  "title": "Homebase",
+  "description": "Raycast commands for homebase",
+  "icon": "icon.png",
+  "author": "lars_solberg",
+  "license": "MIT",
+  "scripts": {
+    "build": "ray build -e dist",
+    "dev": "ray develop",
+    "lint": "ray lint",
+    "fix-lint": "ray lint --fix"
+  },
+  "dependencies": {
+    "@raycast/api": "latest"
+  },
+  "devDependencies": {
+    "@raycast/eslint-config": "^2.1.1",
+    "@types/node": "latest",
+    "@types/react": "latest",
+    "eslint": "^10.4.1",
+    "prettier": "^3.8.3",
+    "typescript": "latest"
+  },
+  "commands": [
+    {
+      "name": "projects",
+      "title": "Projects",
+      "description": "Pick from b ls",
+      "mode": "view",
+      "preferences": [
+        {
+          "name": "bPath",
+          "title": "b Path",
+          "description": "Path to the b executable",
+          "type": "textfield",
+          "required": false,
+          "default": "/Users/xeor/.local/bin/b"
+        },
+        {
+          "name": "timeoutMs",
+          "title": "Command Timeout",
+          "description": "Timeout in milliseconds",
+          "type": "textfield",
+          "required": false,
+          "default": "10000"
+        }
+      ]
+    }
+  ]
+}
