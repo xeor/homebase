@@ -9,10 +9,23 @@ package.
 ## Commands
 
 ```
+mise run setup
+mise run dev
+mise run lint
+mise run build
+mise run check
+mise run ray -- help
+mise tasks ls
+```
+
+Underlying commands:
+
+```
 npm install
 npm run dev
 npm run lint
 npm run build
+npm run check
 ```
 
 Keep dependencies in this directory's `package.json` and

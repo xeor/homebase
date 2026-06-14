@@ -1,0 +1,37 @@
+[tools]
+node = "lts"
+
+[tasks.setup]
+description = "Install Raycast extension dependencies"
+run = "npm install"
+
+[tasks.dev]
+description = "Run Raycast extension in development mode"
+depends = ["setup"]
+raw = true
+run = "npm run dev"
+
+[tasks.lint]
+description = "Lint Raycast extension"
+depends = ["setup"]
+run = "npm run lint"
+
+[tasks."fix-lint"]
+description = "Auto-fix Raycast lint findings"
+depends = ["setup"]
+run = "npm run fix-lint"
+
+[tasks.build]
+description = "Build Raycast extension"
+depends = ["setup"]
+run = "npm run build"
+
+[tasks.check]
+description = "Lint and build the Raycast extension"
+depends = ["setup"]
+run = "npm run check"
+
+[tasks.ray]
+description = "Run the Raycast CLI (args after --)"
+depends = ["setup"]
+run = "npm run ray --"

@@ -33,6 +33,7 @@ def _stub_dispatch_kwargs(**overrides: object) -> dict[str, object]:
         cmd_utils=lambda _a, _b: 0,
         cmd_archive_mv=lambda _a, _b, **_kw: 0,
         cmd_cd=lambda _a, _b: 0,
+        cmd_open=lambda _a, _b: 0,
         cmd_rm=lambda _a, _b: 0,
         cmd_fix=lambda _a: 0,
         cmd_deworktree=lambda _bd, _path: 0,
@@ -412,6 +413,23 @@ def test_dispatch_cd_uses_last_name_arg() -> None:
         **_stub_dispatch_kwargs(cmd_cd=lambda bd, name: (seen.append((bd, name)), 60)[1]),
     )
     assert rc == 60
+    assert seen == [(Path("/base"), "alpha")]
+
+
+def test_dispatch_open_uses_last_name_arg() -> None:
+    parser = cli_dispatch.build_cli_parser()
+    ns = parser.parse_args(["open", "#infra", "alpha"])
+    seen: list[tuple[Path, str]] = []
+    rc = cli_dispatch.dispatch_command(
+        ns,
+        base_dir=Path("/base"),
+        bin_dir=Path("/bin"),
+        cwd=Path("/cwd"),
+        no_arg_flow=lambda _a, _b, _c: 0,
+        initial_filter_expr="",
+        **_stub_dispatch_kwargs(cmd_open=lambda bd, name: (seen.append((bd, name)), 61)[1]),
+    )
+    assert rc == 61
     assert seen == [(Path("/base"), "alpha")]
 
 

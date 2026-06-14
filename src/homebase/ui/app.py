@@ -114,6 +114,7 @@ from ..core.constants import (
     UI_TICK_QUERY_FLUSH_S,
     UI_TICK_RECONCILE_USAGE_FLUSH_S,
     UI_TICK_STATE_FLUSH_S,
+    UI_TICK_TMUX_CONTEXT_S,
     UI_TICK_WORKTREE_HEALTH_S,
     WIDGET_PROJECTS,
 )
@@ -147,6 +148,10 @@ from ..tmux.flow import (
     tmux_find_panes_for_cwd,
     tmux_open_new_tab,
     tmux_open_new_tab_with_load_status,
+)
+from ..tmux.registry import (
+    register_current_tmux_context,
+    unregister_current_tmux_context,
 )
 from ..workspace.deworktree import deworktree as deworktree_internal
 from ..workspace.projects import (
@@ -961,6 +966,19 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
         self.set_interval(UI_TICK_HOOK_REFRESH_S, self._maybe_run_hook_refresh)
         self.set_interval(
             UI_TICK_WORKTREE_HEALTH_S, self._maybe_refresh_worktree_health
+        )
+        register_current_tmux_context(
+            self.base_dir,
+            open_profile=str(self.open_mode.get("profile", "")),
+            project_panes=self.open_panes_by_project,
+        )
+        self.set_interval(
+            UI_TICK_TMUX_CONTEXT_S,
+            lambda: register_current_tmux_context(
+                self.base_dir,
+                open_profile=str(self.open_mode.get("profile", "")),
+                project_panes=self.open_panes_by_project,
+            ),
         )
         self.call_after_refresh(self._initial_worktree_health_scan)
         for wid in (
@@ -2044,6 +2062,11 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
 
     def _on_probe_open_panes_done(self, mapping: dict[Path, list[PaneRef]]) -> None:
         textual_ui_pane_probe.on_probe_open_panes_done(self, mapping)
+        register_current_tmux_context(
+            self.base_dir,
+            open_profile=str(self.open_mode.get("profile", "")),
+            project_panes=self.open_panes_by_project,
+        )
 
     def _pane_probe_desired_interval_s(self) -> float:
         return textual_ui_pane_probe.pane_probe_desired_interval_s(self)
@@ -3413,7 +3436,10 @@ def run_textual_ui(
         start_new_mode=start_new,
         initial_filter=initial_filter_expr,
     )
-    result = app.run() or ("quit", None, [])
+    try:
+        result = app.run() or ("quit", None, [])
+    finally:
+        unregister_current_tmux_context(base_dir)
     # After the TUI returns the terminal is restored; flush any
     # deferred summary or error captured by the new-project flow so
     # the user actually sees what happened (success or failure).

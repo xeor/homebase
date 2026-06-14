@@ -113,6 +113,21 @@ def test_cmd_cd_spawns_shell_in_project(tmp_path: Path) -> None:
     assert called == [(tmp_path / "foo").resolve()]
 
 
+def test_cmd_open_uses_open_mode_for_project(tmp_path: Path) -> None:
+    from homebase.commands.basic import cmd_open
+
+    (tmp_path / "foo").mkdir()
+    called: list[tuple[Path, Path]] = []
+    rc = cmd_open(
+        tmp_path,
+        "foo",
+        archive_dir_name="_archive",
+        open_with_mode=lambda base, path: (called.append((base, path)), 0)[1],
+    )
+    assert rc == 0
+    assert called == [(tmp_path, (tmp_path / "foo").resolve())]
+
+
 def test_cmd_cd_empty_name_drops_into_base(tmp_path: Path) -> None:
     from homebase.commands.basic import cmd_cd
 

@@ -1,0 +1,41 @@
+[tools]
+python = "3.11"
+uv = "latest"
+
+[tasks.setup]
+description = "Install Homebase deps"
+run = "uv sync"
+
+[tasks.tui]
+description = "Run the Homebase TUI"
+depends = ["setup"]
+run = "uv run b"
+
+[tasks.test]
+description = "Run Homebase tests"
+depends = ["setup"]
+run = "uv run pytest"
+
+[tasks.lint]
+description = "Lint Homebase package and tests"
+depends = ["setup"]
+run = "uv run ruff check src/homebase/ tests/"
+
+[tasks.typecheck]
+description = "Typecheck Homebase package"
+depends = ["setup"]
+run = "uv run mypy src/homebase"
+
+[tasks.imports]
+description = "Check Homebase import layering"
+depends = ["setup"]
+run = "uv run lint-imports"
+
+[tasks.build]
+description = "Build Homebase sdist and wheel"
+depends = ["setup"]
+run = "uv build"
+
+[tasks.qa]
+description = "Run the core Homebase QA checks"
+depends = ["test", "lint", "typecheck", "imports"]

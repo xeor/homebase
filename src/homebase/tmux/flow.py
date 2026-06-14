@@ -4,6 +4,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from typing import Callable
 
 from ..config.prefs import load_open_mode_config
 from ..core import utils as core_utils
@@ -19,6 +20,7 @@ from ..core.models import PaneRef
 from ..core.utils import find_marker_root_upward as _find_marker_root_upward
 from . import commands as tmux_commands
 from . import core as tmux_core
+from .registry import load_active_tmux_context
 
 
 def find_marker_root_upward(path: Path) -> Path | None:
@@ -59,6 +61,13 @@ def _tmux_command_prefix() -> list[str]:
     return tmux_core.tmux_command_prefix(resolve_tmux_bin=_resolve_tmux_bin)
 
 
+def _tmux_command_prefix_for_socket(socket_path: str) -> list[str]:
+    cmd = [_resolve_tmux_bin()]
+    if socket_path:
+        cmd += ["-S", socket_path]
+    return cmd
+
+
 def list_window_ids() -> set[str]:
     return tmux_commands.list_window_ids(tmux=tmux)
 
@@ -74,6 +83,194 @@ def tmux_open_new_tab_with_load_status(path: Path) -> tuple[int, str | None]:
         tmux_run=tmux_run,
         tmux_open_new_tab=tmux_open_new_tab,
     )
+
+
+def _tmux_for_prefix(tmux_command_prefix: Callable[[], list[str]]) -> Callable[..., str]:
+    return lambda *args: core_utils.run_out(*tmux_command_prefix(), *args)
+
+
+def _list_window_ids_for_tmux(tmux_fn: Callable[..., str]) -> set[str]:
+    return tmux_commands.list_window_ids(tmux=tmux_fn)
+
+
+def _load_profile_window_for_tmux(
+    profile: Path,
+    tmux_fn: Callable[..., str],
+) -> tuple[str, str | None]:
+    return tmux_commands.load_profile_window(
+        profile,
+        list_window_ids=lambda: _list_window_ids_for_tmux(tmux_fn),
+    )
+
+
+def _tmux_run_for_prefix(tmux_command_prefix: Callable[[], list[str]]) -> Callable[..., None]:
+    def run(*args: str) -> None:
+        subprocess.run([*tmux_command_prefix(), *args], check=True)
+
+    return run
+
+
+def _tmux_find_pane_for_cwd_for_tmux(
+    target: Path,
+    tmux_fn: Callable[..., str],
+) -> tuple[str, str] | None:
+    return tmux_commands.find_pane_for_cwd(
+        target,
+        tmux_find_panes_for_cwd=lambda path: tmux_commands.find_panes_for_cwd(
+            path,
+            tmux=tmux_fn,
+            is_under=core_utils.is_under,
+            pane_ref_factory=PaneRef,
+        ),
+    )
+
+
+def _tmux_open_new_tab_for_prefix(
+    path: Path,
+    tmux_command_prefix: Callable[[], list[str]],
+) -> int:
+    return tmux_commands.tmux_open_new_tab(
+        path,
+        tmux_command_prefix=tmux_command_prefix,
+    )
+
+
+def _tmux_open_new_tab_with_load_for_prefix(
+    path: Path,
+    tmux_command_prefix: Callable[[], list[str]],
+    tmux_fn: Callable[..., str],
+) -> int:
+    return tmux_commands.open_new_tab_with_load(
+        path,
+        open_new_tab_with_load_status=lambda profile_path: (
+            tmux_commands.open_new_tab_with_load_status(
+                profile_path,
+                load_profile_window=lambda profile: _load_profile_window_for_tmux(
+                    profile,
+                    tmux_fn,
+                ),
+                tmux_run=_tmux_run_for_prefix(tmux_command_prefix),
+                tmux_open_new_tab=lambda new_path: _tmux_open_new_tab_for_prefix(
+                    new_path,
+                    tmux_command_prefix,
+                ),
+            )
+        ),
+    )
+
+
+def _focus_tmux_client_app(tmux_fn: Callable[..., str]) -> None:
+    if sys.platform != "darwin":
+        return
+    try:
+        raw_pid = tmux_fn("display-message", "-p", "#{client_pid}").strip()
+        pid = int(raw_pid)
+    except (subprocess.SubprocessError, OSError, RuntimeError, ValueError):
+        return
+    for candidate in _pid_ancestry(pid):
+        if _focus_macos_app_process(candidate):
+            return
+
+
+def _pid_ancestry(pid: int) -> list[int]:
+    out: list[int] = []
+    seen: set[int] = set()
+    current = pid
+    while current > 1 and current not in seen:
+        seen.add(current)
+        out.append(current)
+        try:
+            proc = subprocess.run(
+                ["ps", "-o", "ppid=", "-p", str(current)],
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                capture_output=True,
+                check=False,
+            )
+            if proc.returncode != 0:
+                break
+            current = int(proc.stdout.strip())
+        except (OSError, ValueError):
+            break
+    return out
+
+
+def _focus_macos_app_process(pid: int) -> bool:
+    script = (
+        'tell application "System Events"\n'
+        f"  set matches to application processes whose unix id is {pid}\n"
+        "  if (count of matches) is 0 then return false\n"
+        "  set frontmost of item 1 of matches to true\n"
+        "  return true\n"
+        "end tell"
+    )
+    try:
+        proc = subprocess.run(
+            ["osascript", "-e", script],
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            capture_output=True,
+            check=False,
+        )
+    except OSError:
+        return False
+    return proc.returncode == 0 and proc.stdout.strip().lower() == "true"
+
+
+def _open_profile_spec(profile: str) -> dict[str, object]:
+    spec = next(
+        (p for p in OPEN_MODE_PROFILES if str(p.get("id")) == profile),
+        None,
+    )
+    return spec or OPEN_MODE_PROFILES[0]
+
+
+def _context_pane_for_project(
+    context: dict[str, object],
+    path: Path,
+) -> dict[str, object] | None:
+    raw = context.get("project_panes", {})
+    if not isinstance(raw, dict):
+        return None
+    try:
+        panes = raw.get(str(path.resolve()), [])
+    except (OSError, RuntimeError, ValueError):
+        panes = raw.get(str(path), [])
+    if not isinstance(panes, list):
+        return None
+    candidates = [pane for pane in panes if isinstance(pane, dict)]
+    if not candidates:
+        return None
+    candidates.sort(
+        key=lambda pane: (
+            0 if bool(pane.get("active", False)) else 1,
+            str(pane.get("target", "")),
+            str(pane.get("pane_id", "")),
+        )
+    )
+    return candidates[0]
+
+
+def _select_context_pane(
+    pane: dict[str, object],
+    tmux_command_prefix: Callable[[], list[str]],
+) -> int:
+    pane_id = str(pane.get("pane_id", "")).strip()
+    target = str(pane.get("target", "")).strip()
+    window_id = target.rsplit(".", 1)[0]
+    if not pane_id or not window_id:
+        return 1
+    p1 = subprocess.run(
+        [*tmux_command_prefix(), "select-window", "-t", window_id],
+        check=False,
+    )
+    p2 = subprocess.run(
+        [*tmux_command_prefix(), "select-pane", "-t", pane_id],
+        check=False,
+    )
+    return 0 if p1.returncode == 0 and p2.returncode == 0 else 1
 
 
 def choose_load_mode(pane_count: int) -> str:
@@ -330,6 +527,63 @@ def tmux_open_new_tab_with_load(path: Path) -> int:
 
 
 def open_with_mode(base_dir: Path, path: Path) -> int:
+    context = None if os.getenv("TMUX") else load_active_tmux_context(base_dir)
+    socket_path = str(context.get("socket_path", "")).strip() if context else ""
+    if socket_path:
+        assert context is not None
+        open_profile = str(context.get("open_profile", "")).strip()
+
+        def tmux_command_prefix() -> list[str]:
+            return _tmux_command_prefix_for_socket(socket_path)
+
+        tmux_fn = _tmux_for_prefix(tmux_command_prefix)
+        def load_context_open_mode(_base_dir: Path) -> dict[str, str]:
+            if open_profile:
+                return {"profile": open_profile}
+            return load_open_mode_config(_base_dir)
+
+        profile = load_context_open_mode(base_dir).get(
+            "profile",
+            str(OPEN_MODE_CONFIG["profile"]),
+        )
+        spec = _open_profile_spec(profile)
+        if bool(spec.get("use_tmux", False)) and bool(spec.get("goto_loaded", False)):
+            pane = _context_pane_for_project(context, path)
+            if pane is not None:
+                rc = _select_context_pane(pane, tmux_command_prefix)
+                if rc == 0:
+                    _focus_tmux_client_app(tmux_fn)
+                return rc
+
+        rc = tmux_commands.open_with_mode(
+            base_dir,
+            path,
+            load_open_mode_config=load_context_open_mode,
+            open_mode_default_profile=str(OPEN_MODE_CONFIG["profile"]),
+            open_mode_profiles=OPEN_MODE_PROFILES,
+            open_shell_in_dir=open_shell_in_dir,
+            tmux_find_pane_for_cwd=lambda target: _tmux_find_pane_for_cwd_for_tmux(
+                target,
+                tmux_fn,
+            ),
+            tmux_command_prefix=tmux_command_prefix,
+            tmux_open_new_tab_with_load=lambda target: (
+                _tmux_open_new_tab_with_load_for_prefix(
+                    target,
+                    tmux_command_prefix,
+                    tmux_fn,
+                )
+            ),
+            tmux_open_new_tab=lambda target: _tmux_open_new_tab_for_prefix(
+                target,
+                tmux_command_prefix,
+            ),
+            tmux_available=lambda: True,
+        )
+        if rc == 0:
+            _focus_tmux_client_app(tmux_fn)
+        return rc
+
     return tmux_commands.open_with_mode(
         base_dir,
         path,
@@ -342,4 +596,3 @@ def open_with_mode(base_dir: Path, path: Path) -> int:
         tmux_open_new_tab_with_load=tmux_open_new_tab_with_load,
         tmux_open_new_tab=tmux_open_new_tab,
     )
-

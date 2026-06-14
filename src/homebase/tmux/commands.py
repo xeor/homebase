@@ -123,8 +123,10 @@ def find_panes_for_cwd(
         )
     except (subprocess.SubprocessError, OSError, ValueError):
         return []
-    rows: list[Any] = []
+    cwd_rows: list[Any] = []
+    window_rows: list[Any] = []
     target_res = target.resolve()
+    target_name = target_res.name
     for line in out.splitlines():
         parts = line.split("\t", 5)
         if len(parts) != 6:
@@ -134,18 +136,27 @@ def find_panes_for_cwd(
             cwd = Path(cwd_text).resolve()
         except (OSError, ValueError):
             continue
+        pane = pane_ref_factory(
+            pane_id=pane_id.strip(),
+            target=target_text.strip(),
+            window_name=window_name.strip(),
+            command=command.strip(),
+            cwd=cwd,
+            active=(active_raw.strip() == "1"),
+        )
         if cwd == target_res or is_under(cwd, target_res):
-            rows.append(
-                pane_ref_factory(
-                    pane_id=pane_id.strip(),
-                    target=target_text.strip(),
-                    window_name=window_name.strip(),
-                    command=command.strip(),
-                    cwd=cwd,
-                    active=(active_raw.strip() == "1"),
-                )
-            )
-    rows.sort(key=lambda pane: (0 if pane.active else 1, pane.target, pane.pane_id))
+            cwd_rows.append(pane)
+        elif window_name.strip() == target_name:
+            window_rows.append(pane)
+    rows = cwd_rows or window_rows
+    rows.sort(
+        key=lambda pane: (
+            0 if pane.active else 1,
+            pane.target.rsplit(".", 1)[0],
+            pane.target,
+            pane.pane_id,
+        )
+    )
     return rows
 
 
@@ -206,6 +217,7 @@ def open_with_mode(
     tmux_command_prefix: Callable[[], list[str]],
     tmux_open_new_tab_with_load: Callable[[Path], int],
     tmux_open_new_tab: Callable[[Path], int],
+    tmux_available: Callable[[], bool] | None = None,
 ) -> int:
     conf = load_open_mode_config(base_dir)
     profile = str(conf.get("profile", open_mode_default_profile))
@@ -221,7 +233,8 @@ def open_with_mode(
     if not use_tmux:
         return open_shell_in_dir(path)
 
-    if not os.getenv("TMUX"):
+    is_tmux_available = tmux_available or (lambda: bool(os.getenv("TMUX")))
+    if not is_tmux_available():
         if fallback_cd:
             return open_shell_in_dir(path)
         print("open mode requires tmux session", file=sys.stderr)

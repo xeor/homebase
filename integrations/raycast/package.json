@@ -7,9 +7,11 @@
   "license": "MIT",
   "scripts": {
     "build": "ray build -e dist",
+    "check": "npm run lint && npm run build",
     "dev": "ray develop",
     "lint": "ray lint",
-    "fix-lint": "ray lint --fix"
+    "fix-lint": "ray lint --fix",
+    "ray": "ray"
   },
   "dependencies": {
     "@raycast/api": "latest"

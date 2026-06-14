@@ -114,6 +114,52 @@ def test_find_panes_for_cwd_matches_and_sorts(tmp_path: Path) -> None:
     assert [p.pane_id for p in out] == ["%1", "%2"]
 
 
+def test_find_panes_for_cwd_falls_back_to_window_name(tmp_path: Path) -> None:
+    target = tmp_path / "proj"
+    target.mkdir(parents=True)
+    other = tmp_path / "other"
+    other.mkdir()
+
+    raw = "\n".join(
+        [
+            f"%1\ts:1.0\tproj\tbash\t{other}\t1",
+            f"%2\ts:2.0\tother\tbash\t{other}\t1",
+        ]
+    )
+
+    out = tmux_commands.find_panes_for_cwd(
+        target,
+        tmux=lambda *_args: raw,
+        is_under=lambda path, root: str(path).startswith(str(root)),
+        pane_ref_factory=lambda **kwargs: types.SimpleNamespace(**kwargs),
+    )
+
+    assert [p.pane_id for p in out] == ["%1"]
+
+
+def test_find_panes_for_cwd_prefers_cwd_over_window_name(tmp_path: Path) -> None:
+    target = tmp_path / "proj"
+    target.mkdir(parents=True)
+    other = tmp_path / "other"
+    other.mkdir()
+
+    raw = "\n".join(
+        [
+            f"%1\ts:1.0\tproj\tbash\t{other}\t1",
+            f"%2\ts:2.0\tother\tbash\t{target}\t0",
+        ]
+    )
+
+    out = tmux_commands.find_panes_for_cwd(
+        target,
+        tmux=lambda *_args: raw,
+        is_under=lambda path, root: str(path).startswith(str(root)),
+        pane_ref_factory=lambda **kwargs: types.SimpleNamespace(**kwargs),
+    )
+
+    assert [p.pane_id for p in out] == ["%2"]
+
+
 def test_open_with_mode_returns_shell_when_not_tmux(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.delenv("TMUX", raising=False)
     opened: list[Path] = []

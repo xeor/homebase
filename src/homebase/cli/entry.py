@@ -34,6 +34,7 @@ from ..commands.setup import (
     cmd_cd,
     cmd_json,
     cmd_ls,
+    cmd_open,
     cmd_recent,
     cmd_setup,
     cmd_tags_ls,
@@ -478,6 +479,7 @@ def main(argv: list[str]) -> int:
             cmd_utils=cmd_utils,
             cmd_archive_mv=cmd_archive_mv,
             cmd_cd=cmd_cd,
+            cmd_open=cmd_open,
             cmd_rm=lambda path, force_outside_base, force=False: cmd_rm(
                 path,
                 force_outside_base=force_outside_base,

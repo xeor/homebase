@@ -83,9 +83,13 @@ layers = [
   "homebase.ui",
   "homebase.commands",
   "homebase.workspace",
+  "homebase.hooks",
   "homebase.tmux | homebase.notes | homebase.filter | homebase.archive | homebase.metadata | homebase.cache",
   "homebase.config",
   "homebase.core",
+]
+ignore_imports = [
+  "homebase.hooks.bundled.post._tag_symlink_sync_common -> homebase.workspace.tag_sync",
 ]
 
 [tool.hatch.build.targets.wheel]

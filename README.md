@@ -85,6 +85,32 @@ Do not treat integrations as Homebase internals. Main `src/homebase/`
 code must not import from `integrations/`, and integration dependencies
 must stay in their own manifests.
 
+See [`docs/integrations.md`](docs/integrations.md) for the single
+top-level integration overview and per-project commands.
+
+## Mise tasks
+
+Root tasks cover Homebase only:
+
+```sh
+mise run setup
+mise run tui
+mise run test
+mise run lint
+mise run typecheck
+mise run imports
+mise run build
+mise run qa
+```
+
+Integration task manifests are project-local. Mise also shows inherited
+root tasks while the integration lives inside this monorepo.
+
+```sh
+cd integrations/raycast && mise tasks ls
+cd integrations/browser-tab-sync && mise tasks ls
+```
+
 ## Common Commands
 
 ```sh
@@ -703,6 +729,7 @@ Bump `version` in `pyproject.toml` before each release.
 
 ```
 pyproject.toml      # build config (hatchling), deps, scripts, ruff, pytest
+mise.toml           # Homebase-only task runner config
 src/homebase/       # package
 tests/              # pytest scaffold
 docs/               # technical reference docs

@@ -339,6 +339,48 @@ def cmd_recent(
     return 0
 
 
+def _resolve_project_target(
+    base_dir: Path,
+    name: str,
+    *,
+    archive_dir_name: str,
+) -> tuple[Path | None, int]:
+    target_name = (name or "").strip()
+    if not target_name:
+        return base_dir, 0
+    candidate = (base_dir / target_name).resolve()
+    base_resolved = base_dir.resolve()
+    try:
+        rel = candidate.relative_to(base_resolved)
+    except ValueError:
+        print(f"refusing to cd outside base: {candidate}", file=sys.stderr)
+        return None, 2
+    parts = rel.parts
+    if not parts:
+        # User asked for base itself via something like ``b cd .``.
+        return candidate, 0
+    first = parts[0]
+    # ``_archive``, ``_tags``, and any other underscore / dot dir
+    # under base is bookkeeping, not a project. Block the jump so
+    # ``b cd _archive`` doesn't silently land in the archive root.
+    if first.startswith("_") or first.startswith("."):
+        print(
+            f"refusing to cd into a reserved/hidden dir: {first}",
+            file=sys.stderr,
+        )
+        return None, 2
+    if first == archive_dir_name:
+        print(
+            f"refusing to cd into the archive (use `b archive ls`): {first}",
+            file=sys.stderr,
+        )
+        return None, 2
+    if not candidate.is_dir():
+        print(f"no such project: {target_name}", file=sys.stderr)
+        return None, 2
+    return candidate, 0
+
+
 def cmd_cd(
     base_dir: Path,
     name: str,
@@ -352,40 +394,31 @@ def cmd_cd(
     (non-archived) projects.
 
     Empty ``<name>`` is treated as "drop me into base itself"."""
-    target_name = (name or "").strip()
-    if not target_name:
-        return open_shell_in_dir(base_dir)
-    candidate = (base_dir / target_name).resolve()
-    base_resolved = base_dir.resolve()
-    try:
-        rel = candidate.relative_to(base_resolved)
-    except ValueError:
-        print(f"refusing to cd outside base: {candidate}", file=sys.stderr)
-        return 2
-    parts = rel.parts
-    if not parts:
-        # User asked for base itself via something like ``b cd .``.
-        return open_shell_in_dir(candidate)
-    first = parts[0]
-    # ``_archive``, ``_tags``, and any other underscore / dot dir
-    # under base is bookkeeping, not a project. Block the jump so
-    # ``b cd _archive`` doesn't silently land in the archive root.
-    if first.startswith("_") or first.startswith("."):
-        print(
-            f"refusing to cd into a reserved/hidden dir: {first}",
-            file=sys.stderr,
-        )
-        return 2
-    if first == archive_dir_name:
-        print(
-            f"refusing to cd into the archive (use `b archive ls`): {first}",
-            file=sys.stderr,
-        )
-        return 2
-    if not candidate.is_dir():
-        print(f"no such project: {target_name}", file=sys.stderr)
-        return 2
+    candidate, rc = _resolve_project_target(
+        base_dir,
+        name,
+        archive_dir_name=archive_dir_name,
+    )
+    if candidate is None:
+        return rc
     return open_shell_in_dir(candidate)
+
+
+def cmd_open(
+    base_dir: Path,
+    name: str,
+    *,
+    archive_dir_name: str,
+    open_with_mode: Callable[[Path, Path], int],
+) -> int:
+    candidate, rc = _resolve_project_target(
+        base_dir,
+        name,
+        archive_dir_name=archive_dir_name,
+    )
+    if candidate is None:
+        return rc
+    return open_with_mode(base_dir, candidate)
 
 
 def _expand_known_names(

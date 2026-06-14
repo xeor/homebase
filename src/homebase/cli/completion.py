@@ -15,6 +15,7 @@ _TOP_LEVEL_COMMANDS = [
     "utils",
     "a",
     "cd",
+    "open",
     "rm",
     "fix",
     "archive",
@@ -324,7 +325,7 @@ def _subcommand_candidates(
         return _new_candidates(prev, base_dir)
     if cmd in _SIMPLE_SUB_CANDIDATES:
         return list(_SIMPLE_SUB_CANDIDATES[cmd])
-    if cmd == "cd":
+    if cmd in {"cd", "open"}:
         return _cd_candidates(words, cword, base_dir=base_dir)
     if cmd == "rm":
         return [*_active_project_names(base_dir), "--force", "--force-outside-base"]

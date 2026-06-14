@@ -15,6 +15,9 @@ of the main `homebase` package.
   root `pyproject.toml` or root `uv.lock`.
 - Keep build, lint, test, and release commands project-local. The root
   QA pipeline covers Homebase only.
+- Mise may show inherited root tasks inside this monorepo. Do not rely
+  on them for integration work; each integration must keep complete
+  local manifests and commands.
 - When changing an integration, use that integration's own docs,
   manifest, lockfile, and nested `AGENTS.md` rules.
 

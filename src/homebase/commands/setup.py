@@ -238,6 +238,18 @@ def cmd_cd(base_dir: Path, name: str) -> int:
     )
 
 
+def cmd_open(base_dir: Path, name: str) -> int:
+    from ..core.constants import ARCHIVE_DIR_NAME
+    from ..tmux.flow import open_with_mode
+
+    return commands_basic.cmd_open(
+        base_dir,
+        name,
+        archive_dir_name=ARCHIVE_DIR_NAME,
+        open_with_mode=open_with_mode,
+    )
+
+
 def _scan_nested_markers_all(
     base_dir: Path,
 ) -> tuple[dict[str, int], list[dict[str, object]]]:

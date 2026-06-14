@@ -112,6 +112,13 @@ def _dispatch_cd(ns: Any, base_dir: Path, cmd_cd: Callable[[Path, str], int]) ->
     return cmd_cd(base_dir, name)
 
 
+def _dispatch_open(ns: Any, base_dir: Path, cmd_open: Callable[[Path, str], int]) -> int:
+    raw = getattr(ns, "name", []) or []
+    args = [raw] if isinstance(raw, str) else list(raw)
+    name = str(args[-1]) if args else ""
+    return cmd_open(base_dir, name)
+
+
 def _dispatch_rm(ns: Any, cmd_rm: Callable[..., int]) -> int:
     return cmd_rm(
         str(ns.path),
@@ -282,6 +289,7 @@ def _build_dispatch_table(
         "utils": lambda: handlers["cmd_utils"](base_dir, str(ns.utils_subcommand)),
         "a": lambda: _dispatch_archive_mv(ns, base_dir, handlers["cmd_archive_mv"]),
         "cd": lambda: _dispatch_cd(ns, base_dir, handlers["cmd_cd"]),
+        "open": lambda: _dispatch_open(ns, base_dir, handlers["cmd_open"]),
         "rm": lambda: _dispatch_rm(ns, handlers["cmd_rm"]),
         "deworktree": lambda: handlers["cmd_deworktree"](
             base_dir, str(getattr(ns, "path", ".") or ".")
@@ -334,6 +342,7 @@ def dispatch_command(
     cmd_utils: Callable[[Path, str], int],
     cmd_archive_mv: Callable[..., int],
     cmd_cd: Callable[[Path, str], int],
+    cmd_open: Callable[[Path, str], int],
     cmd_rm: Callable[..., int],
     cmd_fix: Callable[..., int],
     cmd_deworktree: Callable[[Path, str], int],
@@ -368,6 +377,7 @@ def dispatch_command(
         "cmd_utils": cmd_utils,
         "cmd_archive_mv": cmd_archive_mv,
         "cmd_cd": cmd_cd,
+        "cmd_open": cmd_open,
         "cmd_rm": cmd_rm,
         "cmd_fix": cmd_fix,
         "cmd_deworktree": cmd_deworktree,

@@ -274,6 +274,21 @@ def build_cli_parser() -> argparse.ArgumentParser:
         ),
     )
 
+    p_open = sub.add_parser(
+        "open",
+        help="open a project using the configured TUI Enter behavior",
+    )
+    p_open.add_argument(
+        "name",
+        nargs="*",
+        default=[],
+        help=(
+            "project name under base. Filter tokens (e.g. '#infra') may "
+            "precede the name to narrow tab completion; they are ignored "
+            "at execution and only the last positional is used as the name."
+        ),
+    )
+
     p_deworktree = sub.add_parser(
         "deworktree",
         help="turn a worktree project into a standalone clone",
