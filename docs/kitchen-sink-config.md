@@ -579,7 +579,7 @@ file_view_exclude_patterns:
   - ".git/**"
 
 # Action registry.
-# - Built-ins can override only label/confirm.
+# - Built-ins can override only label/confirm/raycast.
 # - Custom actions require kind and kind-specific fields.
 actions:
   # Built-in override.
@@ -587,6 +587,10 @@ actions:
   delete:
     label: Delete forever
     confirm: "Drop {{ count }} project(s) under {{ base_dir }}?"
+  notes_create:
+    raycast: true
+  notes_open:
+    raycast: true
 
   # Custom shell action, one dispatch with list variables.
   open_item_in_editor:
@@ -594,6 +598,9 @@ actions:
     scope: target
     multi: joined
     command: "$EDITOR {{ paths_q }}"
+    raycast:
+      enabled: true
+      title: Open in editor
 
   # Custom shell action, one dispatch per selected row.
   open_in_daisydisk:
@@ -601,12 +608,38 @@ actions:
     scope: target
     multi: per_row
     command: "open -n -a DaisyDisk {{ path_q }}"
+    raycast:
+      enabled: true
+      title: Open in DaisyDisk
+
+  # Robust Finder example: pass the path as argv into AppleScript so
+  # spaces/quotes in project paths do not break the script.
+  open_in_new_finder_window:
+    kind: shell
+    scope: target
+    multi: per_row
+    command: >
+      /usr/bin/osascript
+      -e 'on run argv'
+      -e 'set targetPath to POSIX file (item 1 of argv) as alias'
+      -e 'tell application "Finder"'
+      -e 'activate'
+      -e 'make new Finder window to targetPath'
+      -e 'end tell'
+      -e 'end run'
+      {{ path_q }}
+    raycast:
+      enabled: true
+      title: Open in New Finder Window
 
   # Workspace-scoped shell action.
   open_base_in_editor:
     kind: shell
     scope: workspace
     command: "$EDITOR {{ base_dir_q }}"
+    raycast:
+      enabled: true
+      title: Open base in editor
 
   # filepicker: list command -> choose one -> final command with selection vars.
   pick_markdown:

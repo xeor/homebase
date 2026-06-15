@@ -40,6 +40,16 @@ type Project = {
   title: string;
 };
 
+type ProjectAction = {
+  id: string;
+  title: string;
+};
+
+type ProjectActionSet = {
+  project: string;
+  actions: ProjectAction[];
+};
+
 type ListState = {
   error?: string;
   isLoading: boolean;
@@ -76,6 +86,57 @@ function parseProjects(output: string): Project[] {
     .map((line) => line.trim())
     .filter(Boolean)
     .map((title, index) => ({ id: `${index}:${title}`, title }));
+}
+
+function parseProjectActions(value: unknown): ProjectAction[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map((item) => {
+      if (
+        typeof item === "object" &&
+        item !== null &&
+        "id" in item &&
+        "title" in item
+      ) {
+        return {
+          id: String(item.id),
+          title: String(item.title),
+        };
+      }
+
+      return undefined;
+    })
+    .filter((item): item is ProjectAction => Boolean(item?.id && item.title));
+}
+
+function parseProjectActionSets(output: string): ProjectActionSet[] {
+  const parsed = JSON.parse(output) as unknown;
+  if (!Array.isArray(parsed)) {
+    return [];
+  }
+
+  return parsed
+    .map((item) => {
+      if (
+        typeof item === "object" &&
+        item !== null &&
+        "project" in item &&
+        "actions" in item
+      ) {
+        return {
+          project: String(item.project),
+          actions: parseProjectActions(item.actions),
+        };
+      }
+
+      return undefined;
+    })
+    .filter((item): item is ProjectActionSet =>
+      Boolean(item?.project && item.actions),
+    );
 }
 
 function runB(config: Config, args: string[]): Promise<string> {
@@ -117,19 +178,116 @@ async function runAction(title: string, action: () => Promise<string>) {
   }
 }
 
+function ProjectListItem({
+  config,
+  onRefresh,
+  project,
+  projectActions,
+}: {
+  config: Config;
+  onRefresh: () => void;
+  project: Project;
+  projectActions: ProjectAction[];
+}) {
+  const visibleActions = projectActions.filter(
+    (action) => action.id !== "open_selected",
+  );
+
+  return (
+    <List.Item
+      key={project.id}
+      icon={Icon.Folder}
+      title={project.title}
+      actions={
+        <ActionPanel>
+          <ActionPanel.Section>
+            <Action
+              icon={Icon.Terminal}
+              title="Open"
+              onAction={() =>
+                runAction(`b open ${project.title}`, () =>
+                  runB(config, ["open", project.title]),
+                )
+              }
+            />
+            {visibleActions.map((action) => (
+              <Action
+                key={action.id}
+                icon={Icon.Gear}
+                title={action.title}
+                onAction={() =>
+                  runAction(action.title, () =>
+                    runB(config, [
+                      "integration",
+                      "raycast",
+                      "run",
+                      action.id,
+                      project.title,
+                    ]),
+                  )
+                }
+              />
+            ))}
+          </ActionPanel.Section>
+          <Action
+            icon={Icon.ArrowClockwise}
+            title="Refresh"
+            shortcut={{ modifiers: ["cmd"], key: "r" }}
+            onAction={onRefresh}
+          />
+        </ActionPanel>
+      }
+    />
+  );
+}
+
 export default function Command() {
   const config = useMemo(getConfig, []);
   const requestId = useRef(0);
   const [searchText, setSearchText] = useState("");
+  const [actionsByProject, setActionsByProject] = useState<
+    Record<string, ProjectAction[]>
+  >({});
   const [state, setState] = useState<ListState>({
     isLoading: true,
     projects: [],
   });
 
+  const loadActionsForProjects = useCallback(
+    async (id: number, projects: Project[]) => {
+      try {
+        const output = await runB(config, [
+          "integration",
+          "raycast",
+          "actions",
+        ]);
+        if (id !== requestId.current) {
+          return;
+        }
+
+        const actionSets = parseProjectActionSets(output);
+        const actionsByName = new Map(
+          actionSets.map((item) => [item.project, item.actions]),
+        );
+        const entries = projects.map(
+          (project) =>
+            [project.id, actionsByName.get(project.title) || []] as const,
+        );
+        setActionsByProject(Object.fromEntries(entries));
+      } catch {
+        if (id === requestId.current) {
+          setActionsByProject({});
+        }
+      }
+    },
+    [config],
+  );
+
   const loadProjects = useCallback(
     async (filterExpr: string) => {
       const id = requestId.current + 1;
       requestId.current = id;
+      setActionsByProject({});
       setState((current) => ({
         ...current,
         error: undefined,
@@ -147,7 +305,9 @@ export default function Command() {
         if (id !== requestId.current) {
           return;
         }
-        setState({ isLoading: false, projects: parseProjects(output) });
+        const projects = parseProjects(output);
+        setState({ isLoading: false, projects });
+        void loadActionsForProjects(id, projects);
       } catch (error) {
         if (id !== requestId.current) {
           return;
@@ -161,7 +321,7 @@ export default function Command() {
         });
       }
     },
-    [config],
+    [config, loadActionsForProjects],
   );
 
   useEffect(() => {
@@ -205,29 +365,12 @@ export default function Command() {
         />
       ) : null}
       {state.projects.map((project) => (
-        <List.Item
+        <ProjectListItem
           key={project.id}
-          icon={Icon.Folder}
-          title={project.title}
-          actions={
-            <ActionPanel>
-              <Action
-                icon={Icon.Terminal}
-                title="Open"
-                onAction={() =>
-                  runAction(`b open ${project.title}`, () =>
-                    runB(config, ["open", project.title]),
-                  )
-                }
-              />
-              <Action
-                icon={Icon.ArrowClockwise}
-                title="Refresh"
-                shortcut={{ modifiers: ["cmd"], key: "r" }}
-                onAction={() => loadProjects(searchText)}
-              />
-            </ActionPanel>
-          }
+          config={config}
+          onRefresh={() => loadProjects(searchText)}
+          project={project}
+          projectActions={actionsByProject[project.id] || []}
         />
       ))}
     </List>

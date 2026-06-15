@@ -64,11 +64,41 @@ mise run ray -- help
 Prettier. Raycast manifest/schema validation may require network access
 to `www.raycast.com`.
 
+## Homebase contract
+
+- Project search uses `b ls <filter expression>`.
+- Enter uses `b open <selection>`, so Homebase owns tmux/window behavior.
+- Cmd-K actions come from `b integration raycast actions`.
+- Cmd-K action execution uses `b integration raycast run <action> <selection>`.
+
+Enable secondary Raycast actions in Homebase action config:
+
+```yaml
+actions:
+  notes_create:
+    raycast: true
+  notes_open:
+    raycast: true
+
+  open_item_in_codium:
+    kind: shell
+    scope: target
+    multi: joined
+    command: 'codium {{ paths_q }}'
+    raycast:
+      enabled: true
+      title: Open in Codium
+```
+
+Supported Raycast actions are built-ins `open_selected`, `notes_create`,
+`notes_open`, plus custom `shell` actions with `target` or `workspace`
+scope.
+
 ## Commands
 
-- `Projects`: fuzzy-searches `b ls`
-- `Enter`: `b cd {selection}`
-- Secondary action: `echo {selection}`
+- `Projects`: searches `b ls` with Homebase filter syntax
+- `Enter`: `b open {selection}`
+- `Cmd-K`: enabled Homebase Raycast actions
 
 ## Preferences
 

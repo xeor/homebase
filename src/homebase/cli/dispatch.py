@@ -119,6 +119,32 @@ def _dispatch_open(ns: Any, base_dir: Path, cmd_open: Callable[[Path, str], int]
     return cmd_open(base_dir, name)
 
 
+def _dispatch_integration(
+    ns: Any,
+    base_dir: Path,
+    cmd_raycast: Callable[..., int],
+) -> int:
+    integration = str(getattr(ns, "integration_subcommand", "") or "")
+    if integration != "raycast":
+        return 1
+    subcommand = str(getattr(ns, "raycast_subcommand", "") or "")
+    if subcommand == "actions":
+        return cmd_raycast(
+            base_dir,
+            "actions",
+            str(getattr(ns, "project", "") or ""),
+            "",
+        )
+    if subcommand == "run":
+        return cmd_raycast(
+            base_dir,
+            "run",
+            str(getattr(ns, "project", "") or ""),
+            str(getattr(ns, "action_id", "") or ""),
+        )
+    return 1
+
+
 def _dispatch_rm(ns: Any, cmd_rm: Callable[..., int]) -> int:
     return cmd_rm(
         str(ns.path),
@@ -290,6 +316,9 @@ def _build_dispatch_table(
         "a": lambda: _dispatch_archive_mv(ns, base_dir, handlers["cmd_archive_mv"]),
         "cd": lambda: _dispatch_cd(ns, base_dir, handlers["cmd_cd"]),
         "open": lambda: _dispatch_open(ns, base_dir, handlers["cmd_open"]),
+        "integration": lambda: _dispatch_integration(
+            ns, base_dir, handlers["cmd_raycast"]
+        ),
         "rm": lambda: _dispatch_rm(ns, handlers["cmd_rm"]),
         "deworktree": lambda: handlers["cmd_deworktree"](
             base_dir, str(getattr(ns, "path", ".") or ".")
@@ -343,6 +372,7 @@ def dispatch_command(
     cmd_archive_mv: Callable[..., int],
     cmd_cd: Callable[[Path, str], int],
     cmd_open: Callable[[Path, str], int],
+    cmd_raycast: Callable[..., int],
     cmd_rm: Callable[..., int],
     cmd_fix: Callable[..., int],
     cmd_deworktree: Callable[[Path, str], int],
@@ -378,6 +408,7 @@ def dispatch_command(
         "cmd_archive_mv": cmd_archive_mv,
         "cmd_cd": cmd_cd,
         "cmd_open": cmd_open,
+        "cmd_raycast": cmd_raycast,
         "cmd_rm": cmd_rm,
         "cmd_fix": cmd_fix,
         "cmd_deworktree": cmd_deworktree,

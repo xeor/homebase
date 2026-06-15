@@ -19,6 +19,7 @@ Allowed on all actions:
 |---|---|---|
 | `label` | str | Display label |
 | `confirm` | bool/str | Custom actions: `true`/`false`/string. Built-ins: string only |
+| `raycast` | bool/map | Opt into Raycast Cmd-K actions. `true` or `{ enabled: true, title: "..." }` |
 
 Custom-only fields:
 
@@ -143,6 +144,35 @@ Validation rules:
 
 - Unknown/unavailable variables fail config load.
 - Variables are validated against action scope + dispatch mode.
+
+## Raycast Integration
+
+Raycast only exposes actions that opt in with `raycast`.
+
+```yaml
+actions:
+  notes_create:
+    raycast: true
+  notes_open:
+    raycast: true
+
+  open_item_in_codium:
+    kind: shell
+    scope: target
+    multi: joined
+    command: 'codium {{ paths_q }}'
+    raycast:
+      enabled: true
+      title: Open in Codium
+```
+
+Supported Raycast actions:
+
+- Built-ins: `open_selected`, `notes_create`, `notes_open`
+- Custom shell actions with `scope: target` or `scope: workspace`
+
+Notes are contextual. Missing note file exposes `notes_create` if enabled;
+existing note file exposes `notes_open` if enabled.
 
 ## Hotbar and Keys
 

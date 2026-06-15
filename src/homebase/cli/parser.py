@@ -289,6 +289,28 @@ def build_cli_parser() -> argparse.ArgumentParser:
         ),
     )
 
+    p_integration = sub.add_parser(
+        "integration",
+        help="machine interfaces for optional companion tools",
+    )
+    integration_sub = p_integration.add_subparsers(dest="integration_subcommand")
+    p_raycast = integration_sub.add_parser(
+        "raycast",
+        help="machine interface for the Raycast extension",
+    )
+    raycast_sub = p_raycast.add_subparsers(dest="raycast_subcommand")
+    p_raycast_actions = raycast_sub.add_parser(
+        "actions",
+        help="emit Raycast-supported actions for a project as JSON",
+    )
+    p_raycast_actions.add_argument("project", nargs="?", default="")
+    p_raycast_run = raycast_sub.add_parser(
+        "run",
+        help="run a Raycast-supported action for a project",
+    )
+    p_raycast_run.add_argument("action_id")
+    p_raycast_run.add_argument("project", nargs="?", default="")
+
     p_deworktree = sub.add_parser(
         "deworktree",
         help="turn a worktree project into a standalone clone",

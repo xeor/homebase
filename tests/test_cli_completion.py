@@ -99,6 +99,15 @@ def test_completion_includes_cd() -> None:
     assert "cd" in out
 
 
+def test_completion_includes_integration_raycast() -> None:
+    out = cli_completion.completion_candidates(["integration", ""], 2, base_dir=Path("."))
+    assert out == ["raycast"]
+    out = cli_completion.completion_candidates(
+        ["integration", "raycast", ""], 3, base_dir=Path(".")
+    )
+    assert out == ["actions", "run"]
+
+
 def test_completion_cd_lists_active_projects(tmp_path: Path) -> None:
     """``b cd <tab>`` must show non-archived, non-hidden project
     directories under base — and NOT ``_archive``, ``_tags``, dotfiles,

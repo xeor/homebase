@@ -73,9 +73,10 @@ this repository so they can share Homebase context during development,
 but they are optional and are not part of the main `homebase` package,
 runtime dependencies, build, or QA pipeline.
 
-- `integrations/raycast/`: Raycast extension that shells out to `b ls`
-  and `b cd` for project search/opening. It has its own `package.json`
-  and Raycast build/lint commands.
+- `integrations/raycast/`: Raycast extension that shells out to `b ls`,
+  `b open`, and `b integration raycast ...` for project search/opening
+  and enabled action dispatch. It has its own `package.json` and
+  Raycast build/lint commands.
 - `integrations/browser-tab-sync/`: browser tab-group desired-state
   tool. It has a standalone Python CLI/native host under `cli/`, a
   standalone WXT browser extension under `extension/`, and its own
@@ -653,6 +654,15 @@ actions:
     scope: target
     multi: joined
     command: 'codium {{ paths_q }}'
+    raycast:
+      enabled: true
+      title: Open in Codium
+
+  notes_create:
+    raycast: true
+
+  notes_open:
+    raycast: true
 
   open_in_daisydisk:
     kind: shell

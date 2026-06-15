@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
 from homebase.ui.side import settings as settings_panel
 
@@ -49,3 +50,24 @@ def test_handle_settings_table_key_global_opens_editor_and_reloads(tmp_path: Pat
     assert handled is True
     assert app.opened == tmp_path / ".homebase" / "config.yaml"
     assert app.status.startswith("global config reloaded")
+
+
+def test_global_config_status_text_uses_current_context_shape(tmp_path: Path) -> None:
+    app = SimpleNamespace(
+        ctx=SimpleNamespace(
+            archive_tz_name="UTC",
+            named_filters={"mine": "#mine"},
+            saved_filter_queries=["#mine"],
+            suffixes=["tmp", "old"],
+            favorites=[{"id": "fav_open"}],
+        ),
+        open_mode={"profile": "tmux"},
+        custom_actions=[object(), object()],
+        custom_hotkeys=[{"id": "fav_open"}, {"id": "fav_notes"}],
+        _esc=lambda value: str(value),
+    )
+
+    text = settings_panel.global_config_status_text(app, base_dir=tmp_path)
+
+    assert "[cyan]custom actions[/]: 2" in text
+    assert "[cyan]key bindings[/]: 2" in text

@@ -114,11 +114,11 @@ def _init_builtin_actions(builtins: dict[str, BuiltinActionMeta]) -> dict[str, A
 
 
 def _apply_builtin_override(existing: Action, aid: str, item: dict) -> Action:
-    allowed_keys = {"label", "confirm"}
+    allowed_keys = {"label", "confirm", "raycast"}
     extra = sorted(set(item) - allowed_keys)
     if extra:
         raise ValueError(
-            f"{aid!r} is built-in; only `label` and `confirm` are overridable"
+            f"{aid!r} is built-in; only `label`, `confirm`, and `raycast` are overridable"
         )
     if "confirm" in item and not isinstance(item.get("confirm"), str):
         raise ValueError(f"{aid!r} built-in `confirm` must be a string")
@@ -135,7 +135,23 @@ def _apply_builtin_override(existing: Action, aid: str, item: dict) -> Action:
         hidden=existing.hidden,
         view_scope=existing.view_scope,
         source="overridden",
+        raycast=_parse_raycast_action_config(item.get("raycast")),
     )
+
+
+def _parse_raycast_action_config(raw: object) -> dict[str, object] | None:
+    if raw in (None, "", False):
+        return None
+    if raw is True:
+        return {"enabled": True}
+    if not isinstance(raw, dict):
+        raise ValueError("action `raycast` must be a map or boolean")
+    enabled = bool(raw.get("enabled", False))
+    out: dict[str, object] = {"enabled": enabled}
+    title = str(raw.get("title", "")).strip()
+    if title:
+        out["title"] = title
+    return out
 
 
 def _parse_action_view_scope(raw: object) -> tuple[str, ...]:
@@ -246,6 +262,7 @@ def _parse_action_definition(
         hidden=hidden,
         view_scope=view_scope,
         source="config",
+        raycast=_parse_raycast_action_config(item.get("raycast")),
     )
 
 

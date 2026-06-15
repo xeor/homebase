@@ -20,6 +20,7 @@ _TOP_LEVEL_COMMANDS = [
     "fix",
     "archive",
     "tmux",
+    "integration",
     "benchmark",
     "test",
     "example",
@@ -277,6 +278,14 @@ def _tmux_candidates(words: list[str], cword: int) -> list[str]:
     return []
 
 
+def _integration_candidates(words: list[str], cword: int) -> list[str]:
+    if cword == 2:
+        return ["raycast"]
+    if len(words) >= 2 and words[1] == "raycast":
+        return ["actions", "run"]
+    return []
+
+
 def _benchmark_candidates(words: list[str], cword: int) -> list[str]:
     if cword == 2:
         return ["run", "results"]
@@ -309,6 +318,28 @@ def _example_candidates(
     return []
 
 
+def _secondary_subcommand_candidates(
+    cmd: str,
+    words: list[str],
+    cword: int,
+    prev: str,
+    *,
+    cwd: Path,
+    token: str,
+) -> list[str]:
+    if cmd == "tmux":
+        return _tmux_candidates(words, cword)
+    if cmd == "integration":
+        return _integration_candidates(words, cword)
+    if cmd == "benchmark":
+        return _benchmark_candidates(words, cword)
+    if cmd == "test":
+        return _test_candidates(words, cword, prev)
+    if cmd == "example":
+        return _example_candidates(words, cword, prev, cwd=cwd, token=token)
+    return []
+
+
 def _subcommand_candidates(
     cmd: str,
     words: list[str],
@@ -331,15 +362,14 @@ def _subcommand_candidates(
         return [*_active_project_names(base_dir), "--force", "--force-outside-base"]
     if cmd == "fix":
         return [*_dir_candidates(token, cwd), *_FIX_FLAGS]
-    if cmd == "tmux":
-        return _tmux_candidates(words, cword)
-    if cmd == "benchmark":
-        return _benchmark_candidates(words, cword)
-    if cmd == "test":
-        return _test_candidates(words, cword, prev)
-    if cmd == "example":
-        return _example_candidates(words, cword, prev, cwd=cwd, token=token)
-    return []
+    return _secondary_subcommand_candidates(
+        cmd,
+        words,
+        cword,
+        prev,
+        cwd=cwd,
+        token=token,
+    )
 
 
 def completion_script(shell: str) -> str:

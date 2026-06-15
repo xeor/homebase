@@ -578,11 +578,18 @@ table:
 suffixes: [tmp, fork, old]
 
 actions:
+  notes_create:
+    raycast: true
+  notes_open:
+    raycast: true
   open_in_editor:
     kind: shell
     scope: target
     multi: joined
     command: "$EDITOR {{ paths_q }}"
+    raycast:
+      enabled: true
+      title: Open in editor
   add_log_to_note:
     kind: note
     scope: target

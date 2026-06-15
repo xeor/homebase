@@ -30,6 +30,7 @@ class Action:
     hidden: bool = False
     view_scope: tuple[str, ...] = ("active", "archive")
     source: Literal["builtin", "config", "overridden"] = "builtin"
+    raycast: dict[str, object] | None = None
 
 
 @dataclass(frozen=True)

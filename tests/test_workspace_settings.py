@@ -156,8 +156,31 @@ def test_load_actions_parses_custom_shell_action() -> None:
     assert out["open_item_in_codium"].source == "config"
 
 
+def test_load_actions_parses_raycast_action_config() -> None:
+    out = workspace_settings.load_actions(
+        {
+            "actions": {
+                "notes_create": {"raycast": True},
+                "open_item_in_codium": {
+                    "kind": "shell",
+                    "scope": "target",
+                    "multi": "joined",
+                    "command": "codium {{ paths_q }}",
+                    "raycast": {"enabled": True, "title": "Open in Codium"},
+                },
+            }
+        },
+        builtins=BUILTIN_ACTIONS,
+    )
+    assert out["notes_create"].raycast == {"enabled": True}
+    assert out["open_item_in_codium"].raycast == {
+        "enabled": True,
+        "title": "Open in Codium",
+    }
+
+
 def test_load_actions_rejects_builtin_non_override_fields() -> None:
-    with pytest.raises(ValueError, match="only `label` and `confirm`"):
+    with pytest.raises(ValueError, match="only `label`, `confirm`, and `raycast`"):
         workspace_settings.load_actions(
             {"actions": {"archive": {"kind": "shell", "command": "echo x"}}},
             builtins=BUILTIN_ACTIONS,

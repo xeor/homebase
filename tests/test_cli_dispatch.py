@@ -34,6 +34,7 @@ def _stub_dispatch_kwargs(**overrides: object) -> dict[str, object]:
         cmd_archive_mv=lambda _a, _b, **_kw: 0,
         cmd_cd=lambda _a, _b: 0,
         cmd_open=lambda _a, _b: 0,
+        cmd_raycast=lambda _a, _b, _c, _d: 0,
         cmd_rm=lambda _a, _b: 0,
         cmd_fix=lambda _a: 0,
         cmd_deworktree=lambda _bd, _path: 0,
@@ -431,6 +432,50 @@ def test_dispatch_open_uses_last_name_arg() -> None:
     )
     assert rc == 61
     assert seen == [(Path("/base"), "alpha")]
+
+
+def test_dispatch_raycast_actions_forwards_project() -> None:
+    parser = cli_dispatch.build_cli_parser()
+    ns = parser.parse_args(["integration", "raycast", "actions", "alpha"])
+    seen: list[tuple[Path, str, str, str]] = []
+    rc = cli_dispatch.dispatch_command(
+        ns,
+        base_dir=Path("/base"),
+        bin_dir=Path("/bin"),
+        cwd=Path("/cwd"),
+        no_arg_flow=lambda _a, _b, _c: 0,
+        initial_filter_expr="",
+        **_stub_dispatch_kwargs(
+            cmd_raycast=lambda bd, sub, project, action: (
+                seen.append((bd, sub, project, action)),
+                62,
+            )[1]
+        ),
+    )
+    assert rc == 62
+    assert seen == [(Path("/base"), "actions", "alpha", "")]
+
+
+def test_dispatch_raycast_run_forwards_action_and_project() -> None:
+    parser = cli_dispatch.build_cli_parser()
+    ns = parser.parse_args(["integration", "raycast", "run", "open_item", "alpha"])
+    seen: list[tuple[Path, str, str, str]] = []
+    rc = cli_dispatch.dispatch_command(
+        ns,
+        base_dir=Path("/base"),
+        bin_dir=Path("/bin"),
+        cwd=Path("/cwd"),
+        no_arg_flow=lambda _a, _b, _c: 0,
+        initial_filter_expr="",
+        **_stub_dispatch_kwargs(
+            cmd_raycast=lambda bd, sub, project, action: (
+                seen.append((bd, sub, project, action)),
+                63,
+            )[1]
+        ),
+    )
+    assert rc == 63
+    assert seen == [(Path("/base"), "run", "alpha", "open_item")]
 
 
 def test_dispatch_rm_forwards_flags() -> None:

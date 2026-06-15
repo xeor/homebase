@@ -4,7 +4,9 @@ import os
 import sys
 from pathlib import Path
 
+from ..cache.api import cache_load_rows
 from ..commands import interactive_flow
+from ..commands import raycast as raycast_cmd
 from ..commands.archive import (
     archive_pack_internal,
     archive_restore_internal,
@@ -480,6 +482,25 @@ def main(argv: list[str]) -> int:
             cmd_archive_mv=cmd_archive_mv,
             cmd_cd=cmd_cd,
             cmd_open=cmd_open,
+            cmd_raycast=lambda bd, subcommand, project, action_id: (
+                raycast_cmd.cmd_actions(
+                    bd,
+                    project,
+                    actions=runtime_cfg.actions,
+                    load_rows=cache_load_rows,
+                    notes_config=runtime_cfg.notes_config,
+                )
+                if subcommand == "actions"
+                else raycast_cmd.cmd_run(
+                    bd,
+                    project,
+                    action_id,
+                    actions=runtime_cfg.actions,
+                    load_rows=cache_load_rows,
+                    notes_config=runtime_cfg.notes_config,
+                    open_project=cmd_open,
+                )
+            ),
             cmd_rm=lambda path, force_outside_base, force=False: cmd_rm(
                 path,
                 force_outside_base=force_outside_base,

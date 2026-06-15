@@ -534,6 +534,7 @@ def global_config_status_text(app: Any, *, base_dir: Path) -> str:
         except OSError:
             pass
 
+    custom_hotkeys = getattr(app, "custom_hotkeys", getattr(app.ctx, "favorites", []))
     lines = [
         "[bold]Global Config[/]",
         f"[cyan]path[/]: {app._esc(config_path)}",
@@ -547,7 +548,7 @@ def global_config_status_text(app: Any, *, base_dir: Path) -> str:
         f"[cyan]saved filters[/]: {len(app.ctx.saved_filter_queries)}",
         f"[cyan]suffixes[/]: {len(app.ctx.suffixes)}",
         f"[cyan]custom actions[/]: {len(app.custom_actions)}",
-        f"[cyan]keys[/]: {len(app.ctx.keys)}",
+        f"[cyan]key bindings[/]: {len(custom_hotkeys)}",
         "",
         "[dim]Use the button below to edit config and auto-reload when editor exits.[/]",
     ]
