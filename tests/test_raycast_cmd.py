@@ -126,6 +126,54 @@ def test_cmd_actions_without_project_lists_all_projects(tmp_path: Path, capsys) 
     ]
 
 
+def test_cmd_projects_filters_and_includes_actions(tmp_path: Path, capsys) -> None:
+    alpha = _row(tmp_path, "alpha")
+    beta = _row(tmp_path, "beta")
+    actions = {
+        "open_gui": Action(
+            id="open_gui",
+            label="Open GUI",
+            kind="shell",
+            scope="target",
+            multi="joined",
+            command="open {{ path_q }}",
+            source="config",
+            raycast={"enabled": True},
+        )
+    }
+
+    rc = raycast.cmd_projects(
+        tmp_path,
+        "alpha",
+        actions=actions,
+        load_rows=lambda _base_dir: ([beta, alpha], [], 0),
+        notes_config={"path_template": "notes/{{ name }}.md"},
+        compile_filter_expr=lambda expr: (
+            lambda row: expr in str(getattr(row, "name", "")),
+            None,
+        ),
+    )
+
+    assert rc == 0
+    assert json.loads(capsys.readouterr().out) == [
+        {"project": "alpha", "actions": [{"id": "open_gui", "title": "Open GUI"}]},
+    ]
+
+
+def test_cmd_projects_rejects_invalid_filter(tmp_path: Path, capsys) -> None:
+    rc = raycast.cmd_projects(
+        tmp_path,
+        "#bad",
+        actions={},
+        load_rows=lambda _base_dir: ([_row(tmp_path)], [], 0),
+        notes_config={"path_template": "notes/{{ name }}.md"},
+        compile_filter_expr=lambda _expr: (lambda _row: True, "bad token"),
+    )
+
+    assert rc == 2
+    assert "invalid filter: bad token" in capsys.readouterr().err
+
+
 def test_cmd_actions_uses_notes_open_when_note_exists(tmp_path: Path, capsys) -> None:
     row = _row(tmp_path)
     note_path = tmp_path / "notes" / "alpha.md"

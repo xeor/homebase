@@ -1,6 +1,7 @@
 import {
   Action,
   ActionPanel,
+  closeMainWindow,
   getPreferenceValues,
   Icon,
   List,
@@ -8,7 +9,7 @@ import {
   showToast,
   Toast,
 } from "@raycast/api";
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import path from "node:path";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
@@ -38,16 +39,12 @@ type Config = {
 type Project = {
   id: string;
   title: string;
+  actions: ProjectAction[];
 };
 
 type ProjectAction = {
   id: string;
   title: string;
-};
-
-type ProjectActionSet = {
-  project: string;
-  actions: ProjectAction[];
 };
 
 type ListState = {
@@ -80,14 +77,6 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function parseProjects(output: string): Project[] {
-  return output
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .map((title, index) => ({ id: `${index}:${title}`, title }));
-}
-
 function parseProjectActions(value: unknown): ProjectAction[] {
   if (!Array.isArray(value)) {
     return [];
@@ -112,31 +101,35 @@ function parseProjectActions(value: unknown): ProjectAction[] {
     .filter((item): item is ProjectAction => Boolean(item?.id && item.title));
 }
 
-function parseProjectActionSets(output: string): ProjectActionSet[] {
+function parseProjects(output: string): Project[] {
   const parsed = JSON.parse(output) as unknown;
   if (!Array.isArray(parsed)) {
     return [];
   }
 
   return parsed
-    .map((item) => {
+    .map((item, index) => {
       if (
         typeof item === "object" &&
         item !== null &&
         "project" in item &&
         "actions" in item
       ) {
+        const title = String(item.project);
         return {
-          project: String(item.project),
+          id: `${index}:${title}`,
+          title,
           actions: parseProjectActions(item.actions),
         };
       }
 
       return undefined;
     })
-    .filter((item): item is ProjectActionSet =>
-      Boolean(item?.project && item.actions),
-    );
+    .filter((item): item is Project => Boolean(item?.title && item.actions));
+}
+
+function commandEnv(config: Config): NodeJS.ProcessEnv {
+  return { ...process.env, PATH: config.envPath };
 }
 
 function runB(config: Config, args: string[]): Promise<string> {
@@ -145,7 +138,7 @@ function runB(config: Config, args: string[]): Promise<string> {
       config.bPath,
       args,
       {
-        env: { ...process.env, PATH: config.envPath },
+        env: commandEnv(config),
         maxBuffer: 2 * 1024 * 1024,
         timeout: config.timeoutMs,
       },
@@ -161,11 +154,28 @@ function runB(config: Config, args: string[]): Promise<string> {
   });
 }
 
+function runBDetached(config: Config, args: string[]) {
+  const child = spawn(config.bPath, args, {
+    detached: true,
+    env: commandEnv(config),
+    stdio: "ignore",
+  });
+  child.once("error", (error) => {
+    void showToast({
+      style: Toast.Style.Failure,
+      title: "b open failed",
+      message: errorMessage(error),
+    });
+  });
+  child.unref();
+}
+
 async function runAction(title: string, action: () => Promise<string>) {
+  const actionPromise = Promise.resolve().then(action);
   const toast = await showToast({ style: Toast.Style.Animated, title });
 
   try {
-    const output = await action();
+    const output = await actionPromise;
     toast.style = Toast.Style.Success;
     toast.title = title;
     toast.message = output || undefined;
@@ -176,6 +186,11 @@ async function runAction(title: string, action: () => Promise<string>) {
     toast.title = title;
     toast.message = errorMessage(error);
   }
+}
+
+async function openProject(config: Config, project: Project) {
+  runBDetached(config, ["open", project.title]);
+  await closeMainWindow({ clearRootSearch: true });
 }
 
 function ProjectListItem({
@@ -204,11 +219,7 @@ function ProjectListItem({
             <Action
               icon={Icon.Terminal}
               title="Open"
-              onAction={() =>
-                runAction(`b open ${project.title}`, () =>
-                  runB(config, ["open", project.title]),
-                )
-              }
+              onAction={() => openProject(config, project)}
             />
             {visibleActions.map((action) => (
               <Action
@@ -245,49 +256,15 @@ export default function Command() {
   const config = useMemo(getConfig, []);
   const requestId = useRef(0);
   const [searchText, setSearchText] = useState("");
-  const [actionsByProject, setActionsByProject] = useState<
-    Record<string, ProjectAction[]>
-  >({});
   const [state, setState] = useState<ListState>({
     isLoading: true,
     projects: [],
   });
 
-  const loadActionsForProjects = useCallback(
-    async (id: number, projects: Project[]) => {
-      try {
-        const output = await runB(config, [
-          "integration",
-          "raycast",
-          "actions",
-        ]);
-        if (id !== requestId.current) {
-          return;
-        }
-
-        const actionSets = parseProjectActionSets(output);
-        const actionsByName = new Map(
-          actionSets.map((item) => [item.project, item.actions]),
-        );
-        const entries = projects.map(
-          (project) =>
-            [project.id, actionsByName.get(project.title) || []] as const,
-        );
-        setActionsByProject(Object.fromEntries(entries));
-      } catch {
-        if (id === requestId.current) {
-          setActionsByProject({});
-        }
-      }
-    },
-    [config],
-  );
-
   const loadProjects = useCallback(
     async (filterExpr: string) => {
       const id = requestId.current + 1;
       requestId.current = id;
-      setActionsByProject({});
       setState((current) => ({
         ...current,
         error: undefined,
@@ -295,7 +272,7 @@ export default function Command() {
       }));
 
       try {
-        const args = ["ls"];
+        const args = ["integration", "raycast", "projects"];
         const filter = filterExpr.trim();
         if (filter) {
           args.push(filter);
@@ -307,7 +284,6 @@ export default function Command() {
         }
         const projects = parseProjects(output);
         setState({ isLoading: false, projects });
-        void loadActionsForProjects(id, projects);
       } catch (error) {
         if (id !== requestId.current) {
           return;
@@ -321,7 +297,7 @@ export default function Command() {
         });
       }
     },
-    [config, loadActionsForProjects],
+    [config],
   );
 
   useEffect(() => {
@@ -370,7 +346,7 @@ export default function Command() {
           config={config}
           onRefresh={() => loadProjects(searchText)}
           project={project}
-          projectActions={actionsByProject[project.id] || []}
+          projectActions={project.actions}
         />
       ))}
     </List>

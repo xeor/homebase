@@ -389,6 +389,57 @@ def cmd_actions(
     return 0
 
 
+def _row_actions_payload(
+    base_dir: Path,
+    row: Any,
+    *,
+    actions: dict[str, Action],
+    notes_config: dict[str, object],
+) -> list[dict[str, str]]:
+    payload = []
+    for action_id in _supported_action_ids(base_dir, actions, row, notes_config):
+        action = actions.get(action_id)
+        if action is None:
+            continue
+        payload.append({"id": action_id, "title": _raycast_title(action)})
+    return payload
+
+
+def cmd_projects(
+    base_dir: Path,
+    filter_expr: str,
+    *,
+    actions: dict[str, Action],
+    load_rows: Callable[[Path], tuple[list[Any], list[Any], int]],
+    notes_config: dict[str, object],
+    compile_filter_expr: Callable[[str], tuple[Callable[[Any], bool], str | None]],
+) -> int:
+    active, _archived, _ts = load_rows(base_dir)
+    rows = list(active)
+    expr = filter_expr.strip()
+    if expr:
+        pred, err = compile_filter_expr(expr)
+        if err:
+            print(f"raycast projects: invalid filter: {err}", file=sys.stderr)
+            return 2
+        rows = [row for row in rows if pred(row)]
+    rows = sorted(rows, key=lambda row: str(getattr(row, "name", "")).lower())
+    payload = [
+        {
+            "project": str(getattr(row, "name", "")),
+            "actions": _row_actions_payload(
+                base_dir,
+                row,
+                actions=actions,
+                notes_config=notes_config,
+            ),
+        }
+        for row in rows
+    ]
+    print(json.dumps(payload))
+    return 0
+
+
 def _render_shell_action(
     base_dir: Path,
     row: Any,

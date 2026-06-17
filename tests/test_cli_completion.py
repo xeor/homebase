@@ -105,7 +105,7 @@ def test_completion_includes_integration_raycast() -> None:
     out = cli_completion.completion_candidates(
         ["integration", "raycast", ""], 3, base_dir=Path(".")
     )
-    assert out == ["actions", "run"]
+    assert out == ["actions", "projects", "run"]
 
 
 def test_completion_cd_lists_active_projects(tmp_path: Path) -> None:

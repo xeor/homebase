@@ -119,30 +119,43 @@ def _dispatch_open(ns: Any, base_dir: Path, cmd_open: Callable[[Path, str], int]
     return cmd_open(base_dir, name)
 
 
+def _raycast_filter_arg(ns: Any) -> str:
+    raw = getattr(ns, "filter", []) or []
+    parts = [raw] if isinstance(raw, str) else list(raw)
+    return " ".join(str(x) for x in parts)
+
+
+def _raycast_dispatch_args(ns: Any) -> tuple[str, str, str] | None:
+    subcommand = str(getattr(ns, "raycast_subcommand", "") or "")
+    builders: dict[str, Callable[[Any], tuple[str, str, str]]] = {
+        "actions": lambda obj: (
+            "actions",
+            str(getattr(obj, "project", "") or ""),
+            "",
+        ),
+        "projects": lambda obj: ("projects", _raycast_filter_arg(obj), ""),
+        "run": lambda obj: (
+            "run",
+            str(getattr(obj, "project", "") or ""),
+            str(getattr(obj, "action_id", "") or ""),
+        ),
+    }
+    builder = builders.get(subcommand)
+    return None if builder is None else builder(ns)
+
+
 def _dispatch_integration(
     ns: Any,
     base_dir: Path,
     cmd_raycast: Callable[..., int],
 ) -> int:
-    integration = str(getattr(ns, "integration_subcommand", "") or "")
-    if integration != "raycast":
+    if str(getattr(ns, "integration_subcommand", "") or "") != "raycast":
         return 1
-    subcommand = str(getattr(ns, "raycast_subcommand", "") or "")
-    if subcommand == "actions":
-        return cmd_raycast(
-            base_dir,
-            "actions",
-            str(getattr(ns, "project", "") or ""),
-            "",
-        )
-    if subcommand == "run":
-        return cmd_raycast(
-            base_dir,
-            "run",
-            str(getattr(ns, "project", "") or ""),
-            str(getattr(ns, "action_id", "") or ""),
-        )
-    return 1
+    args = _raycast_dispatch_args(ns)
+    if args is None:
+        return 1
+    subcommand, project, action_id = args
+    return cmd_raycast(base_dir, subcommand, project, action_id)
 
 
 def _dispatch_rm(ns: Any, cmd_rm: Callable[..., int]) -> int:

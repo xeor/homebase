@@ -304,6 +304,11 @@ def build_cli_parser() -> argparse.ArgumentParser:
         help="emit Raycast-supported actions for a project as JSON",
     )
     p_raycast_actions.add_argument("project", nargs="?", default="")
+    p_raycast_projects = raycast_sub.add_parser(
+        "projects",
+        help="emit Raycast project search results and supported actions as JSON",
+    )
+    p_raycast_projects.add_argument("filter", nargs="*", default=[])
     p_raycast_run = raycast_sub.add_parser(
         "run",
         help="run a Raycast-supported action for a project",

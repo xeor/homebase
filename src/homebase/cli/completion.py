@@ -282,7 +282,7 @@ def _integration_candidates(words: list[str], cword: int) -> list[str]:
     if cword == 2:
         return ["raycast"]
     if len(words) >= 2 and words[1] == "raycast":
-        return ["actions", "run"]
+        return ["actions", "projects", "run"]
     return []
 
 

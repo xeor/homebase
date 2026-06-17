@@ -456,6 +456,28 @@ def test_dispatch_raycast_actions_forwards_project() -> None:
     assert seen == [(Path("/base"), "actions", "alpha", "")]
 
 
+def test_dispatch_raycast_projects_forwards_filter() -> None:
+    parser = cli_dispatch.build_cli_parser()
+    ns = parser.parse_args(["integration", "raycast", "projects", "#infra", "alpha"])
+    seen: list[tuple[Path, str, str, str]] = []
+    rc = cli_dispatch.dispatch_command(
+        ns,
+        base_dir=Path("/base"),
+        bin_dir=Path("/bin"),
+        cwd=Path("/cwd"),
+        no_arg_flow=lambda _a, _b, _c: 0,
+        initial_filter_expr="",
+        **_stub_dispatch_kwargs(
+            cmd_raycast=lambda bd, sub, project, action: (
+                seen.append((bd, sub, project, action)),
+                64,
+            )[1]
+        ),
+    )
+    assert rc == 64
+    assert seen == [(Path("/base"), "projects", "#infra alpha", "")]
+
+
 def test_dispatch_raycast_run_forwards_action_and_project() -> None:
     parser = cli_dispatch.build_cli_parser()
     ns = parser.parse_args(["integration", "raycast", "run", "open_item", "alpha"])

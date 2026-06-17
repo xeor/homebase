@@ -196,6 +196,43 @@ def _config_error_help_response(ns, parser, prefix: str, exc: BaseException) -> 
     )
 
 
+def _cmd_raycast(
+    base_dir: Path,
+    subcommand: str,
+    project: str,
+    action_id: str,
+    *,
+    runtime_cfg,
+    compile_filter_expr,
+) -> int:
+    if subcommand == "actions":
+        return raycast_cmd.cmd_actions(
+            base_dir,
+            project,
+            actions=runtime_cfg.actions,
+            load_rows=cache_load_rows,
+            notes_config=runtime_cfg.notes_config,
+        )
+    if subcommand == "projects":
+        return raycast_cmd.cmd_projects(
+            base_dir,
+            project,
+            actions=runtime_cfg.actions,
+            load_rows=cache_load_rows,
+            notes_config=runtime_cfg.notes_config,
+            compile_filter_expr=compile_filter_expr,
+        )
+    return raycast_cmd.cmd_run(
+        base_dir,
+        project,
+        action_id,
+        actions=runtime_cfg.actions,
+        load_rows=cache_load_rows,
+        notes_config=runtime_cfg.notes_config,
+        open_project=cmd_open,
+    )
+
+
 def main(argv: list[str]) -> int:
     from ..config import prefs as app_prefs  # noqa: F401  (alias for clarity)
     from ..config.hooks import HookConfigError, load_hook_refresh_config, load_hook_specs
@@ -218,6 +255,7 @@ def main(argv: list[str]) -> int:
     from ..hooks.snapshot import snapshot_target_from_path
     from ..tmux.flow import cmd_tmux_load, cmd_tmux_save
     from ..workspace.benchmark import cmd_benchmark, cmd_test
+    from ..workspace.filter_compile import compile_filter_expr
     from ..workspace.new import cmd_new
     from ..workspace.regression import cmd_test_regression
 
@@ -482,24 +520,13 @@ def main(argv: list[str]) -> int:
             cmd_archive_mv=cmd_archive_mv,
             cmd_cd=cmd_cd,
             cmd_open=cmd_open,
-            cmd_raycast=lambda bd, subcommand, project, action_id: (
-                raycast_cmd.cmd_actions(
-                    bd,
-                    project,
-                    actions=runtime_cfg.actions,
-                    load_rows=cache_load_rows,
-                    notes_config=runtime_cfg.notes_config,
-                )
-                if subcommand == "actions"
-                else raycast_cmd.cmd_run(
-                    bd,
-                    project,
-                    action_id,
-                    actions=runtime_cfg.actions,
-                    load_rows=cache_load_rows,
-                    notes_config=runtime_cfg.notes_config,
-                    open_project=cmd_open,
-                )
+            cmd_raycast=lambda bd, subcommand, project, action_id: _cmd_raycast(
+                bd,
+                subcommand,
+                project,
+                action_id,
+                runtime_cfg=runtime_cfg,
+                compile_filter_expr=compile_filter_expr,
             ),
             cmd_rm=lambda path, force_outside_base, force=False: cmd_rm(
                 path,

@@ -68,7 +68,10 @@ to `www.raycast.com`.
 
 - Project search uses `b ls <filter expression>`.
 - Enter uses `b open <selection>`, so Homebase owns tmux/window behavior.
-- Cmd-K actions come from `b integration raycast actions`.
+- Search results and Cmd-K actions come from
+  `b integration raycast projects <filter expression>`.
+- `b integration raycast actions` remains available for single-purpose
+  action inspection/debugging.
 - Cmd-K action execution uses `b integration raycast run <action> <selection>`.
 
 Enable secondary Raycast actions in Homebase action config:
