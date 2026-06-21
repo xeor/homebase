@@ -14,6 +14,7 @@ from ..core.constants import (
     OPEN_MODE_PROFILES,
     PREVIEW_ENTRIES_LIMIT_MAX,
     PREVIEW_ENTRIES_LIMIT_MIN,
+    RAYCAST_CONFIG,
     RECONCILE_CONFIG,
     SAVED_FILTER_QUERIES,
     SIDE_CHILD_TABS,
@@ -236,6 +237,13 @@ def load_notes_config(base_dir: Path) -> dict[str, object]:
     return workspace_settings.load_notes_config(
         load_global_config_dict(base_dir),
         defaults=NOTES_CONFIG,
+    )
+
+
+def load_raycast_config(base_dir: Path) -> dict[str, object]:
+    return workspace_settings.load_raycast_config(
+        load_global_config_dict(base_dir),
+        defaults=RAYCAST_CONFIG,
     )
 
 

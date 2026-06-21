@@ -149,6 +149,28 @@ Validation rules:
 
 Raycast only exposes actions that opt in with `raycast`.
 
+Project ordering:
+
+```yaml
+raycast:
+  # name (default) or opened
+  sort: opened
+  secondary_info:
+    - "{{ opened_ago }}"
+    - "{{ tags_space }}"
+```
+
+`secondary_info` entries are rendered from cached row data and indexed as
+Raycast search keywords. Useful variables:
+
+| Variable | Notes |
+| --- | --- |
+| `opened_ago` / `active_ago` | Human last-opened text, e.g. `2 hours ago` |
+| `tags_space` | Tags separated by spaces |
+| `tags` | Tags separated by commas |
+| `branch`, `dirty`, `description`, `properties_space`, `suffix` | Cached row fields |
+| `created_ago`, `modified_ago`, `size_human` | Cached derived fields |
+
 ```yaml
 actions:
   notes_create:

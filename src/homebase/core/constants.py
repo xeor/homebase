@@ -571,6 +571,11 @@ RECONCILE_CONFIG: dict[str, dict[str, object]] = {
         "cache_profile": PROFILE_RECONCILE_ARCHIVE,
     },
 }
+RAYCAST_CONFIG: dict[str, object] = {
+    "sort": "name",
+    "secondary_info": [],
+    "secondary_separator": " • ",
+}
 
 CACHE_PROFILE_CONFIG: dict[str, dict[str, dict[str, object]]] = {
     "all": {

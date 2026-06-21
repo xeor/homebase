@@ -39,6 +39,8 @@ type Config = {
 type Project = {
   id: string;
   title: string;
+  keywords: string[];
+  subtitle?: string;
   actions: ProjectAction[];
 };
 
@@ -101,6 +103,14 @@ function parseProjectActions(value: unknown): ProjectAction[] {
     .filter((item): item is ProjectAction => Boolean(item?.id && item.title));
 }
 
+function parseStringList(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.map((item) => String(item).trim()).filter(Boolean);
+}
+
 function parseProjects(output: string): Project[] {
   const parsed = JSON.parse(output) as unknown;
   if (!Array.isArray(parsed)) {
@@ -116,9 +126,15 @@ function parseProjects(output: string): Project[] {
         "actions" in item
       ) {
         const title = String(item.project);
+        const subtitle =
+          "subtitle" in item && String(item.subtitle).trim()
+            ? String(item.subtitle)
+            : "";
         return {
           id: `${index}:${title}`,
           title,
+          keywords: parseStringList("keywords" in item ? item.keywords : []),
+          ...(subtitle ? { subtitle } : {}),
           actions: parseProjectActions(item.actions),
         };
       }
@@ -213,6 +229,8 @@ function ProjectListItem({
       key={project.id}
       icon={Icon.Folder}
       title={project.title}
+      subtitle={project.subtitle}
+      keywords={project.keywords}
       actions={
         <ActionPanel>
           <ActionPanel.Section>
@@ -255,69 +273,57 @@ function ProjectListItem({
 export default function Command() {
   const config = useMemo(getConfig, []);
   const requestId = useRef(0);
-  const [searchText, setSearchText] = useState("");
   const [state, setState] = useState<ListState>({
     isLoading: true,
     projects: [],
   });
 
-  const loadProjects = useCallback(
-    async (filterExpr: string) => {
-      const id = requestId.current + 1;
-      requestId.current = id;
-      setState((current) => ({
-        ...current,
-        error: undefined,
-        isLoading: true,
-      }));
+  const loadProjects = useCallback(async () => {
+    const id = requestId.current + 1;
+    requestId.current = id;
+    setState((current) => ({
+      ...current,
+      error: undefined,
+      isLoading: true,
+    }));
 
-      try {
-        const args = ["integration", "raycast", "projects"];
-        const filter = filterExpr.trim();
-        if (filter) {
-          args.push(filter);
-        }
-
-        const output = await runB(config, args);
-        if (id !== requestId.current) {
-          return;
-        }
-        const projects = parseProjects(output);
-        setState({ isLoading: false, projects });
-      } catch (error) {
-        if (id !== requestId.current) {
-          return;
-        }
-        const message = errorMessage(error);
-        setState({ error: message, isLoading: false, projects: [] });
-        await showToast({
-          style: Toast.Style.Failure,
-          title: "b ls failed",
-          message,
-        });
+    try {
+      const args = ["integration", "raycast", "projects"];
+      const output = await runB(config, args);
+      if (id !== requestId.current) {
+        return;
       }
-    },
-    [config],
-  );
+      const projects = parseProjects(output);
+      setState({ isLoading: false, projects });
+    } catch (error) {
+      if (id !== requestId.current) {
+        return;
+      }
+      const message = errorMessage(error);
+      setState({ error: message, isLoading: false, projects: [] });
+      await showToast({
+        style: Toast.Style.Failure,
+        title: "b ls failed",
+        message,
+      });
+    }
+  }, [config]);
 
   useEffect(() => {
-    void loadProjects(searchText);
-  }, [loadProjects, searchText]);
+    void loadProjects();
+  }, [loadProjects]);
 
   return (
     <List
       isLoading={state.isLoading}
-      filtering={false}
-      throttle
-      searchText={searchText}
-      searchBarPlaceholder="Homebase filter expression"
-      onSearchTextChange={setSearchText}
+      filtering
+      searchBarPlaceholder="Search projects"
       actions={
         <ActionPanel>
           <Action
             icon={Icon.ArrowClockwise}
             title="Refresh"
-            onAction={() => loadProjects(searchText)}
+            onAction={() => loadProjects()}
           />
         </ActionPanel>
       }
@@ -333,18 +339,14 @@ export default function Command() {
         <List.EmptyView
           icon={Icon.MagnifyingGlass}
           title="No projects"
-          description={
-            searchText.trim()
-              ? `No projects match ${searchText.trim()}`
-              : "b ls returned no output"
-          }
+          description="b integration raycast projects returned no output"
         />
       ) : null}
       {state.projects.map((project) => (
         <ProjectListItem
           key={project.id}
           config={config}
-          onRefresh={() => loadProjects(searchText)}
+          onRefresh={() => loadProjects()}
           project={project}
           projectActions={project.actions}
         />

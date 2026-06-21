@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import json
+import time
 from pathlib import Path
 
 from homebase.commands import raycast
 from homebase.core.models import Action, ProjectRow
 
 
-def _row(base_dir: Path, name: str = "alpha") -> ProjectRow:
+def _row(base_dir: Path, name: str = "alpha", *, opened_ts: int = 0) -> ProjectRow:
     return ProjectRow(
         path=base_dir / name,
         name=name,
@@ -22,7 +23,7 @@ def _row(base_dir: Path, name: str = "alpha") -> ProjectRow:
         created_ts=0,
         last_ts=0,
         git_ts=0,
-        opened_ts=0,
+        opened_ts=opened_ts,
         is_fork=False,
         is_tmp=False,
         archived=False,
@@ -157,6 +158,62 @@ def test_cmd_projects_filters_and_includes_actions(tmp_path: Path, capsys) -> No
     assert rc == 0
     assert json.loads(capsys.readouterr().out) == [
         {"project": "alpha", "actions": [{"id": "open_gui", "title": "Open GUI"}]},
+    ]
+
+
+def test_cmd_projects_sorts_by_opened_when_configured(tmp_path: Path, capsys) -> None:
+    alpha = _row(tmp_path, "alpha", opened_ts=20)
+    beta = _row(tmp_path, "beta", opened_ts=40)
+    gamma = _row(tmp_path, "gamma", opened_ts=0)
+
+    rc = raycast.cmd_projects(
+        tmp_path,
+        "",
+        actions={},
+        load_rows=lambda _base_dir: ([gamma, alpha, beta], [], 0),
+        notes_config={"path_template": "notes/{{ name }}.md"},
+        raycast_config={"sort": "opened"},
+        compile_filter_expr=lambda _expr: (lambda _row: True, None),
+    )
+
+    assert rc == 0
+    assert [item["project"] for item in json.loads(capsys.readouterr().out)] == [
+        "beta",
+        "alpha",
+        "gamma",
+    ]
+
+
+def test_cmd_projects_includes_configured_secondary_info(
+    tmp_path: Path,
+    capsys,
+) -> None:
+    opened_ts = int(time.time()) - (2 * 60 * 60)
+    row = _row(tmp_path, "alpha", opened_ts=opened_ts)
+    row.tags = ["work", "api"]
+
+    rc = raycast.cmd_projects(
+        tmp_path,
+        "",
+        actions={},
+        load_rows=lambda _base_dir: ([row], [], 0),
+        notes_config={"path_template": "notes/{{ name }}.md"},
+        raycast_config={
+            "secondary_info": ["{{ opened_ago }}", "{{ tags_space }}"],
+            "secondary_separator": " | ",
+        },
+        compile_filter_expr=lambda _expr: (lambda _row: True, None),
+    )
+
+    assert rc == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload == [
+        {
+            "project": "alpha",
+            "actions": [],
+            "subtitle": "2 hours ago | work api",
+            "keywords": ["2 hours ago", "work api", "work", "api"],
+        }
     ]
 
 

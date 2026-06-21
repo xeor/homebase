@@ -220,6 +220,7 @@ def _cmd_raycast(
             actions=runtime_cfg.actions,
             load_rows=cache_load_rows,
             notes_config=runtime_cfg.notes_config,
+            raycast_config=runtime_cfg.raycast_config,
             compile_filter_expr=compile_filter_expr,
         )
     return raycast_cmd.cmd_run(
@@ -244,6 +245,7 @@ def main(argv: list[str]) -> int:
         load_file_view_exclude_patterns,
         load_notes_config,
         load_open_mode_config,
+        load_raycast_config,
         load_reconcile_config,
         load_saved_filter_queries,
         load_suffixes,
@@ -307,6 +309,7 @@ def main(argv: list[str]) -> int:
             load_favorites=lambda bd, actions: load_favorites(bd, actions=actions),
             load_open_mode_config=load_open_mode_config,
             load_notes_config=load_notes_config,
+            load_raycast_config=load_raycast_config,
             load_reconcile_config=load_reconcile_config,
             load_cache_profile_table=load_cache_profile_table,
             load_hook_specs=load_hook_specs,

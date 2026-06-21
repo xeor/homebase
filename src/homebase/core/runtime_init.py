@@ -18,6 +18,7 @@ class RuntimeConfig:
     favorites: list[dict[str, object]]
     open_mode_config: dict[str, str]
     notes_config: dict[str, object]
+    raycast_config: dict[str, object]
     reconcile_config: dict[str, dict[str, object]]
     cache_profile_table: dict[str, dict[str, dict[str, object]]]
     hook_specs: dict[tuple[str, str], list[Any]]
@@ -39,6 +40,7 @@ def load_runtime_config(
     load_favorites: Callable[[Path, dict[str, Any]], list[dict[str, object]]],
     load_open_mode_config: Callable[[Path], dict[str, str]],
     load_notes_config: Callable[[Path], dict[str, object]],
+    load_raycast_config: Callable[[Path], dict[str, object]],
     load_reconcile_config: Callable[[Path], dict[str, dict[str, object]]],
     load_cache_profile_table: Callable[[Path], dict[str, dict[str, dict[str, object]]]],
     load_hook_specs: Callable[[Path], dict[tuple[str, str], list[Any]]],
@@ -68,6 +70,7 @@ def load_runtime_config(
         favorites=load_favorites(base_dir, actions),
         open_mode_config=load_open_mode_config(base_dir),
         notes_config=load_notes_config(base_dir),
+        raycast_config=load_raycast_config(base_dir),
         reconcile_config=load_reconcile_config(base_dir),
         cache_profile_table=load_cache_profile_table(base_dir),
         hook_specs=load_hook_specs(base_dir),

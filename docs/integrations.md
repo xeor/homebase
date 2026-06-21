@@ -5,7 +5,7 @@ Homebase. Homebase does not depend on them.
 
 | Path | Purpose | Tooling |
 | --- | --- | --- |
-| `integrations/raycast/` | Raycast extension for `b ls`, `b open`, and enabled action dispatch | `mise run setup`, `mise run dev`, `mise run check` |
+| `integrations/raycast/` | Raycast extension for project search, `b open`, and enabled action dispatch | `mise run setup`, `mise run dev`, `mise run check` |
 | `integrations/browser-tab-sync/` | Browser tab-group desired-state controller | `mise run dev`, `mise run test`, `mise run lint`, `mise run build` |
 
 Boundary rules:

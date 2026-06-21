@@ -73,6 +73,26 @@ def _fmt_human_bytes(size_bytes: int) -> str:
     return f"{v:.1f}{unit}"
 
 
+def _fmt_ago(ts: int, *, now_ts: int) -> str:
+    if ts <= 0:
+        return "never"
+    delta = max(0, now_ts - int(ts))
+    units = (
+        ("year", 365 * 24 * 60 * 60),
+        ("month", 30 * 24 * 60 * 60),
+        ("week", 7 * 24 * 60 * 60),
+        ("day", 24 * 60 * 60),
+        ("hour", 60 * 60),
+        ("minute", 60),
+    )
+    for label, seconds in units:
+        if delta >= seconds:
+            count = max(1, delta // seconds)
+            suffix = "" if count == 1 else "s"
+            return f"{count} {label}{suffix} ago"
+    return "just now"
+
+
 def _render_template(text: str, *contexts: dict[str, str]) -> str:
     merged: dict[str, str] = {}
     for ctx in contexts:
@@ -303,6 +323,50 @@ def _build_list_context(base_dir: Path, row: Any) -> dict[str, str]:
     }
 
 
+def _build_raycast_context(base_dir: Path, row: Any, *, now_ts: int) -> dict[str, str]:
+    row_path = Path(str(getattr(row, "path", "")))
+    rel = _relative_to_base(row_path, base_dir)
+    row_name = str(getattr(row, "name", row_path.name))
+    row_tags = [str(tag) for tag in _list_attr(row, "tags") if str(tag)]
+    row_props = [str(prop) for prop in _list_attr(row, "properties") if str(prop)]
+    opened_ts = _int_attr(row, "opened_ts")
+    last_ts = _int_attr(row, "last_ts")
+    created_ts = _int_attr(row, "created_ts")
+    context = {
+        "path": str(row_path),
+        "rel_path": str(rel),
+        "name": row_name,
+        "branch": str(getattr(row, "branch", "")),
+        "dirty": str(getattr(row, "dirty", "")),
+        "description": str(getattr(row, "description", "")),
+        "tags": ",".join(row_tags),
+        "tags_space": " ".join(row_tags),
+        "properties": ",".join(row_props),
+        "properties_space": " ".join(row_props),
+        "suffix": str(getattr(row, "suffix", "") or ""),
+        "wip": _flag(getattr(row, "wip", False)),
+        "created": str(getattr(row, "created", "") or _fmt_ymd(created_ts)),
+        "created_iso": _fmt_iso(created_ts),
+        "created_ago": _fmt_ago(created_ts, now_ts=now_ts),
+        "modified": str(getattr(row, "last", "") or _fmt_ymd(last_ts)),
+        "modified_iso": _fmt_iso(last_ts),
+        "modified_ago": _fmt_ago(last_ts, now_ts=now_ts),
+        "active": _fmt_ymd(opened_ts),
+        "active_iso": _fmt_iso(opened_ts),
+        "active_ago": _fmt_ago(opened_ts, now_ts=now_ts),
+        "opened": _fmt_ymd(opened_ts),
+        "opened_iso": _fmt_iso(opened_ts),
+        "opened_ago": _fmt_ago(opened_ts, now_ts=now_ts),
+        "size_human": _fmt_human_bytes(_int_attr(row, "size_bytes")),
+    }
+    out = _with_lowercase_keys(context)
+    out["path_q"] = _quote(row_path)
+    out["rel_path_q"] = _quote(rel)
+    out["name_q"] = _quote(row_name)
+    out["tags_space_q"] = _quote(out["tags_space"])
+    return out
+
+
 def _note_action_id(
     base_dir: Path,
     actions: dict[str, Action],
@@ -405,6 +469,71 @@ def _row_actions_payload(
     return payload
 
 
+def _sort_project_rows(rows: list[Any], sort_mode: str) -> list[Any]:
+    mode = str(sort_mode).strip()
+    if mode == "opened":
+        return sorted(
+            rows,
+            key=lambda row: (
+                -int(getattr(row, "opened_ts", 0) or 0),
+                str(getattr(row, "name", "")).lower(),
+            ),
+        )
+    return sorted(rows, key=lambda row: str(getattr(row, "name", "")).lower())
+
+
+def _secondary_templates(config: dict[str, object]) -> list[str]:
+    raw = config.get("secondary_info", [])
+    if isinstance(raw, str):
+        text = raw.strip()
+        return [text] if text else []
+    if not isinstance(raw, list):
+        return []
+    return [str(item).strip() for item in raw if str(item).strip()]
+
+
+def _raycast_project_payload(
+    base_dir: Path,
+    row: Any,
+    *,
+    actions: dict[str, Action],
+    notes_config: dict[str, object],
+    raycast_config: dict[str, object],
+    now_ts: int,
+) -> dict[str, object]:
+    info_segments: list[str] = []
+    templates = _secondary_templates(raycast_config)
+    if templates:
+        context = _build_raycast_context(base_dir, row, now_ts=now_ts)
+        for template in templates:
+            rendered = _render_template(template, context).strip()
+            if rendered:
+                info_segments.append(rendered)
+    separator = str(raycast_config.get("secondary_separator", " • "))
+    subtitle = separator.join(info_segments)
+    keywords: list[str] = []
+    if info_segments:
+        keywords = list(
+            dict.fromkeys(
+                info_segments + [str(tag) for tag in _list_attr(row, "tags") if str(tag)]
+            )
+        )
+    payload: dict[str, object] = {
+        "project": str(getattr(row, "name", "")),
+        "actions": _row_actions_payload(
+            base_dir,
+            row,
+            actions=actions,
+            notes_config=notes_config,
+        ),
+    }
+    if subtitle:
+        payload["subtitle"] = subtitle
+    if keywords:
+        payload["keywords"] = keywords
+    return payload
+
+
 def cmd_projects(
     base_dir: Path,
     filter_expr: str,
@@ -412,6 +541,7 @@ def cmd_projects(
     actions: dict[str, Action],
     load_rows: Callable[[Path], tuple[list[Any], list[Any], int]],
     notes_config: dict[str, object],
+    raycast_config: dict[str, object] | None = None,
     compile_filter_expr: Callable[[str], tuple[Callable[[Any], bool], str | None]],
 ) -> int:
     active, _archived, _ts = load_rows(base_dir)
@@ -423,17 +553,18 @@ def cmd_projects(
             print(f"raycast projects: invalid filter: {err}", file=sys.stderr)
             return 2
         rows = [row for row in rows if pred(row)]
-    rows = sorted(rows, key=lambda row: str(getattr(row, "name", "")).lower())
+    config = raycast_config if isinstance(raycast_config, dict) else {}
+    rows = _sort_project_rows(rows, str(config.get("sort", "name")))
+    now_ts = int(datetime.now().astimezone().timestamp())
     payload = [
-        {
-            "project": str(getattr(row, "name", "")),
-            "actions": _row_actions_payload(
-                base_dir,
-                row,
-                actions=actions,
-                notes_config=notes_config,
-            ),
-        }
+        _raycast_project_payload(
+            base_dir,
+            row,
+            actions=actions,
+            notes_config=notes_config,
+            raycast_config=config,
+            now_ts=now_ts,
+        )
         for row in rows
     ]
     print(json.dumps(payload))

@@ -645,6 +645,27 @@ def load_notes_config(data: object, *, defaults: dict[str, object]) -> dict[str,
     return out
 
 
+def load_raycast_config(data: object, *, defaults: dict[str, object]) -> dict[str, object]:
+    out = dict(defaults)
+    raw = data.get("raycast", {}) if isinstance(data, dict) else {}
+    if not isinstance(raw, dict):
+        return out
+    sort = str(raw.get("sort", out.get("sort", "name"))).strip()
+    out["sort"] = sort if sort in {"name", "opened"} else "name"
+    secondary = raw.get("secondary_info", out.get("secondary_info", []))
+    if isinstance(secondary, str):
+        out["secondary_info"] = [secondary.strip()] if secondary.strip() else []
+    elif isinstance(secondary, list):
+        out["secondary_info"] = [
+            str(item).strip() for item in secondary if str(item).strip()
+        ]
+    else:
+        out["secondary_info"] = []
+    separator = str(raw.get("secondary_separator", out.get("secondary_separator", " • ")))
+    out["secondary_separator"] = separator
+    return out
+
+
 def _merge_profile_overrides(
     default_profiles: dict, profile_source: dict[str, object]
 ) -> dict:

@@ -349,3 +349,34 @@ def test_save_ui_state_roundtrip(tmp_path: Path) -> None:
 def test_load_cache_profile_table_returns_three_scopes(tmp_path: Path) -> None:
     out = prefs.load_cache_profile_table(tmp_path)
     assert {"all", "active", "archive"} <= set(out.keys())
+
+
+def test_load_raycast_config_defaults_and_validates_sort(tmp_path: Path) -> None:
+    assert prefs.load_raycast_config(tmp_path) == {
+        "sort": "name",
+        "secondary_info": [],
+        "secondary_separator": " • ",
+    }
+
+    config_store.save_global_config_dict(tmp_path, {"raycast": {"sort": "opened"}})
+    assert prefs.load_raycast_config(tmp_path)["sort"] == "opened"
+
+    config_store.save_global_config_dict(tmp_path, {"raycast": {"sort": "bad"}})
+    assert prefs.load_raycast_config(tmp_path)["sort"] == "name"
+
+
+def test_load_raycast_config_supports_secondary_info(tmp_path: Path) -> None:
+    config_store.save_global_config_dict(
+        tmp_path,
+        {
+            "raycast": {
+                "secondary_info": ["{{ opened_ago }}", " {{ tags_space }} "],
+                "secondary_separator": " | ",
+            }
+        },
+    )
+
+    out = prefs.load_raycast_config(tmp_path)
+
+    assert out["secondary_info"] == ["{{ opened_ago }}", "{{ tags_space }}"]
+    assert out["secondary_separator"] == " | "

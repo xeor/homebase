@@ -66,13 +66,28 @@ to `www.raycast.com`.
 
 ## Homebase contract
 
-- Project search uses `b ls <filter expression>`.
 - Enter uses `b open <selection>`, so Homebase owns tmux/window behavior.
-- Search results and Cmd-K actions come from
-  `b integration raycast projects <filter expression>`.
+- The project list and Cmd-K actions come from
+  `b integration raycast projects`.
+- The Raycast search box uses native Raycast filtering over the loaded
+  project list. It does not run Homebase filter syntax per keystroke.
+- Project list ordering is controlled by `<base>/.homebase/config.yaml`:
+  `raycast.sort: name` (default) or `raycast.sort: opened`.
+- Optional `raycast.secondary_info` templates are shown as the Raycast
+  subtitle and indexed as search keywords. They are rendered from cached
+  row data.
 - `b integration raycast actions` remains available for single-purpose
   action inspection/debugging.
 - Cmd-K action execution uses `b integration raycast run <action> <selection>`.
+
+```yaml
+raycast:
+  sort: opened
+  secondary_info:
+    - "{{ opened_ago }}"
+    - "{{ tags_space }}"
+  secondary_separator: " • "
+```
 
 Enable secondary Raycast actions in Homebase action config:
 
@@ -99,7 +114,7 @@ scope.
 
 ## Commands
 
-- `Projects`: searches `b ls` with Homebase filter syntax
+- `Projects`: loads Homebase projects once and filters locally in Raycast
 - `Enter`: `b open {selection}`
 - `Cmd-K`: enabled Homebase Raycast actions
 

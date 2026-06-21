@@ -28,6 +28,19 @@ filters:
     hot: "#cli OR #api"
     stale: ":modified<=@-60d"
 
+# Raycast integration settings.
+raycast:
+  # Project list ordering in Raycast.
+  # name   = alphabetical (default)
+  # opened = newest last-opened first
+  sort: name
+  # Extra row info shown as Raycast subtitle and indexed for search.
+  # Rendered from cached row data; no per-row filesystem probes.
+  secondary_info:
+    - "{{ opened_ago }}"
+    - "{{ tags_space }}"
+  secondary_separator: " • "
+
 # Dynamic property badges on project rows.
 properties:
   GIT:

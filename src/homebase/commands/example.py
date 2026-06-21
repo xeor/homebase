@@ -472,6 +472,14 @@ filters:
     code: "##programming"
     urgent: "##priority"
 
+raycast:
+  # `name` is the default. Use `opened` for newest last-opened first.
+  sort: opened
+  secondary_info:
+    - "{{ opened_ago }}"
+    - "{{ tags_space }}"
+  secondary_separator: " • "
+
 properties:
   GIT:
     label: Git repo

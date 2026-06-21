@@ -26,6 +26,7 @@ def test_load_runtime_config_uses_loaders(tmp_path: Path) -> None:
         load_favorites=lambda _p, _actions: [],
         load_open_mode_config=lambda _p: {},
         load_notes_config=lambda _p: {},
+        load_raycast_config=lambda _p: {"sort": "opened"},
         load_reconcile_config=lambda _p: {},
         load_cache_profile_table=lambda _p: {},
         load_hook_specs=lambda _p: {},
@@ -34,6 +35,7 @@ def test_load_runtime_config_uses_loaders(tmp_path: Path) -> None:
     )
     assert cfg.property_defs == ["a"]
     assert cfg.named_filters == {"n": "#x"}
+    assert cfg.raycast_config == {"sort": "opened"}
 
 
 def test_validate_custom_hotkeys_accepts_unique_non_reserved() -> None:
