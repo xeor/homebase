@@ -339,7 +339,17 @@ new:
 
 # Default open behavior for UI open actions.
 open_mode:
+  # Profiles:
+  #   shell_cd                  close b and cd to project
+  #   tmux_tab                  open new tmux window
+  #   tmux_tab_load             goto matching tmux pane, else new tmux window
+  #   tmux_tab_load_or_goto     goto matching tmux pane, else load .tmuxp.yaml/new window
   profile: shell_cd
+  # Optional tmux session name/id used when b runs outside tmux.
+  # If omitted, one discoverable tmux session is used automatically.
+  # If multiple sessions or sockets are active, tmux open mode fails
+  # until this is set or `b --tmux-session <name-or-id>` is passed.
+  # tmux_session: main
 
 # Notes integration for built-in notes actions.
 notes:

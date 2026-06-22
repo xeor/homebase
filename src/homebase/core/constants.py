@@ -390,6 +390,7 @@ def reserved_hotkeys() -> dict[str, str]:
     return out
 
 ENV_BASE_DIR = "BASE_DIR"
+ENV_TMUX_SESSION = "HOMEBASE_TMUX_SESSION"
 WIDGET_PROJECTS = "#projects"
 BUSY_LABEL_IDLE = "idle"
 ACTION_ACCEPT = "accept"

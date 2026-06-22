@@ -98,7 +98,7 @@ def test_resolve_cached_returns_none_for_invalid_path() -> None:
 
 
 def test_pane_probe_desired_interval_uses_profile_policy(monkeypatch) -> None:
-    monkeypatch.setenv("TMUX", "1")
+    monkeypatch.setattr(pane_probe, "is_inside_current_tmux_pane", lambda: True)
     pdef = PropertyDef(
         key="act",
         label="act",
@@ -212,7 +212,7 @@ def test_start_probe_open_panes_honors_project_scan_limit(monkeypatch) -> None:
         stdout = "%1\ts:1.1\tw\tbash\t/tmp/p1/sub\t1\n%2\ts:1.2\tw\tbash\t/tmp/p2/sub\t1\n"
 
     app = _ProbeApp()
-    monkeypatch.setenv("TMUX", "1")
+    monkeypatch.setattr(pane_probe, "is_inside_current_tmux_pane", lambda: True)
     monkeypatch.setattr(pane_probe.threading, "Thread", _ImmediateThread)
     monkeypatch.setattr(pane_probe.subprocess, "run", lambda *a, **k: _Proc())
     pane_probe.start_probe_open_panes(app)
@@ -220,3 +220,256 @@ def test_start_probe_open_panes_honors_project_scan_limit(monkeypatch) -> None:
     mapped_names = {p.name for p in app.mapping.keys()}
     assert "p1" in mapped_names
     assert "p2" not in mapped_names
+
+
+def test_start_probe_open_panes_includes_active_rows_outside_current_rows(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    class _Row:
+        def __init__(self, path: Path) -> None:
+            self.path = path
+
+    class _ProbeApp:
+        def __init__(self, homebase: Path, corex_infra: Path) -> None:
+            self.base_dir = tmp_path
+            self.fast_exit_requested = False
+            self.pane_probe_running = False
+            self.open_panes_by_project = {}
+            self.open_pane_count_by_project = {}
+            self.open_pane_overflow_projects = set()
+            self.active_rows = [_Row(homebase), _Row(corex_infra)]
+            self.archived_rows = []
+            self.mapping = None
+
+        def _current_rows(self):
+            return self.active_rows[:1]
+
+        def _pane_probe_project_scan_limit(self) -> int:
+            return 10
+
+        def _queue_dynamic_property_refresh(self, _paths):
+            return None
+
+        def _pane_probe_desired_interval_s(self) -> float:
+            return 1.0
+
+        def call_from_thread(self, fn, mapping):
+            self.mapping = mapping
+            fn(mapping)
+
+        def _on_probe_open_panes_done(self, _mapping):
+            self.pane_probe_running = False
+
+    class _ImmediateThread:
+        def __init__(self, target, daemon: bool) -> None:
+            self._target = target
+
+        def start(self) -> None:
+            self._target()
+
+    class _Proc:
+        returncode = 0
+
+        def __init__(self, stdout: str) -> None:
+            self.stdout = stdout
+
+    homebase = tmp_path / "homebase"
+    corex_infra = tmp_path / "corex-infra"
+    homebase_sub = homebase / "src"
+    corex_infra_sub = corex_infra / "terraform"
+    homebase_sub.mkdir(parents=True)
+    corex_infra_sub.mkdir(parents=True)
+    app = _ProbeApp(homebase, corex_infra)
+
+    monkeypatch.delenv("TMUX", raising=False)
+    monkeypatch.setattr(
+        pane_probe,
+        "external_tmux_command_prefix_and_session",
+        lambda _base_dir, quiet: (["tmux"], "$0"),
+    )
+    monkeypatch.setattr(pane_probe.threading, "Thread", _ImmediateThread)
+    monkeypatch.setattr(
+        pane_probe.subprocess,
+        "run",
+        lambda *_args, **_kwargs: _Proc(
+            "\n".join(
+                [
+                    f"%1\tmain:1.1\thomebase\tbash\t{homebase_sub}\t1",
+                    f"%2\tmain:2.1\tcorex-infra\tbash\t{corex_infra_sub}\t1",
+                    f"%3\tmain:2.2\tcorex-infra\tbash\t{corex_infra_sub}\t0",
+                    f"%4\tmain:2.3\tcorex-infra\tbash\t{corex_infra_sub}\t0",
+                    f"%5\tmain:2.4\tcorex-infra\tbash\t{corex_infra_sub}\t0",
+                ]
+            )
+        ),
+    )
+
+    pane_probe.start_probe_open_panes(app)
+
+    assert app.mapping is not None
+    assert len(app.mapping[homebase]) == 1
+    assert len(app.mapping[corex_infra]) == 4
+
+
+def test_start_probe_open_panes_uses_resolved_session_outside_tmux(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    class _Row:
+        def __init__(self, path: Path) -> None:
+            self.path = path
+
+    class _ProbeApp:
+        def __init__(self, project: Path) -> None:
+            self.base_dir = tmp_path
+            self.fast_exit_requested = False
+            self.pane_probe_running = False
+            self.open_panes_by_project = {}
+            self.open_pane_count_by_project = {}
+            self.open_pane_overflow_projects = set()
+            self.active_rows = [_Row(project)]
+            self.archived_rows = []
+            self.mapping = None
+
+        def _current_rows(self):
+            return self.active_rows
+
+        def _pane_probe_project_scan_limit(self) -> int:
+            return 10
+
+        def _queue_dynamic_property_refresh(self, _paths):
+            return None
+
+        def _pane_probe_desired_interval_s(self) -> float:
+            return 1.0
+
+        def call_from_thread(self, fn, mapping):
+            self.mapping = mapping
+            fn(mapping)
+
+        def _on_probe_open_panes_done(self, _mapping):
+            self.pane_probe_running = False
+
+    class _ImmediateThread:
+        def __init__(self, target, daemon: bool) -> None:
+            self._target = target
+
+        def start(self) -> None:
+            self._target()
+
+    class _Proc:
+        returncode = 0
+
+        def __init__(self, stdout: str = "") -> None:
+            self.stdout = stdout
+
+    project = tmp_path / "p1"
+    child = project / "sub"
+    child.mkdir(parents=True)
+    app = _ProbeApp(project)
+    calls: list[list[str]] = []
+
+    monkeypatch.delenv("TMUX", raising=False)
+    monkeypatch.setattr(
+        pane_probe,
+        "external_tmux_command_prefix_and_session",
+        lambda _base_dir, quiet: (["tmux"], "$1"),
+    )
+    monkeypatch.setattr(pane_probe.threading, "Thread", _ImmediateThread)
+
+    def fake_run(cmd, **_kwargs):
+        calls.append(list(cmd))
+        return _Proc(f"%1\tmain:1.1\tw\tbash\t{child}\t1\n")
+
+    monkeypatch.setattr(pane_probe.subprocess, "run", fake_run)
+
+    pane_probe.start_probe_open_panes(app)
+
+    assert calls[0][:5] == ["tmux", "list-panes", "-s", "-t", "$1"]
+    assert app.mapping == {
+        project.resolve(): [
+            pane_probe.PaneRef(
+                pane_id="%1",
+                target="main:1.1",
+                window_name="w",
+                command="bash",
+                cwd=child.resolve(),
+                active=True,
+            )
+        ]
+    }
+
+
+def test_start_probe_open_panes_keys_mapping_by_row_path_when_resolved_differs(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    class _Row:
+        def __init__(self, path: Path) -> None:
+            self.path = path
+
+    class _ProbeApp:
+        def __init__(self, row_path: Path) -> None:
+            self.base_dir = tmp_path
+            self.fast_exit_requested = False
+            self.pane_probe_running = False
+            self.open_panes_by_project = {}
+            self.open_pane_count_by_project = {}
+            self.open_pane_overflow_projects = set()
+            self.active_rows = [_Row(row_path)]
+            self.archived_rows = []
+            self.mapping = None
+
+        def _current_rows(self):
+            return self.active_rows
+
+        def _pane_probe_project_scan_limit(self) -> int:
+            return 10
+
+        def _queue_dynamic_property_refresh(self, _paths):
+            return None
+
+        def _pane_probe_desired_interval_s(self) -> float:
+            return 1.0
+
+        def call_from_thread(self, fn, mapping):
+            self.mapping = mapping
+            fn(mapping)
+
+        def _on_probe_open_panes_done(self, _mapping):
+            self.pane_probe_running = False
+
+    class _ImmediateThread:
+        def __init__(self, target, daemon: bool) -> None:
+            self._target = target
+
+        def start(self) -> None:
+            self._target()
+
+    class _Proc:
+        returncode = 0
+
+        def __init__(self, stdout: str) -> None:
+            self.stdout = stdout
+
+    real_project = tmp_path / "real"
+    child = real_project / "sub"
+    child.mkdir(parents=True)
+    row_path = tmp_path / "link"
+    row_path.symlink_to(real_project)
+    app = _ProbeApp(row_path)
+
+    monkeypatch.setattr(pane_probe, "is_inside_current_tmux_pane", lambda: True)
+    monkeypatch.setattr(pane_probe.threading, "Thread", _ImmediateThread)
+    monkeypatch.setattr(
+        pane_probe.subprocess,
+        "run",
+        lambda *_args, **_kwargs: _Proc(f"%1\tmain:1.1\tw\tbash\t{child}\t1\n"),
+    )
+
+    pane_probe.start_probe_open_panes(app)
+
+    assert app.mapping is not None
+    assert list(app.mapping) == [row_path]
+    assert app.mapping[row_path][0].cwd == child.resolve()

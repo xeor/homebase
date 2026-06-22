@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import subprocess
 import types
 from pathlib import Path
 
@@ -11,6 +12,51 @@ from homebase.tmux import commands as tmux_commands
 def test_list_window_ids_parses_non_empty_rows() -> None:
     out = tmux_commands.list_window_ids(tmux=lambda *_args: "@1\n\n @2 \n")
     assert out == {"@1", "@2"}
+
+
+def test_load_profile_window_passes_tmuxp_target(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    profile = tmp_path / ".tmuxp.yaml"
+    profile.write_text("session_name: project\nwindows: []\n")
+    windows = iter([{"@1"}, {"@1", "@2"}])
+    calls: list[tuple[list[str], dict[str, str] | None]] = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append((list(cmd), kwargs.get("env")))
+        return subprocess.CompletedProcess(
+            cmd,
+            0,
+            stdout="loaded workspace: project\n",
+            stderr="",
+        )
+
+    monkeypatch.setattr(tmux_commands.subprocess, "run", fake_run)
+    env = {"TMUX_PANE": "%9"}
+
+    window_id, status = tmux_commands.load_profile_window(
+        profile,
+        list_window_ids=lambda: next(windows),
+        tmuxp_args=["tmuxp", "load", "-a", "-S", "/tmp/tmux.sock"],
+        env=env,
+    )
+
+    assert window_id == "@2"
+    assert status == "loaded workspace: project"
+    assert calls == [
+        (
+            [
+                "tmuxp",
+                "load",
+                "-a",
+                "-S",
+                "/tmp/tmux.sock",
+                str(profile),
+            ],
+            env,
+        )
+    ]
 
 
 def test_choose_load_mode_returns_cancel_on_none() -> None:

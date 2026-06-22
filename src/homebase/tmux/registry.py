@@ -144,16 +144,18 @@ def unregister_current_tmux_context(base_dir: Path) -> None:
 def load_active_tmux_context(
     base_dir: Path, *, now: float | None = None
 ) -> dict[str, Any] | None:
+    contexts = load_tmux_contexts(base_dir, now=now)
+    return contexts[0] if contexts else None
+
+
+def load_tmux_contexts(
+    base_dir: Path, *, now: float | None = None
+) -> list[dict[str, Any]]:
     ts = time.time() if now is None else now
     contexts = [
-        context
+        dict(context)
         for context in _load(registry_path(base_dir)).values()
         if _is_fresh(context, ts, TMUX_CONTEXT_TTL_S)
     ]
-    if not contexts:
-        return None
-    newest = contexts[0]
-    for context in contexts[1:]:
-        if _updated_at(context) > _updated_at(newest):
-            newest = context
-    return dict(newest)
+    contexts.sort(key=_updated_at, reverse=True)
+    return contexts

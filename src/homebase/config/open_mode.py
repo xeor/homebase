@@ -12,6 +12,10 @@ def load_open_mode_config(
     if not isinstance(raw, dict):
         return out
 
+    tmux_session = str(raw.get("tmux_session", "")).strip()
+    if tmux_session:
+        out["tmux_session"] = tmux_session
+
     profile = str(raw.get("profile", "")).strip()
     if profile in known_profiles:
         out["profile"] = profile
@@ -42,5 +46,9 @@ def save_open_mode_config(
     profile = str(conf.get("profile", default_profile)).strip() or default_profile
     if profile not in known_profiles:
         profile = default_profile
-    out["open_mode"] = {"profile": profile}
+    serialized = {"profile": profile}
+    tmux_session = str(conf.get("tmux_session", "")).strip()
+    if tmux_session:
+        serialized["tmux_session"] = tmux_session
+    out["open_mode"] = serialized
     return out

@@ -49,6 +49,7 @@ from ..core.constants import (
     BUILTIN_ACTIONS,
     DEFAULT_ARCHIVE_TZ_NAME,
     ENV_BASE_DIR,
+    ENV_TMUX_SESSION,
     discover_tab_actions,
 )
 from ..core.logging import configure_logging, logger
@@ -285,6 +286,9 @@ def main(argv: list[str]) -> int:
 
     base_dir = resolve_base_dir(ns.base_folder)
     os.environ[ENV_BASE_DIR] = str(base_dir)
+    tmux_session = str(getattr(ns, "tmux_session", "") or "").strip()
+    if tmux_session:
+        os.environ[ENV_TMUX_SESSION] = tmux_session
 
     fast_rc = _handle_fast_path_commands(ns, base_dir, parser)
     if fast_rc is not None:

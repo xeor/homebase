@@ -143,7 +143,7 @@ def record_benchmark() -> dict[str, float]:
     csv_path = HISTORY / "benchmark.csv"
     cols = ["date", "score", "warm_sc", "cold_sc"]
     with csv_path.open("w", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=cols)
+        w = csv.DictWriter(f, fieldnames=cols, lineterminator="\n")
         w.writeheader()
         w.writerows(rows)
     render_chart(
@@ -217,7 +217,7 @@ def append_csv(name: str, metrics: dict[str, float]) -> Path:
     rows.append({"date": today, **{k: _fmt(v) for k, v in metrics.items()}})
     rows.sort(key=lambda r: r["date"])
     with csv_path.open("w", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=cols)
+        w = csv.DictWriter(f, fieldnames=cols, lineterminator="\n")
         w.writeheader()
         w.writerows(rows)
     return csv_path

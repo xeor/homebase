@@ -70,6 +70,12 @@ def _build_new_parser(sub) -> None:
 def build_cli_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="b")
     parser.add_argument("--base-folder", dest="base_folder", default=None)
+    parser.add_argument(
+        "--tmux-session",
+        dest="tmux_session",
+        default="",
+        help="target tmux session name/id for outside-tmux open mode",
+    )
     parser.add_argument("--filter", dest="initial_filter", default="")
     parser.add_argument(
         "-v",

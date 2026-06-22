@@ -143,11 +143,15 @@ from ..metadata.api import (
     save_base_tags,
     save_base_wip,
 )
+from ..tmux.external import is_inside_current_tmux_pane
 from ..tmux.flow import (
     _tmux_command_prefix,
     tmux_find_panes_for_cwd,
     tmux_open_new_tab,
     tmux_open_new_tab_with_load_status,
+)
+from ..tmux.flow import (
+    open_with_mode as tmux_open_with_mode,
 )
 from ..tmux.registry import (
     register_current_tmux_context,
@@ -3262,13 +3266,20 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
             self.pane_probe_fast_until_ts, time.time() + 20.0
         )
 
-        if not os.getenv("TMUX"):
-            self._log("tmux not running; fallback to close + shell open", "warn")
-            self._set_runtime_status(
-                "tmux not running -> fallback shell open", "warn"
-            )
+        if not is_inside_current_tmux_pane():
+            rc = tmux_open_with_mode(self.base_dir, row.path)
+            if rc == 0:
+                self._log("opened in tmux client", "info")
+                self._set_runtime_status(
+                    "opened in tmux client", "info", ttl_s=10.0
+                )
+            else:
+                self._log("external tmux open failed", "error")
+                self._set_runtime_status(
+                    "external tmux open failed", "error", ttl_s=14.0
+                )
             self._refresh_side()
-            return False
+            return True
 
         if bool(spec.get("goto_loaded", False)):
             panes = tmux_find_panes_for_cwd(row.path)

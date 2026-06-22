@@ -75,9 +75,17 @@ class _App:
         self.queued: list[list[Path]] = []
         self.fast_interval = 1.0
         self.slow_interval = 30.0
+        self.table_refreshes = 0
+        self.side_refreshes = 0
 
     def _queue_dynamic_property_refresh(self, paths: list[Path]) -> None:
         self.queued.append(list(paths))
+
+    def _refresh_table(self) -> None:
+        self.table_refreshes += 1
+
+    def _refresh_side(self) -> None:
+        self.side_refreshes += 1
 
     def _pane_probe_desired_interval_s(self) -> float:
         return self.slow_interval
@@ -111,8 +119,29 @@ def test_on_probe_done_writes_counts_and_clears_running(tmp_path: Path) -> None:
     pp.on_probe_open_panes_done(app, {p1: [_pane(p1), _pane(p1, "1")], p2: [_pane(p2)]})
     assert app.pane_probe_running is False
     assert app.open_pane_count_by_project == {p1: 2, p2: 1}
+    assert app.table_refreshes == 1
+    assert app.side_refreshes == 1
     # Below the overflow threshold (>9 panes) — set should be empty.
     assert app.open_pane_overflow_projects == set()
+
+
+def test_on_probe_failed_preserves_counts_and_schedules_retry(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    app = _App()
+    app.open_pane_count_by_project = {tmp_path: 3}
+    app.pane_probe_running = True
+    logs: list[tuple[str, str]] = []
+    app._log = lambda message, level: logs.append((message, level))
+    monkeypatch.setattr(pp.time, "time", lambda: 100.0)
+
+    pp.on_probe_open_panes_failed(app, "tmux pane probe failed: unavailable")
+
+    assert app.pane_probe_running is False
+    assert app.open_pane_count_by_project == {tmp_path: 3}
+    assert app.pane_probe_next_due_at == 130.0
+    assert logs == [("tmux pane probe failed: unavailable", "warn")]
 
 
 def test_on_probe_done_flags_overflow_projects(tmp_path: Path) -> None:
@@ -187,7 +216,7 @@ def test_desired_interval_slow_when_not_in_tmux(monkeypatch) -> None:
 def test_desired_interval_fast_when_in_fast_window(monkeypatch) -> None:
     """If a recent event armed a fast window, that wins regardless of
     view or query state."""
-    monkeypatch.setenv("TMUX", "/tmp/tmux-1")
+    monkeypatch.setattr(pp, "is_inside_current_tmux_pane", lambda: True)
     monkeypatch.setattr(pp.time, "time", lambda: 100.0)
     app = _IntervalApp()
     app.pane_probe_fast_until_ts = 200.0
@@ -198,7 +227,7 @@ def test_desired_interval_fast_when_properties_column_visible(monkeypatch) -> No
     """The properties column shows per-project info that depends on
     pane state — keep the probe at fast cadence whenever it's
     visible."""
-    monkeypatch.setenv("TMUX", "/tmp/tmux-1")
+    monkeypatch.setattr(pp, "is_inside_current_tmux_pane", lambda: True)
     monkeypatch.setattr(pp.time, "time", lambda: 100.0)
     app = _IntervalApp()
     app.view_mode = "active"
@@ -210,7 +239,7 @@ def test_desired_interval_fast_when_query_contains_act(monkeypatch) -> None:
     """A query that includes the literal ``act`` token (e.g. ``:act``,
     ``act+``, etc.) implies the user is filtering on activity — go
     fast."""
-    monkeypatch.setenv("TMUX", "/tmp/tmux-1")
+    monkeypatch.setattr(pp, "is_inside_current_tmux_pane", lambda: True)
     monkeypatch.setattr(pp.time, "time", lambda: 100.0)
     app = _IntervalApp()
     app.query = ":act"

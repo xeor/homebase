@@ -21,6 +21,13 @@ def test_cli_parser_builds() -> None:
     assert ns.command == "help"
 
 
+def test_cli_parser_accepts_tmux_session() -> None:
+    cli_parser = importlib.import_module("homebase.cli.parser")
+    parser = cli_parser.build_cli_parser()
+    ns = parser.parse_args(["--tmux-session", "main", "help"])
+    assert ns.tmux_session == "main"
+
+
 def test_cli_main_callable() -> None:
     entry = importlib.import_module("homebase.cli.entry")
     assert callable(getattr(entry, "main", None))
@@ -32,6 +39,26 @@ def test_cli_help_smoke(tmp_path: Path, monkeypatch, capsys) -> None:
     rc = int(entry.main(["help"]))
     capsys.readouterr()
     assert rc == 0
+
+
+def test_cli_tmux_session_sets_process_override(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+) -> None:
+    entry = importlib.import_module("homebase.cli.entry")
+    constants = importlib.import_module("homebase.core.constants")
+    monkeypatch.setenv("BASE_FOLDER", str(tmp_path))
+    monkeypatch.delenv(constants.ENV_TMUX_SESSION, raising=False)
+
+    try:
+        rc = int(entry.main(["--tmux-session", "main", "help"]))
+
+        capsys.readouterr()
+        assert rc == 0
+        assert entry.os.environ[constants.ENV_TMUX_SESSION] == "main"
+    finally:
+        entry.os.environ.pop(constants.ENV_TMUX_SESSION, None)
 
 
 def test_cli_ls_smoke(tmp_path: Path, monkeypatch, capsys) -> None:

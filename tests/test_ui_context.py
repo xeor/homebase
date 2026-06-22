@@ -174,6 +174,59 @@ def test_bapp_editor_query_matches_command(tmp_path) -> None:
     assert "edt" in row.properties
 
 
+def test_bapp_tmux_open_outside_tmux_uses_shared_flow(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    ctx = UIContext(
+        base_dir=tmp_path,
+        archive_tz=ZoneInfo("UTC"),
+        archive_tz_name="UTC",
+        open_mode_config={"profile": "tmux_tab_load_or_goto"},
+    )
+    app = BApp(tmp_path, ctx=ctx)
+    row = ProjectRow(
+        path=tmp_path / "proj",
+        name="proj",
+        branch="main",
+        dirty="",
+        last="-",
+        src="fs",
+        created="-",
+        tags=[],
+        properties=[],
+        description="",
+        created_ts=0,
+        last_ts=0,
+        git_ts=0,
+        opened_ts=0,
+        is_fork=False,
+        is_tmp=False,
+        archived=False,
+        restore_target=None,
+        archived_ts=0,
+        wip=False,
+        suffix=None,
+    )
+    calls: list[tuple[object, object]] = []
+    statuses: list[tuple[str, str]] = []
+
+    monkeypatch.delenv("TMUX", raising=False)
+    monkeypatch.setattr(
+        "homebase.ui.app.tmux_open_with_mode",
+        lambda base_dir, path: calls.append((base_dir, path)) or 0,
+    )
+    app._log = lambda _message, _level="info": None  # type: ignore[method-assign]
+    app._set_runtime_status = (  # type: ignore[method-assign]
+        lambda message, level, **_kwargs: statuses.append((message, level))
+    )
+    app._refresh_side = lambda: None  # type: ignore[method-assign]
+
+    assert app._open_selected_in_tmux_mode(row) is True
+    assert calls == [(tmp_path, row.path)]
+    assert statuses == [("opened in tmux client", "info")]
+
+
 def test_bapp_dispatch_hotkey_target_supports_action_and_tab_ids(tmp_path) -> None:
     ctx = UIContext(
         base_dir=tmp_path,

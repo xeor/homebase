@@ -326,6 +326,18 @@ Most used top-level sections:
 - `new_project`
 - `state`
 
+### Open Mode
+
+Tmux profiles can be used from a terminal that is not itself inside
+tmux. If exactly one discoverable tmux session is running, Homebase
+uses it. If multiple sessions or tmux sockets are active, set
+`open_mode.tmux_session` or pass:
+
+```sh
+b --tmux-session main
+b --tmux-session main open my-project
+```
+
 ### Property Config
 
 `properties` is a token-keyed map in `.homebase/config.yaml`.
@@ -459,9 +471,13 @@ new:
       cd: true
       tags: [python]
 
-# Open behavior profile
+# Open behavior profile.
 open_mode:
   profile: shell_cd
+  # Optional when using a tmux profile outside tmux. If multiple tmux
+  # sessions or sockets are active, set this or pass
+  # `b --tmux-session <name-or-id>`.
+  # tmux_session: main
 
 # Notes integration
 notes:

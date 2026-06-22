@@ -20,15 +20,19 @@ def load_profile_window(
     profile: Path,
     *,
     list_window_ids: Callable[[], set[str]],
+    tmuxp_args: list[str] | None = None,
+    env: dict[str, str] | None = None,
 ) -> tuple[str, str | None]:
     before = list_window_ids()
+    command = list(tmuxp_args or ["tmuxp", "load", "-a"])
     proc = subprocess.run(
-        ["tmuxp", "load", "-a", str(profile)],
+        [*command, str(profile)],
         check=True,
         text=True,
         encoding="utf-8",
         errors="replace",
         capture_output=True,
+        env=env,
     )
     created = sorted(list_window_ids() - before)
     if len(created) != 1:
@@ -93,7 +97,7 @@ def open_new_tab_with_load_status(
             window_id, status_line = load_profile_window(profile)
             tmux_run("select-window", "-t", window_id)
             return 0, status_line
-        except (subprocess.SubprocessError, OSError, ValueError):
+        except (subprocess.SubprocessError, OSError, RuntimeError, ValueError):
             return tmux_open_new_tab(path), None
     return tmux_open_new_tab(path), None
 

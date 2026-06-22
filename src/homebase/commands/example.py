@@ -643,6 +643,10 @@ notes:
 
 open_mode:
   profile: shell_cd
+  # Optional when using a tmux profile outside tmux. If multiple tmux
+  # sessions or sockets are active, set this or pass
+  # `b --tmux-session <name-or-id>`.
+  # tmux_session: main
 
 hooks_post:
   rename:
