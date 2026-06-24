@@ -4,6 +4,7 @@ import json
 import os
 import shlex
 import shutil
+import subprocess
 import sys
 import textwrap
 from datetime import datetime
@@ -270,6 +271,37 @@ def _runtime_imports_ok() -> tuple[bool, str]:
     except ImportError as exc:
         return False, f"missing runtime python deps ({exc})"
     return True, "python runtime deps available"
+
+
+def _macos_fast_focus_installed() -> bool:
+    if sys.platform != "darwin":
+        return False
+    try:
+        import AppKit  # noqa: F401
+    except ImportError:
+        return False
+    return True
+
+
+def _macos_fast_focus_install_cmd() -> str:
+    # Deliberately NOT .resolve()'d: a venv's bin/python3 is a symlink
+    # chain that resolves out to the base interpreter (e.g. the
+    # Homebrew python), which has no venv of its own — `uv pip install
+    # --python` on that resolved path fails with "no virtual
+    # environment found". The unresolved sys.executable is the path
+    # `uv` actually needs to target this venv specifically.
+    return f'uv pip install --python "{sys.executable}" pyobjc-framework-Cocoa'
+
+
+def _install_macos_fast_focus() -> None:
+    proc = subprocess.run(
+        ["uv", "pip", "install", "--python", sys.executable, "pyobjc-framework-Cocoa"],
+        check=False,
+    )
+    if proc.returncode != 0:
+        raise OSError(
+            f"uv pip install pyobjc-framework-Cocoa failed (rc={proc.returncode})"
+        )
 
 
 def _state_text(status: str) -> str:
@@ -556,6 +588,7 @@ def _gather_context(
         update_detail=update_detail,
         config_exists=config_exists,
         config_valid=config_valid,
+        macos_fast_focus_installed=_macos_fast_focus_installed(),
     )
 
 
@@ -810,6 +843,32 @@ def _gitignore_check(ctx: SetupContext) -> SetupCheck:
     )
 
 
+def _macos_fast_focus_check(ctx: SetupContext) -> SetupCheck:
+    if sys.platform != "darwin":
+        return SetupCheck(
+            id="macos_fast_focus",
+            name="macOS fast-focus backend",
+            status=STATUS_SKIP,
+            detail="darwin only; osascript fallback is used on this platform",
+        )
+    if ctx.macos_fast_focus_installed:
+        return SetupCheck(
+            id="macos_fast_focus",
+            name="macOS fast-focus backend",
+            status=STATUS_PASS,
+            detail="pyobjc installed: fast Cocoa activation used for `b open` outside tmux",
+        )
+    return SetupCheck(
+        id="macos_fast_focus",
+        name="macOS fast-focus backend",
+        status=STATUS_WARN,
+        detail=(
+            "optional, not installed: falls back to osascript "
+            f"(noticeably slower window activation). install: {_macos_fast_focus_install_cmd()}"
+        ),
+    )
+
+
 def _build_checks(ctx: SetupContext) -> list[SetupCheck]:
     return [
         _binary_check("uv", "uv", ctx.uv_bin, "install uv and add to PATH"),
@@ -833,6 +892,7 @@ def _build_checks(ctx: SetupContext) -> list[SetupCheck]:
         _tmux_binding_check(ctx),
         _completion_check(ctx),
         _shell_init_check(ctx),
+        _macos_fast_focus_check(ctx),
     ]
 
 
@@ -1221,6 +1281,36 @@ def _tmux_binding_fix(ctx: SetupContext) -> SetupFix:
     )
 
 
+def _macos_fast_focus_fix(ctx: SetupContext) -> SetupFix:
+    installed = ctx.macos_fast_focus_installed
+    install_cmd = _macos_fast_focus_install_cmd()
+    return SetupFix(
+        id="macos_fast_focus",
+        title="macOS fast-focus backend (pyobjc, optional)",
+        description=(
+            "Lets `b open` outside tmux activate the terminal window via a "
+            "direct Cocoa call instead of spawning osascript — noticeably "
+            "faster. Optional: without it, window activation automatically "
+            "falls back to osascript (slower, but always works)."
+        ),
+        currently_present=installed,
+        currently_correct=installed,
+        required=False,
+        recommended=False,  # opt-in: never auto-selected by setup's defaults
+        apply_create=_install_macos_fast_focus,
+        apply_remove=None,  # uninstalling a python package is out of scope here
+        preview_create=(
+            f"current: {'installed' if installed else 'not installed'}",
+            f"would run: {install_cmd}",
+        ),
+        preview_remove=(
+            "uninstall not supported: run "
+            f'`uv pip uninstall --python "{sys.executable}" pyobjc-framework-Cocoa` by hand.',
+        ),
+        current_state_text="installed" if installed else "not installed (optional)",
+    )
+
+
 def _build_fixes(ctx: SetupContext) -> list[SetupFix]:
     """Always emit the full set of setup items.
 
@@ -1240,6 +1330,8 @@ def _build_fixes(ctx: SetupContext) -> list[SetupFix]:
     fixes.append(_launcher_symlink_fix(ctx))
     fixes.append(_gitignore_fix(ctx))
     fixes.append(_tmux_binding_fix(ctx))
+    if sys.platform == "darwin":
+        fixes.append(_macos_fast_focus_fix(ctx))
 
     # --- shell completion file ------------------------------------
     if ctx.completion_shell and ctx.completion_target is not None and ctx.expected_completion:

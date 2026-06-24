@@ -338,6 +338,49 @@ b --tmux-session main
 b --tmux-session main open my-project
 ```
 
+#### macOS: faster window activation (optional)
+
+When `b open`/`b cd` runs outside tmux on macOS, after switching to the
+right tmux window it also has to bring the terminal app itself to the
+front. By default this goes through `osascript` (AppleScript), which
+works everywhere but pays a real, measurable cost (process spawn +
+AppleScript compile) every time.
+
+Installing the optional `pyobjc-framework-Cocoa` dependency lets it use
+a direct Cocoa call instead — no subprocess, no AppleScript — which is
+noticeably faster. It's entirely optional: without it, homebase
+automatically falls back to the `osascript` path, just slower. Not
+applicable on Linux (this whole step is macOS-only either way).
+
+Check current status and install it interactively:
+
+```sh
+b setup
+```
+
+`b setup` reports whether it's installed and, if not, will install it
+when selected (it's opt-in — not selected by default). It runs:
+
+```sh
+uv pip install --python <the exact interpreter b runs on> pyobjc-framework-Cocoa
+```
+
+This installs straight into the same venv `b` itself runs from — never
+system-wide, no `--system` flag. If you're working from a checkout of
+this repo (the common case), the equivalent manual command is simply:
+
+```sh
+cd /path/to/homebase  # wherever this repo lives
+uv pip install pyobjc-framework-Cocoa
+```
+
+`uv pip install` without `--python` auto-targets `./.venv` from the
+current directory. Don't pass a `.resolve()`d interpreter path by
+hand — a venv's `bin/python3` is a symlink chain that resolves out to
+the base interpreter (e.g. Homebrew's python), which has no venv of
+its own, and `uv pip install --python` on that path fails with "no
+virtual environment found".
+
 ### Property Config
 
 `properties` is a token-keyed map in `.homebase/config.yaml`.

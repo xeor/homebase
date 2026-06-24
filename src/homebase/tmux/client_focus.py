@@ -5,20 +5,59 @@ import sys
 from pathlib import Path
 from typing import Callable
 
+from ..core import debug_timers
+from ..core.debug_timers import timed_step
 
-def focus_tmux_client_app(tmux: Callable[..., str]) -> None:
+
+def focus_tmux_client_app(tmux: Callable[..., str], base_dir: Path) -> None:
     if sys.platform != "darwin":
         return
-    try:
-        raw_pid = tmux("display-message", "-p", "#{client_pid}").strip()
-        pid = int(raw_pid)
-    except (subprocess.SubprocessError, OSError, RuntimeError, ValueError):
-        return
-    ancestry = _process_ancestry(pid)
-    app_bundle = _macos_app_bundle_for_ancestry(ancestry)
-    if app_bundle is not None and _open_macos_app(app_bundle):
-        return
-    _focus_macos_app_processes([candidate_pid for candidate_pid, _ in ancestry])
+    with timed_step(base_dir, "tmux_focus.client_pid_lookup") as info:
+        try:
+            raw_pid = tmux("display-message", "-p", "#{client_pid}").strip()
+            pid = int(raw_pid)
+        except (subprocess.SubprocessError, OSError, RuntimeError, ValueError):
+            info["ok"] = False
+            return
+        info["ok"] = True
+        info["pid"] = pid
+
+    with timed_step(base_dir, "tmux_focus.process_ancestry") as info:
+        ancestry = _process_ancestry(pid)
+        info["chain"] = [command for _pid, command in ancestry]
+
+    app = _macos_app_for_ancestry(ancestry)
+
+    if app is not None:
+        app_pid, app_bundle = app
+        # AppKit activation (pyobjc) has no subprocess/AppleScript-compile
+        # overhead and is the fastest working path, but it's an optional
+        # dependency — falls through to osascript when unavailable.
+        with timed_step(base_dir, "tmux_focus.activate_via_appkit", pid=app_pid) as info:
+            activated = _activate_via_appkit(app_pid)
+            info["ok"] = activated
+        if not activated:
+            with timed_step(
+                base_dir, "tmux_focus.activate_by_bundle", bundle=str(app_bundle)
+            ) as info:
+                activated = _open_macos_app(app_bundle)
+                info["ok"] = activated
+        if activated:
+            # `activate` returns once the Apple Event is delivered, not
+            # once the app is actually visibly frontmost (Space switch /
+            # window-manager animation happens after). Only measured in
+            # debug mode since it polls for up to a few seconds.
+            if debug_timers.enabled:
+                with timed_step(
+                    base_dir, "tmux_focus.wait_until_frontmost", pid=app_pid
+                ) as info:
+                    info["ok"] = _wait_until_frontmost(app_pid)
+            return
+
+    with timed_step(base_dir, "tmux_focus.activate_via_system_events") as info:
+        info["ok"] = _focus_macos_app_processes(
+            [candidate_pid for candidate_pid, _ in ancestry]
+        )
 
 
 def _process_ancestry(pid: int) -> list[tuple[int, str]]:
@@ -58,15 +97,33 @@ def _process_ancestry(pid: int) -> list[tuple[int, str]]:
     return out
 
 
-def _macos_app_bundle_for_ancestry(
+def _macos_app_for_ancestry(
     ancestry: list[tuple[int, str]],
-) -> Path | None:
-    for _pid, command in reversed(ancestry):
+) -> tuple[int, Path] | None:
+    for pid, command in reversed(ancestry):
         parts = Path(command).parts
         for index, part in enumerate(parts):
             if part.endswith(".app"):
-                return Path(*parts[: index + 1])
+                return pid, Path(*parts[: index + 1])
     return None
+
+
+def _activate_via_appkit(pid: int) -> bool:
+    """Fast path: direct Cocoa activation via the optional pyobjc dep.
+
+    No subprocess, no AppleScript compile — roughly an order of
+    magnitude faster than ``_open_macos_app`` when it works. Falls
+    through (returns False) if pyobjc isn't installed; see ``b setup``
+    for the optional install.
+    """
+    try:
+        from AppKit import NSApplicationActivateIgnoringOtherApps, NSRunningApplication
+    except ImportError:
+        return False
+    app = NSRunningApplication.runningApplicationWithProcessIdentifier_(pid)
+    if app is None:
+        return False
+    return bool(app.activateWithOptions_(NSApplicationActivateIgnoringOtherApps))
 
 
 def _open_macos_app(app_bundle: Path) -> bool:
@@ -85,6 +142,38 @@ def _open_macos_app(app_bundle: Path) -> bool:
     except (OSError, subprocess.TimeoutExpired):
         return False
     return proc.returncode == 0
+
+
+def _wait_until_frontmost(pid: int, timeout: float = 3.0) -> bool:
+    script = (
+        f"set targetPid to {pid}\n"
+        f"set deadline to (current date) + {timeout}\n"
+        "repeat\n"
+        '  tell application "System Events"\n'
+        "    set matches to application processes whose unix id is targetPid\n"
+        "    if (count of matches) > 0 and frontmost of item 1 of matches then\n"
+        "      return true\n"
+        "    end if\n"
+        "  end tell\n"
+        "  if (current date) > deadline then\n"
+        "    return false\n"
+        "  end if\n"
+        "  delay 0.05\n"
+        "end repeat"
+    )
+    try:
+        proc = subprocess.run(
+            ["osascript", "-e", script],
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            capture_output=True,
+            check=False,
+            timeout=timeout + 1.0,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return proc.returncode == 0 and proc.stdout.strip().lower() == "true"
 
 
 def _focus_macos_app_processes(pids: list[int]) -> bool:

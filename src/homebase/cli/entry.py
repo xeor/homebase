@@ -43,12 +43,13 @@ from ..commands.setup import (
     cmd_tags_sync,
     cmd_utils,
 )
-from ..core import runtime_init
+from ..core import debug_timers, runtime_init
 from ..core import utils as core_utils
 from ..core.constants import (
     BUILTIN_ACTIONS,
     DEFAULT_ARCHIVE_TZ_NAME,
     ENV_BASE_DIR,
+    ENV_DEBUG_TIMERS,
     ENV_TMUX_SESSION,
     discover_tab_actions,
 )
@@ -289,6 +290,10 @@ def main(argv: list[str]) -> int:
     tmux_session = str(getattr(ns, "tmux_session", "") or "").strip()
     if tmux_session:
         os.environ[ENV_TMUX_SESSION] = tmux_session
+    debug_timers.set_enabled(
+        bool(getattr(ns, "debug_timers", False))
+        or os.environ.get(ENV_DEBUG_TIMERS, "").strip() not in ("", "0")
+    )
 
     fast_rc = _handle_fast_path_commands(ns, base_dir, parser)
     if fast_rc is not None:

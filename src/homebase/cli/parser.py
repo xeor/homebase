@@ -84,6 +84,12 @@ def build_cli_parser() -> argparse.ArgumentParser:
         default=0,
         help="increase verbosity (-v, -vv, -vvv)",
     )
+    parser.add_argument(
+        "--debug-timers",
+        dest="debug_timers",
+        action="store_true",
+        help="record step timings for instrumented operations to .homebase/debug-timers.jsonl",
+    )
 
     sub = parser.add_subparsers(dest="command")
     p_help = sub.add_parser(

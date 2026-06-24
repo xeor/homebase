@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Callable
 
 from ..config.prefs import load_open_mode_config
+from ..core import debug_timers
 from ..core import utils as core_utils
 from ..core.constants import (
     ENV_TMUX_SESSION,
@@ -409,35 +410,37 @@ def _open_with_external_tmux_target(
         return list(prefix)
 
     socket_path = str(context.get("socket_path", "")).strip() if context else ""
-    rc = tmux_commands.open_with_mode(
-        base_dir,
-        path,
-        load_open_mode_config=load_context_open_mode,
-        open_mode_default_profile=str(OPEN_MODE_CONFIG["profile"]),
-        open_mode_profiles=OPEN_MODE_PROFILES,
-        open_shell_in_dir=open_shell_in_dir,
-        tmux_find_pane_for_cwd=lambda target: _tmux_find_pane_for_cwd_in_session(
-            target,
-            tmux_fn,
-            session_target,
-        ),
-        tmux_command_prefix=tmux_command_prefix,
-        tmux_open_new_tab_with_load=lambda target: _tmux_open_new_tab_with_load(
-            target,
-            tmux_command_prefix,
-            tmux_fn,
-            socket_path=socket_path,
-            session_target=session_target,
-        ),
-        tmux_open_new_tab=lambda target: _tmux_open_new_tab_in_session(
-            target,
-            tmux_command_prefix,
-            session_target,
-        ),
-        tmux_available=lambda: True,
-    )
+    with debug_timers.timed_step(base_dir, "tmux_focus.open_with_mode") as info:
+        rc = tmux_commands.open_with_mode(
+            base_dir,
+            path,
+            load_open_mode_config=load_context_open_mode,
+            open_mode_default_profile=str(OPEN_MODE_CONFIG["profile"]),
+            open_mode_profiles=OPEN_MODE_PROFILES,
+            open_shell_in_dir=open_shell_in_dir,
+            tmux_find_pane_for_cwd=lambda target: _tmux_find_pane_for_cwd_in_session(
+                target,
+                tmux_fn,
+                session_target,
+            ),
+            tmux_command_prefix=tmux_command_prefix,
+            tmux_open_new_tab_with_load=lambda target: _tmux_open_new_tab_with_load(
+                target,
+                tmux_command_prefix,
+                tmux_fn,
+                socket_path=socket_path,
+                session_target=session_target,
+            ),
+            tmux_open_new_tab=lambda target: _tmux_open_new_tab_in_session(
+                target,
+                tmux_command_prefix,
+                session_target,
+            ),
+            tmux_available=lambda: True,
+        )
+        info["rc"] = rc
     if rc == 0:
-        focus_tmux_client_app(tmux_fn)
+        focus_tmux_client_app(tmux_fn, base_dir)
     return rc
 
 
@@ -461,7 +464,9 @@ def open_with_mode_outside_tmux(
     spec = _open_profile_spec(profile)
     if not bool(spec.get("use_tmux", False)):
         return open_shell_in_dir(path)
-    resolved = _external_tmux_target(base_dir)
+    with debug_timers.timed_step(base_dir, "tmux_focus.external_target_resolution") as info:
+        resolved = _external_tmux_target(base_dir)
+        info["resolved"] = resolved is not None
     if resolved is None:
         return 1
     context, prefix, tmux_fn, session_target = resolved

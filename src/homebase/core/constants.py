@@ -45,6 +45,7 @@ BENCHMARK_REPORT_FILE_NAME = "benchmark.yaml"
 TEST_REPORT_FILE_NAME = "test.yaml"
 REGRESSION_TEST_REPORT_FILE_NAME = "regression-test.yaml"
 NESTED_DISCOVERY_REPORT_FILE_NAME = "nested-discovery.yaml"
+DEBUG_TIMERS_LOG_FILE_NAME = "debug-timers.jsonl"
 ARCHIVE_DIR_NAME = "_archive"
 PACKED_ARCHIVE_SUFFIX = ".tgz"
 TMUX_BIN_CANDIDATES = (
@@ -391,6 +392,7 @@ def reserved_hotkeys() -> dict[str, str]:
 
 ENV_BASE_DIR = "BASE_DIR"
 ENV_TMUX_SESSION = "HOMEBASE_TMUX_SESSION"
+ENV_DEBUG_TIMERS = "HOMEBASE_DEBUG_TIMERS"
 WIDGET_PROJECTS = "#projects"
 BUSY_LABEL_IDLE = "idle"
 ACTION_ACCEPT = "accept"

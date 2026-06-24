@@ -15,6 +15,13 @@ dependencies = [
   "loguru>=0.7.3",
 ]
 
+[project.optional-dependencies]
+# macOS only. Lets `b open` outside tmux activate the terminal window via
+# a direct Cocoa call instead of spawning osascript — noticeably faster
+# (no subprocess + AppleScript-compile cost). Optional: falls back to
+# osascript automatically when not installed. See `b setup` / README.
+macos-fast-focus = ["pyobjc-framework-Cocoa>=10.3; sys_platform == 'darwin'"]
+
 [project.scripts]
 homebase = "homebase.cli:entrypoint"
 b = "homebase.cli:entrypoint"

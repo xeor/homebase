@@ -77,7 +77,7 @@ def test_open_with_mode_uses_registered_tmux_socket_outside_tmux(
     monkeypatch.setattr(
         tmux_external,
         "focus_tmux_client_app",
-        lambda tmux_fn: focused.append(tmux_fn),
+        lambda tmux_fn, _base_dir: focused.append(tmux_fn),
     )
     seen: dict[str, object] = {}
 
@@ -415,7 +415,7 @@ def test_open_with_mode_selects_live_pane_in_resolved_session(
     monkeypatch.setattr(
         tmux_external,
         "focus_tmux_client_app",
-        lambda tmux_fn: focused.append(tmux_fn),
+        lambda tmux_fn, _base_dir: focused.append(tmux_fn),
     )
 
     calls: list[list[str]] = []
@@ -485,7 +485,7 @@ def test_open_with_mode_does_not_focus_when_external_open_fails(
     monkeypatch.setattr(
         tmux_external,
         "focus_tmux_client_app",
-        lambda tmux_fn: focused.append(tmux_fn),
+        lambda tmux_fn, _base_dir: focused.append(tmux_fn),
     )
     monkeypatch.setattr(
         tmux_external.tmux_commands,

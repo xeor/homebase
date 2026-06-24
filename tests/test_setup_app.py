@@ -53,6 +53,7 @@ def _ctx(tmp_path: Path, *, update_cmd: str = "uv tool upgrade homebase") -> Set
         update_detail="uv tool",
         config_exists=False,
         config_valid=True,
+        macos_fast_focus_installed=False,
     )
 
 

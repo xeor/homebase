@@ -123,6 +123,7 @@ class SetupContext:
     update_detail: str
     config_exists: bool
     config_valid: bool
+    macos_fast_focus_installed: bool
 
 
 @dataclass

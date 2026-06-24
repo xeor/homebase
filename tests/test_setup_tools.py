@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from dataclasses import replace
 from pathlib import Path
 
@@ -959,7 +960,7 @@ def test_cmd_setup_offers_to_install_shell_init(
         base_dir,
         bin_dir,
         tmux_bin_candidates=(),
-        prompt_yes_no=lambda _q, _d: True,
+        prompt_yes_no=lambda _q, d: d,
         completion_script_fn=lambda _s: "# completion\n",
         shell_init_script_fn=lambda _s: expected_wrapper,
     )
@@ -1006,7 +1007,7 @@ def test_cmd_setup_fixes_wrong_symlink_target(monkeypatch: pytest.MonkeyPatch, t
         base_dir,
         bin_dir,
         tmux_bin_candidates=(),
-        prompt_yes_no=lambda _q, _d: True,
+        prompt_yes_no=lambda _q, d: d,
     )
     assert rc == 0
     assert launcher.is_symlink()
@@ -1045,7 +1046,7 @@ def test_cmd_setup_renames_plain_launcher_file_before_symlink(
         base_dir,
         bin_dir,
         tmux_bin_candidates=(),
-        prompt_yes_no=lambda _q, _d: True,
+        prompt_yes_no=lambda _q, d: d,
     )
     assert rc == 0
     assert launcher.is_symlink()
@@ -1079,7 +1080,7 @@ def test_cmd_setup_dry_run_does_not_modify_files(monkeypatch: pytest.MonkeyPatch
         base_dir,
         bin_dir,
         tmux_bin_candidates=(),
-        prompt_yes_no=lambda _q, _d: True,
+        prompt_yes_no=lambda _q, d: d,
         dry_run=True,
     )
     assert rc == 1
@@ -1252,6 +1253,7 @@ def _basic_context() -> SetupContext:
         update_detail="",
         config_exists=False,
         config_valid=True,
+        macos_fast_focus_installed=False,
     )
 
 
@@ -1298,7 +1300,45 @@ def _ctx_for_fixes(tmp_path: Path) -> SetupContext:
         update_detail="detected",
         config_exists=False,
         config_valid=True,
+        macos_fast_focus_installed=False,
     )
+
+
+def test_macos_fast_focus_install_cmd_uses_unresolved_executable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Regression: Path(sys.executable).resolve() follows a venv's
+    # bin/python3 symlink chain out to the base interpreter (which has
+    # no venv of its own), making `uv pip install --python` fail with
+    # "no virtual environment found". The unresolved path is the one
+    # that actually identifies the venv.
+    fake_venv_python = "/tmp/fake/.venv/bin/python3"
+    monkeypatch.setattr(setup_tools.sys, "executable", fake_venv_python)
+
+    cmd = setup_tools._macos_fast_focus_install_cmd()
+
+    assert fake_venv_python in cmd
+    assert "--system" not in cmd
+
+
+def test_install_macos_fast_focus_passes_unresolved_executable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_venv_python = "/tmp/fake/.venv/bin/python3"
+    monkeypatch.setattr(setup_tools.sys, "executable", fake_venv_python)
+    captured: list[list[str]] = []
+
+    def fake_run(cmd, **_kwargs):
+        captured.append(list(cmd))
+        return subprocess.CompletedProcess(cmd, 0)
+
+    monkeypatch.setattr(setup_tools.subprocess, "run", fake_run)
+
+    setup_tools._install_macos_fast_focus()
+
+    assert captured == [
+        ["uv", "pip", "install", "--python", fake_venv_python, "pyobjc-framework-Cocoa"]
+    ]
 
 
 def test_write_homebase_gitignore_adds_cache_rule_once(tmp_path: Path) -> None:
