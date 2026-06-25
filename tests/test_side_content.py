@@ -64,6 +64,7 @@ class _AppStub:
 def test_global_info_lines_contains_runtime_overview() -> None:
     app = _AppStub()
     lines = content.global_info_lines(app)
+    assert any(line.startswith("version: ") for line in lines)
     assert any(line == "view: active" for line in lines)
     assert any(line == "sort: last" for line in lines)
     assert any(line == "rows visible: 2" for line in lines)

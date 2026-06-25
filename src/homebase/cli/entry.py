@@ -127,6 +127,8 @@ def _parse_args(argv: list[str], parser):
 
 def _handle_fast_path_commands(ns, base_dir: Path, parser) -> int | None:
     """Return an exit code if the command should bypass config loading; else None."""
+    if ns.command == "version":
+        return _cmd_version()
     if ns.command == "completion":
         return _cmd_completion(str(ns.shell))
     if ns.command == "shell-init":
@@ -622,6 +624,13 @@ def main(argv: list[str]) -> int:
     }:
         print("unknown command", file=sys.stderr)
     return rc
+
+
+def _cmd_version() -> int:
+    from ..core.version import get_commit, get_version
+
+    print(f"homebase {get_version()} ({get_commit()})")
+    return 0
 
 
 def _cmd_completion(shell: str) -> int:

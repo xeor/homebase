@@ -13,6 +13,7 @@ from typing import Callable
 
 import yaml
 
+from .changelog import ChangelogEntry, entries_since, load_changelog_entries
 from .constants import GLOBAL_CONFIG_FILE_NAME, HOMEBASE_DIR_NAME
 from .setup_model import (
     STATUS_FAIL,
@@ -29,6 +30,7 @@ from .setup_render import (
     render_checks,
     render_summary,
 )
+from .version import get_commit, get_version
 
 
 def find_executable(name: str, extra_candidates: tuple[str, ...] = ()) -> str | None:
@@ -1767,6 +1769,55 @@ def _print_fix_execution_summary(
 SETUP_REPORT_FILE_NAME = "setup-report.json"
 
 
+def _read_previous_release_info(homebase_dir: Path) -> tuple[str | None, str | None]:
+    """Version + commit recorded by the *previous* `b setup` run, read
+    before this run's report overwrites the file. Returns (None, None)
+    when there's no prior report or it's malformed."""
+    report_path = homebase_dir / SETUP_REPORT_FILE_NAME
+    if not report_path.is_file():
+        return None, None
+    try:
+        payload = json.loads(report_path.read_text())
+    except (OSError, ValueError):
+        return None, None
+    homebase_section = payload.get("homebase") if isinstance(payload, dict) else None
+    if not isinstance(homebase_section, dict):
+        return None, None
+    version = homebase_section.get("version")
+    commit = homebase_section.get("commit")
+    return (
+        version if isinstance(version, str) and version else None,
+        commit if isinstance(commit, str) and commit else None,
+    )
+
+
+def _print_version_section(
+    prev_version: str | None, current_version: str, current_commit: str
+) -> None:
+    print(f"version: {current_version} ({current_commit})")
+    if prev_version is None or prev_version == current_version:
+        return
+    print(f"- updated since last `b setup` run: {prev_version} -> {current_version}")
+    entries = entries_since(load_changelog_entries(), prev_version)
+    if not entries:
+        return
+    print("- changelog:")
+    for entry in entries:
+        print(f"  ## {entry.version} ({entry.commit}) - {entry.date}")
+        for line in entry.body.splitlines():
+            if line.strip():
+                print(f"    {line}")
+
+
+def _changelog_entry_to_dict(entry: ChangelogEntry) -> dict:
+    return {
+        "version": entry.version,
+        "commit": entry.commit,
+        "date": entry.date,
+        "body": entry.body,
+    }
+
+
 def _report_payload(
     *,
     ctx: SetupContext,
@@ -1776,6 +1827,8 @@ def _report_payload(
     results: list[FixResult],
     summary: SetupSummary,
     dry_run: bool,
+    prev_version: str | None,
+    prev_commit: str | None,
 ) -> dict:
     def _check_to_dict(c: SetupCheck) -> dict:
         return {
@@ -1814,6 +1867,9 @@ def _report_payload(
             "error": r.error,
         }
 
+    current_version = get_version()
+    current_commit = get_commit()
+    changed = prev_version is not None and prev_version != current_version
     return {
         "homebase": {
             "base_dir": str(ctx.base_dir),
@@ -1821,6 +1877,20 @@ def _report_payload(
             "homebase_dir": str(ctx.homebase_dir),
             "dry_run": dry_run,
             "timestamp": datetime.now().astimezone().isoformat(timespec="seconds"),
+            "version": current_version,
+            "commit": current_commit,
+        },
+        "release": {
+            "previous_version": prev_version,
+            "previous_commit": prev_commit,
+            "current_version": current_version,
+            "current_commit": current_commit,
+            "changelog": [
+                _changelog_entry_to_dict(e)
+                for e in (
+                    entries_since(load_changelog_entries(), prev_version) if changed else []
+                )
+            ],
         },
         "diagnostics": {
             "uv": ctx.uv_bin,
@@ -1963,6 +2033,7 @@ def cmd_setup(
     )
     initial_checks = _build_checks(ctx)
     fixes = _build_fixes(ctx)
+    prev_version, prev_commit = _read_previous_release_info(ctx.homebase_dir)
 
     if not json_output:
         print("setup: homebase")
@@ -1970,6 +2041,8 @@ def cmd_setup(
             print("mode: dry-run (no files will be modified)")
         print(f"base dir: {base_dir}")
         print("change base dir: --base-folder <path> or BASE_FOLDER=<path>")
+        print("")
+        _print_version_section(prev_version, get_version(), get_commit())
         print("")
         print("validation:")
         render_checks(initial_checks)
@@ -2032,6 +2105,8 @@ def cmd_setup(
         results=results,
         summary=summary,
         dry_run=dry_run,
+        prev_version=prev_version,
+        prev_commit=prev_commit,
     )
 
     if json_output:

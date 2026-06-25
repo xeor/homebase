@@ -102,6 +102,7 @@ mise run typecheck
 mise run imports
 mise run build
 mise run qa
+mise run deploy
 ```
 
 Integration task manifests are project-local. Mise also shows inherited
@@ -116,6 +117,7 @@ cd integrations/browser-tab-sync && mise tasks ls
 
 ```sh
 uv run b                   # interactive TUI
+uv run b version           # print version + commit
 uv run b ls                # fast cache-backed project list (names only)
 uv run b ls -l             # long format (modified / size / tags)
 uv run b ls tag:work       # filter (same syntax as the TUI's QUERY input)
@@ -782,7 +784,7 @@ ls dist/
 Install from a built wheel:
 
 ```sh
-uv pip install dist/homebase-0.1.0-py3-none-any.whl
+uv pip install dist/homebase-0.5.0-py3-none-any.whl
 b help
 ```
 
@@ -792,7 +794,34 @@ Install from GitHub:
 uv pip install git+https://github.com/xeor/homebase.git
 ```
 
-Bump `version` in `pyproject.toml` before each release.
+## Versioning
+
+Semver (`MAJOR.MINOR.PATCH`). `[project].version` in `pyproject.toml`
+is the single source of truth — everything else reads it at runtime,
+nothing else is hand-edited.
+
+```sh
+b version              # "homebase 0.5.0 (c824259)"
+```
+
+Version + current commit also show up in the TUI under
+`info > global`. The commit is resolved from `git rev-parse --short
+HEAD` against the checkout the code is running from; it shows
+`unknown` when running from a build with no `.git` (e.g. an installed
+wheel without a git checkout alongside it).
+
+Releasing:
+
+```sh
+mise run deploy
+```
+
+Opens `lazygit` to review/stage/commit working changes, then on exit
+asks for a bump (`major`/`minor`/`patch`/`none`), updates
+`pyproject.toml`, optionally shells out to `claude` to draft a
+`CHANGELOG.md` entry from the commits since the last tag, then
+commits the bump and tags `vX.Y.Z`. Never pushes — `git push && git
+push --tags` is on you.
 
 ## Repository Layout
 
@@ -801,9 +830,11 @@ pyproject.toml      # build config (hatchling), deps, scripts, ruff, pytest
 mise.toml           # Homebase-only task runner config
 src/homebase/       # package
 tests/              # pytest scaffold
+scripts/            # standalone maintenance scripts (e.g. release flow)
 docs/               # technical reference docs
 integrations/       # optional standalone companion projects
 TODO.md             # active follow-ups + feature backlog
+CHANGELOG.md        # per-release notes, newest first
 README.md           # this file
 AGENTS.md           # AI agent rules + project conventions
 ```

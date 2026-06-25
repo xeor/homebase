@@ -4,6 +4,7 @@ from pathlib import Path
 
 _TOP_LEVEL_COMMANDS = [
     "help",
+    "version",
     "ls",
     "json",
     "new",

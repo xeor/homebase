@@ -92,6 +92,7 @@ def build_cli_parser() -> argparse.ArgumentParser:
     )
 
     sub = parser.add_subparsers(dest="command")
+    sub.add_parser("version", help="show homebase version and commit")
     p_help = sub.add_parser(
         "help",
         help="show help for a topic (`b help topics` lists available topics)",

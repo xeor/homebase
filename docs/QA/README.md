@@ -25,17 +25,17 @@ docs/QA/
 
 ## Status snapshot
 
-Last run: `2026-06-24` · source: 224 files / 52k LOC · tests: 186 files / ~38k LOC
+Last run: `2026-06-24` · source: 225 files / 53k LOC · tests: 187 files / ~38k LOC
 
 | Tool          | Metric                          | Baseline     | Target        | Status   |
 |---------------|---------------------------------|--------------|---------------|----------|
-| pytest        | tests passing                   | 2241/2241    | all           | green    |
+| pytest        | tests passing                   | 2243/2243    | all           | green    |
 | ruff          | lint findings                   | 0            | 0             | green    |
 | mypy          | errors / files affected         | 0 / 0        | 0 / 0         | green    |
 | pytest-cov    | branch coverage                 | 66.4 %       | 75 %          | baseline |
 | import-linter | contract violations             | 0            | 0             | green    |
 | vulture       | findings (min-confidence 80)    | 0            | 0             | green    |
-| vulture       | findings (min-confidence 60)    | ~292 lns     | review        | baseline |
+| vulture       | findings (min-confidence 60)    | ~291 lns     | review        | baseline |
 | bandit        | High / Medium / Low             | 0 / 0 / 0    | 0 / 0 / < 20  | green    |
 | radon (cc)    | avg complexity                  | C (14.48)    | B (≤ 10)      | baseline |
 | radon (cc)    | functions ranked C or worse     | 180          | 0             | baseline |

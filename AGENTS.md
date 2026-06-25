@@ -188,27 +188,45 @@ root lockfile, and main QA pipeline.
   document in `docs/QA/README.md`; if tracked over time, also add a
   parser entry in `docs/QA/scripts/qa_track.py`.
 
-## 11. Shell / environment
+## 11. Versioning
+
+- Semver (`MAJOR.MINOR.PATCH`). `[project].version` in
+  `pyproject.toml` is the **single source of truth** — never hand-edit
+  a version number anywhere else.
+- Runtime code reads it via `core/version.py`
+  (`get_version()` = `importlib.metadata.version("homebase")`,
+  `get_commit()` = `git rev-parse --short HEAD` against the checkout,
+  falling back to `"unknown"` when there's no `.git`). Surfaced via
+  `b version` and the TUI's `info > global` panel.
+- Releases go through `mise run deploy`
+  (`scripts/deploy.py`): lazygit for review/stage/commit, then a
+  prompted bump (major/minor/patch/none), then an optional
+  `claude`-drafted `CHANGELOG.md` entry, then `git commit` + `git tag
+  vX.Y.Z`. It never pushes — that's a separate, explicit step.
+- Don't bump the version or edit `CHANGELOG.md` by hand outside that
+  flow unless the user explicitly asks.
+
+## 12. Shell / environment
 
 - Primary shell: nushell. Scripts must work in bash and zsh
   (POSIX `sh` where possible).
 - direnv is used for per-directory env (`.envrc`).
 - tmuxp is used for tmux session/window management.
 
-## 12. Git
+## 13. Git
 
 - Never commit unless asked. Never push unless asked. Never
   force-push to `main`/`master`.
 - Follow existing commit-message style.
 
-## 13. Security
+## 14. Security
 
 - Never expose or log secrets, tokens, API keys, passwords.
 - Don't create or modify `.env` files without explicit instruction.
 - Avoid destructive commands (`rm -rf`, `DROP TABLE`, …) without
   confirmation.
 
-## 14. File and directory conventions
+## 15. File and directory conventions
 
 - This repo is part of a larger workspace. Subdirectories may have
   their own `AGENTS.md` with more specific rules — those take
