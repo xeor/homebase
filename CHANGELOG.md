@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.2 - 2026-06-25
+
+- Improved version resolution logic
+
+
 ## 0.5.1 - 2026-06-25
 
 - Worktree support: detect, create (`b new --as worktree`, TUI "New worktree"), rename/archive/delete/deworktree via worktree repair, `b fix-worktrees` audit+repair, pack/unpack preflight warnings, `:repo`/`:worktree-of` filter keys, GIT column `↪parent` marker, sticky worktree-health banner (ctrl+x to dismiss), side panel repo path + worktree lineage
