@@ -1791,10 +1791,8 @@ def _read_previous_release_info(homebase_dir: Path) -> tuple[str | None, str | N
     )
 
 
-def _print_version_section(
-    prev_version: str | None, current_version: str, current_commit: str
-) -> None:
-    print(f"version: {current_version} ({current_commit})")
+def _print_version_section(prev_version: str | None, current_version: str) -> None:
+    print(f"version: {current_version}")
     if prev_version is None or prev_version == current_version:
         return
     print(f"- updated since last `b setup` run: {prev_version} -> {current_version}")
@@ -1803,7 +1801,7 @@ def _print_version_section(
         return
     print("- changelog:")
     for entry in entries:
-        print(f"  ## {entry.version} ({entry.commit}) - {entry.date}")
+        print(f"  ## {entry.version} - {entry.date}")
         for line in entry.body.splitlines():
             if line.strip():
                 print(f"    {line}")
@@ -1812,7 +1810,6 @@ def _print_version_section(
 def _changelog_entry_to_dict(entry: ChangelogEntry) -> dict:
     return {
         "version": entry.version,
-        "commit": entry.commit,
         "date": entry.date,
         "body": entry.body,
     }
@@ -2042,7 +2039,7 @@ def cmd_setup(
         print(f"base dir: {base_dir}")
         print("change base dir: --base-folder <path> or BASE_FOLDER=<path>")
         print("")
-        _print_version_section(prev_version, get_version(), get_commit())
+        _print_version_section(prev_version, get_version())
         print("")
         print("validation:")
         render_checks(initial_checks)

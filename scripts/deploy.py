@@ -8,17 +8,18 @@ Flow:
     1. Launch lazygit so you can review/stage/commit working changes.
     2. After lazygit exits, ask for a semver bump (major/minor/patch/none).
     3. Bump [project].version in pyproject.toml.
-    4. Always write a CHANGELOG.md entry headed
-       `## <version> (<commit>) - <date>` — <commit> is the HEAD this
-       release was cut from (captured before the bump commit). Optionally
-       run `claude` to draft the bullet body from the commits since the
-       last tag; the heading itself is always built here, never by claude.
-    5. git add + commit the version bump (+ changelog), then tag
-       vX.Y.Z. Never pushes.
+    4. Write a CHANGELOG.md entry headed `## <version> - <date>`. The body
+       is drafted by `claude` from the commits since the previous version
+       tag; the heading itself is always built here, never by claude.
+       The whole file is forced to ASCII dashes (no em/en-dash).
+    5. Show the new entry and let you edit it before anything is committed.
+    6. On confirmation, git add + commit the version bump (+ changelog),
+       then tag vX.Y.Z. Never pushes.
 """
 
 from __future__ import annotations
 
+import os
 import re
 import shutil
 import subprocess
@@ -69,15 +70,12 @@ def write_version(new_version: tuple[int, int, int]) -> str:
     return new_str
 
 
-def head_short_hash() -> str:
-    result = subprocess.run(
-        ["git", "rev-parse", "--short", "HEAD"],
-        cwd=REPO_ROOT,
-        text=True,
-        capture_output=True,
-        check=False,
-    )
-    return result.stdout.strip() if result.returncode == 0 else "unknown"
+_FANCY_DASHES = str.maketrans({"‒": "-", "–": "-", "—": "-", "―": "-"})
+
+
+def ascii_dashes(text: str) -> str:
+    """Replace figure/en/em/horizontal-bar dashes with ASCII '-'."""
+    return text.translate(_FANCY_DASHES)
 
 
 def previous_tag() -> str:
@@ -104,20 +102,22 @@ def commit_log_since(tag: str) -> str:
 
 
 def generate_changelog_body(new_version: str, commits: str) -> str | None:
-    """Bullet-point body only — the `## version (commit) - date` heading
-    is always built in ``write_changelog_entry`` so the format can't drift."""
+    """Bullet-point body only — the `## version - date` heading is always
+    built in ``write_changelog_entry`` so the format can't drift. Drafted
+    from the commits since the previous version tag; never em/en-dashes."""
     if shutil.which("claude") is None:
         print("claude not found in PATH, skipping changelog body", file=sys.stderr)
         return None
     if not commits:
-        print("no commits since last tag, skipping changelog body", file=sys.stderr)
+        print("no commits since previous version, skipping changelog body", file=sys.stderr)
         return None
     prompt = (
         f"Write the body of a terse CHANGELOG.md entry for homebase version {new_version}, "
         "single-user personal tool, no marketing language. Summarize the commits "
         "below into a few bullet points grouped by what changed (skip trivial/"
         "internal commits). Output ONLY markdown bullet points (no heading, "
-        f"no version/date line, nothing else).\n\nCommits:\n{commits}"
+        "no version/date line, nothing else). Use ASCII '-' only, never em-dash "
+        f"or en-dash.\n\nCommits:\n{commits}"
     )
     result = subprocess.run(
         ["claude", "-p", prompt],
@@ -129,11 +129,11 @@ def generate_changelog_body(new_version: str, commits: str) -> str | None:
     if result.returncode != 0 or not result.stdout.strip():
         print(f"claude changelog generation failed: {result.stderr.strip()}", file=sys.stderr)
         return None
-    return result.stdout.strip()
+    return ascii_dashes(result.stdout.strip())
 
 
-def write_changelog_entry(version: str, commit: str, body: str | None) -> None:
-    heading = f"## {version} ({commit}) - {date.today().isoformat()}"
+def write_changelog_entry(version: str, body: str | None) -> None:
+    heading = f"## {version} - {date.today().isoformat()}"
     entry = heading if not body else f"{heading}\n\n{body}"
     existing = CHANGELOG.read_text() if CHANGELOG.exists() else "# Changelog\n"
     lines = existing.splitlines()
@@ -142,7 +142,23 @@ def write_changelog_entry(version: str, commit: str, body: str | None) -> None:
         new_text = "\n".join([header, "", entry, "", *rest]).rstrip() + "\n"
     else:
         new_text = entry + "\n\n" + existing
-    CHANGELOG.write_text(new_text)
+    CHANGELOG.write_text(ascii_dashes(new_text))
+
+
+def review_changelog() -> None:
+    """Show the pending CHANGELOG.md and offer to edit it before commit.
+    Any edits are re-sanitized so the file never keeps an em/en-dash."""
+    print("\n--- CHANGELOG.md (new entry on top) ---")
+    print(CHANGELOG.read_text(), end="")
+    print("--- end ---")
+    editor = os.environ.get("VISUAL") or os.environ.get("EDITOR")
+    if not editor:
+        return
+    answer = input(f"Edit CHANGELOG.md in {editor} before commit? [y/N]: ").strip().lower()
+    if answer not in ("y", "yes"):
+        return
+    subprocess.run([*editor.split(), str(CHANGELOG)], cwd=REPO_ROOT, check=False)
+    CHANGELOG.write_text(ascii_dashes(CHANGELOG.read_text()))
 
 
 def git_commit_and_tag(new_version: str) -> None:
@@ -166,21 +182,20 @@ def main() -> int:
         print(f"invalid choice: {answer!r}", file=sys.stderr)
         return 1
 
-    # Captured before the bump commit exists, so it names the commit
-    # this release is built from (not the bump commit itself — that
-    # hash can't be known until after it's created).
-    commit = head_short_hash()
-
     current = read_current_version()
     new_version = write_version(bump(current, answer))
     print(f"bumped version: {'.'.join(map(str, current))} -> {new_version}")
 
-    body: str | None = None
-    gen = input("Generate CHANGELOG.md body via claude? [y/N]: ").strip().lower()
-    if gen in ("y", "yes"):
-        commits = commit_log_since(previous_tag())
-        body = generate_changelog_body(new_version, commits)
-    write_changelog_entry(new_version, commit, body)
+    commits = commit_log_since(previous_tag())
+    body = generate_changelog_body(new_version, commits)
+    write_changelog_entry(new_version, body)
+
+    review_changelog()
+
+    proceed = input(f"Commit version bump + changelog and tag v{new_version}? [y/N]: ").strip().lower()
+    if proceed not in ("y", "yes"):
+        print("aborted before commit; pyproject.toml + CHANGELOG.md left modified in the working tree")
+        return 0
 
     git_commit_and_tag(new_version)
     print(f"tagged v{new_version} (not pushed). Run `git push && git push --tags` when ready.")

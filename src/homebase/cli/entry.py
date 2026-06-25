@@ -627,9 +627,9 @@ def main(argv: list[str]) -> int:
 
 
 def _cmd_version() -> int:
-    from ..core.version import get_commit, get_version
+    from ..core.version import get_version
 
-    print(f"homebase {get_version()} ({get_commit()})")
+    print(f"homebase {get_version()}")
     return 0
 
 

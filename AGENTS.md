@@ -194,15 +194,21 @@ root lockfile, and main QA pipeline.
   `pyproject.toml` is the **single source of truth** — never hand-edit
   a version number anywhere else.
 - Runtime code reads it via `core/version.py`
-  (`get_version()` = `importlib.metadata.version("homebase")`,
-  `get_commit()` = `git rev-parse --short HEAD` against the checkout,
-  falling back to `"unknown"` when there's no `.git`). Surfaced via
-  `b version` and the TUI's `info > global` panel.
+  (`get_version()` = `importlib.metadata.version("homebase")`).
+  Surfaced (version only, no commit hash) via `b version` and the
+  TUI's `info > global` panel. `get_commit()` still exists but is only
+  recorded in the `b setup` JSON snapshot, never shown alongside the
+  version.
+- `CHANGELOG.md` entries are headed `## <version> - <date>` (no commit
+  hash). The file must never contain an em-dash or en-dash — only ASCII
+  `-`; `scripts/deploy.py` forces this on write.
 - Releases go through `mise run deploy`
   (`scripts/deploy.py`): lazygit for review/stage/commit, then a
-  prompted bump (major/minor/patch/none), then an optional
-  `claude`-drafted `CHANGELOG.md` entry, then `git commit` + `git tag
-  vX.Y.Z`. It never pushes — that's a separate, explicit step.
+  prompted bump (major/minor/patch/none), then a `claude`-drafted
+  `CHANGELOG.md` body built from the commits since the previous version
+  tag, then a review/edit step so you see the entry before anything is
+  committed, then `git commit` + `git tag vX.Y.Z` on confirmation. It
+  never pushes — that's a separate, explicit step.
 - Don't bump the version or edit `CHANGELOG.md` by hand outside that
   flow unless the user explicitly asks.
 

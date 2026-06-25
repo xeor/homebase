@@ -20,7 +20,7 @@ from ...core.constants import (
     COLOR_WARN_HEX,
 )
 from ...core.models import ProjectRow
-from ...core.version import get_commit, get_version
+from ...core.version import get_version
 from ...metadata.api import load_base_worktree as _load_worktree_block
 from ..actions import template as action_template
 
@@ -32,7 +32,7 @@ def global_info_lines(app: Any) -> list[str]:
     selected_text = selected.name if selected is not None else "-"
     open_panes_total = sum(int(n) for n in app.open_pane_count_by_project.values())
     return [
-        f"version: {get_version()} ({get_commit()})",
+        f"version: {get_version()}",
         f"base dir: {app._esc(app.base_dir)}",
         f"view: {app.view_mode}",
         f"sort: {app.sort_mode}",

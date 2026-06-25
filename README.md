@@ -117,7 +117,7 @@ cd integrations/browser-tab-sync && mise tasks ls
 
 ```sh
 uv run b                   # interactive TUI
-uv run b version           # print version + commit
+uv run b version           # print version
 uv run b ls                # fast cache-backed project list (names only)
 uv run b ls -l             # long format (modified / size / tags)
 uv run b ls tag:work       # filter (same syntax as the TUI's QUERY input)
@@ -801,14 +801,10 @@ is the single source of truth — everything else reads it at runtime,
 nothing else is hand-edited.
 
 ```sh
-b version              # "homebase 0.5.0 (c824259)"
+b version              # "homebase 0.5.0"
 ```
 
-Version + current commit also show up in the TUI under
-`info > global`. The commit is resolved from `git rev-parse --short
-HEAD` against the checkout the code is running from; it shows
-`unknown` when running from a build with no `.git` (e.g. an installed
-wheel without a git checkout alongside it).
+The version also shows up in the TUI under `info > global`.
 
 Releasing:
 
@@ -818,10 +814,12 @@ mise run deploy
 
 Opens `lazygit` to review/stage/commit working changes, then on exit
 asks for a bump (`major`/`minor`/`patch`/`none`), updates
-`pyproject.toml`, optionally shells out to `claude` to draft a
-`CHANGELOG.md` entry from the commits since the last tag, then
-commits the bump and tags `vX.Y.Z`. Never pushes — `git push && git
-push --tags` is on you.
+`pyproject.toml`, shells out to `claude` to draft a `CHANGELOG.md`
+entry from the commits since the previous version tag, shows it for
+review/edit, then commits the bump and tags `vX.Y.Z` on confirmation.
+`CHANGELOG.md` headings are `## <version> - <date>` and the file is
+kept free of em/en-dashes. Never pushes — `git push && git push
+--tags` is on you.
 
 ## Repository Layout
 

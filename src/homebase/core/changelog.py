@@ -9,7 +9,7 @@ CHANGELOG_PATH = REPO_ROOT / "CHANGELOG.md"
 
 _ENTRY_HEADER_RE = re.compile(
     r"^## (?P<version>\d+\.\d+\.\d+(?:[+\-][\w.]+)?) "
-    r"\((?P<commit>[0-9a-f]+|unknown)\) - (?P<date>\d{4}-\d{2}-\d{2})$"
+    r"- (?P<date>\d{4}-\d{2}-\d{2})$"
 )
 _SEMVER_PREFIX_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)")
 
@@ -17,7 +17,6 @@ _SEMVER_PREFIX_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)")
 @dataclass(frozen=True)
 class ChangelogEntry:
     version: str
-    commit: str
     date: str
     body: str
 
@@ -32,7 +31,6 @@ def parse_changelog(text: str) -> list[ChangelogEntry]:
             entries.append(
                 ChangelogEntry(
                     version=current["version"],
-                    commit=current["commit"],
                     date=current["date"],
                     body="\n".join(body_lines).strip("\n"),
                 )
