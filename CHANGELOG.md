@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.5.1 (32836ad) - 2026-06-25
+
+- Worktree support: detect, create (`b new --as worktree`, TUI "New worktree"), rename/archive/delete/deworktree via worktree repair, `b fix-worktrees` audit+repair, pack/unpack preflight warnings, `:repo`/`:worktree-of` filter keys, GIT column `↪parent` marker, sticky worktree-health banner (ctrl+x to dismiss), side panel repo path + worktree lineage
+- Hooks: full hook feature (config, runtime, snapshots)
+- `b new`: reworked new-project dialog — source-at-top, worktree-aware plan + validation, prefill/layout fixes, confirm-destructive guard, `.git` prompt on local import
+- `b fix`: `--repo-dir` autodetector, `repo_dir` in `.base.yaml`, `fix --all` fixes, better archive auto-date parsing
+- Config: reworked config system (phases 1–8)
+- Cache: persist `worktree_of` + `repo_dir` per row, race fix, cache rework
+- Filter: unified query input
+- `b example generate` for demo base folders; shared `workspace/seed/` primitives
+- Hotbar functionality and per-context hotbar styles
+- Range-color on datetime columns
+- Notes: markdown log append functionality
+- tmux: fast window switch, `b` works outside tmux, better tmux errors
+- Discovery: one bad project no longer aborts the whole scan
+- Action picker: hide actions that don't fit the current target
+- Moved browser tab sync (bts) and raycast into `integrations/`
+
+
 Entry format: `## <version> (<commit>) - <date>`. `<commit>` is the
 short hash the release was cut from. Every entry must have all three
 — enforced by `scripts/deploy.py`, never hand-write a heading without
