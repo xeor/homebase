@@ -1305,24 +1305,56 @@ def _ctx_for_fixes(tmp_path: Path) -> SetupContext:
 
 
 def test_macos_fast_focus_install_cmd_uses_unresolved_executable(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     # Regression: Path(sys.executable).resolve() follows a venv's
     # bin/python3 symlink chain out to the base interpreter (which has
     # no venv of its own), making `uv pip install --python` fail with
     # "no virtual environment found". The unresolved path is the one
-    # that actually identifies the venv.
+    # that actually identifies the venv. Only the unknown-mode fallback
+    # uses this ad-hoc path.
     fake_venv_python = "/tmp/fake/.venv/bin/python3"
     monkeypatch.setattr(setup_tools.sys, "executable", fake_venv_python)
 
-    cmd = setup_tools._macos_fast_focus_install_cmd()
+    cmd = setup_tools._macos_fast_focus_install_cmd("unknown", tmp_path)
 
     assert fake_venv_python in cmd
     assert "--system" not in cmd
 
 
+def test_macos_fast_focus_install_cmd_records_extra_for_managed_modes(
+    tmp_path: Path,
+) -> None:
+    # The disappearing-package bug: the extra must travel with the
+    # primary install so the next self-update doesn't prune it.
+    editable = setup_tools._macos_fast_focus_install_cmd("editable", tmp_path)
+    assert "uv tool install --editable" in editable
+    assert setup_tools.FAST_FOCUS_PACKAGE in editable
+
+    uv_tool = setup_tools._macos_fast_focus_install_cmd("uv-tool", tmp_path)
+    assert f"homebase[{setup_tools.FAST_FOCUS_EXTRA}]" in uv_tool
+
+    pip = setup_tools._macos_fast_focus_install_cmd("pip", tmp_path)
+    assert f"homebase[{setup_tools.FAST_FOCUS_EXTRA}]" in pip
+
+
+def test_self_update_preserves_fast_focus_extra(tmp_path: Path) -> None:
+    # When the extra is already installed, the self-update command keeps
+    # it so the upgrade doesn't drop it again.
+    (tmp_path / "src" / "homebase").mkdir(parents=True)
+    (tmp_path / "pyproject.toml").write_text("[project]\nname='homebase'\n")
+
+    _, plain = setup_tools._detect_self_update(tmp_path, None)
+    assert setup_tools.FAST_FOCUS_PACKAGE not in plain
+
+    _, with_extra = setup_tools._detect_self_update(
+        tmp_path, None, fast_focus_installed=True
+    )
+    assert setup_tools.FAST_FOCUS_PACKAGE in with_extra
+
+
 def test_install_macos_fast_focus_passes_unresolved_executable(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     fake_venv_python = "/tmp/fake/.venv/bin/python3"
     monkeypatch.setattr(setup_tools.sys, "executable", fake_venv_python)
@@ -1334,7 +1366,7 @@ def test_install_macos_fast_focus_passes_unresolved_executable(
 
     monkeypatch.setattr(setup_tools.subprocess, "run", fake_run)
 
-    setup_tools._install_macos_fast_focus()
+    setup_tools._install_macos_fast_focus("unknown", tmp_path)
 
     assert captured == [
         ["uv", "pip", "install", "--python", fake_venv_python, "pyobjc-framework-Cocoa"]

@@ -178,6 +178,7 @@ class SetupContext:
     config_exists: bool
     config_valid: bool
     macos_fast_focus_installed: bool
+    install_mode: str = "unknown"
 
 
 @dataclass

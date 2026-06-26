@@ -34,6 +34,12 @@ from .setup_render import (
 )
 from .version import get_commit, get_version
 
+# macOS fast-focus optional backend. ``FAST_FOCUS_EXTRA`` is the
+# pyproject optional-dependency group; ``FAST_FOCUS_PACKAGE`` is the
+# concrete distribution it pulls in.
+FAST_FOCUS_EXTRA = "macos-fast-focus"
+FAST_FOCUS_PACKAGE = "pyobjc-framework-Cocoa"
+
 
 def find_executable(name: str, extra_candidates: tuple[str, ...] = ()) -> str | None:
     found = shutil.which(name)
@@ -287,25 +293,31 @@ def _macos_fast_focus_installed() -> bool:
     return True
 
 
-def _macos_fast_focus_install_cmd() -> str:
-    # Deliberately NOT .resolve()'d: a venv's bin/python3 is a symlink
-    # chain that resolves out to the base interpreter (e.g. the
-    # Homebrew python), which has no venv of its own — `uv pip install
-    # --python` on that resolved path fails with "no virtual
-    # environment found". The unresolved sys.executable is the path
-    # `uv` actually needs to target this venv specifically.
-    return f'uv pip install --python "{sys.executable}" pyobjc-framework-Cocoa'
+def _macos_fast_focus_install_cmd(install_mode: str, base_dir: Path) -> str:
+    """Command that installs the Cocoa extra *persistently*.
+
+    For uv-tool / editable / pip installs the extra travels with the
+    primary install request so it lands in the tool receipt and
+    survives the next self-update. A bare ``uv pip install`` into the
+    managed venv is wiped by the following ``uv tool`` resync — that
+    was the disappearing-package bug."""
+    cmd = _install_command(install_mode, base_dir, with_fast_focus=True)
+    if cmd:
+        return cmd
+    # Unknown install mode: best-effort ad-hoc install into the active
+    # interpreter's environment. Not .resolve()'d: a venv's bin/python3
+    # symlink chain resolves out to the base interpreter (no venv of its
+    # own), making `uv pip install --python` fail with "no virtual
+    # environment found". This path has no receipt to record into, so a
+    # later managed update may still drop it.
+    return f'uv pip install --python "{sys.executable}" {FAST_FOCUS_PACKAGE}'
 
 
-def _install_macos_fast_focus() -> None:
-    proc = subprocess.run(
-        ["uv", "pip", "install", "--python", sys.executable, "pyobjc-framework-Cocoa"],
-        check=False,
-    )
+def _install_macos_fast_focus(install_mode: str, base_dir: Path) -> None:
+    cmd = _macos_fast_focus_install_cmd(install_mode, base_dir)
+    proc = subprocess.run(shlex.split(cmd), check=False)
     if proc.returncode != 0:
-        raise OSError(
-            f"uv pip install pyobjc-framework-Cocoa failed (rc={proc.returncode})"
-        )
+        raise OSError(f"{cmd} failed (rc={proc.returncode})")
 
 
 def _state_text(status: str) -> str:
@@ -459,26 +471,67 @@ def _shell_init_installed(
     return _shell_init_source_line(shell, target) in rc_text
 
 
-def _detect_self_update(base_dir: Path, launcher_path: Path | None) -> tuple[str, str]:
+def _detect_install_mode(
+    base_dir: Path, launcher_path: Path | None
+) -> tuple[str, str]:
+    """Return ``(mode, detail)`` where mode is one of ``editable``,
+    ``uv-tool``, ``pip`` or ``unknown``."""
     repo_root = base_dir
     if (repo_root / "src" / "homebase").is_dir() and (repo_root / "pyproject.toml").is_file():
-        cmd = f'uv tool install --editable "{repo_root}"'
-        return f"local editable install detected (repo={repo_root})", cmd
+        return "editable", f"local editable install detected (repo={repo_root})"
     launcher = str(launcher_path or "")
     exe = str(Path(sys.executable).resolve()) if str(sys.executable).strip() else ""
     if "/.local/share/uv/tools/" in exe:
-        return f"uv tool runtime detected (python={exe})", "uv tool upgrade homebase"
+        return "uv-tool", f"uv tool runtime detected (python={exe})"
     if "/.local/share/uv/tools/" in launcher:
-        return "uv tool install detected", "uv tool upgrade homebase"
+        return "uv-tool", "uv tool install detected"
     if "/site-packages/" in exe or "/dist-packages/" in exe:
-        return f"python environment install detected (python={exe})", "python -m pip install -U homebase"
+        return "pip", f"python environment install detected (python={exe})"
     if launcher:
         if exe:
-            return f"install mode unclear (launcher={launcher}, python={exe})", ""
-        return f"install mode unclear (launcher={launcher})", ""
+            return "unknown", f"install mode unclear (launcher={launcher}, python={exe})"
+        return "unknown", f"install mode unclear (launcher={launcher})"
     if exe:
-        return f"launcher path unavailable (python={exe})", ""
-    return "launcher path unavailable", ""
+        return "unknown", f"launcher path unavailable (python={exe})"
+    return "unknown", "launcher path unavailable"
+
+
+def _install_command(
+    install_mode: str, base_dir: Path, *, with_fast_focus: bool
+) -> str:
+    """(Re)install command for ``install_mode``.
+
+    With ``with_fast_focus`` the macOS Cocoa extra is recorded as part
+    of the install request so it survives later self-updates. uv-tool
+    upgrades and editable reinstalls resync the managed environment to
+    the recorded requirement set, which is why the extra must travel
+    with the primary install rather than be added ad-hoc afterwards.
+    Returns ``""`` for an unknown mode (no actionable command)."""
+    if install_mode == "editable":
+        cmd = f'uv tool install --editable "{base_dir}"'
+        if with_fast_focus:
+            cmd += f" --with {FAST_FOCUS_PACKAGE} --force"
+        return cmd
+    if install_mode == "uv-tool":
+        if with_fast_focus:
+            return f'uv tool install --force "homebase[{FAST_FOCUS_EXTRA}]"'
+        return "uv tool upgrade homebase"
+    if install_mode == "pip":
+        if with_fast_focus:
+            return f'python -m pip install -U "homebase[{FAST_FOCUS_EXTRA}]"'
+        return "python -m pip install -U homebase"
+    return ""
+
+
+def _detect_self_update(
+    base_dir: Path,
+    launcher_path: Path | None,
+    *,
+    fast_focus_installed: bool = False,
+) -> tuple[str, str]:
+    mode, detail = _detect_install_mode(base_dir, launcher_path)
+    cmd = _install_command(mode, base_dir, with_fast_focus=fast_focus_installed)
+    return detail, cmd
 
 
 # --- context gather --------------------------------------------------
@@ -548,7 +601,13 @@ def _gather_context(
             shell_init_rc,
         )
 
-    update_detail, update_cmd = _detect_self_update(base_dir, launcher_path)
+    fast_focus_installed = _macos_fast_focus_installed()
+    install_mode, update_detail = _detect_install_mode(base_dir, launcher_path)
+    # The self-update command carries the Cocoa extra whenever it's
+    # already installed, so updating doesn't silently drop it.
+    update_cmd = _install_command(
+        install_mode, base_dir, with_fast_focus=fast_focus_installed
+    )
 
     config_exists = config_path.is_file()
     config_valid = True
@@ -590,9 +649,10 @@ def _gather_context(
         shell_init_ok=shell_init_ok,
         update_cmd=update_cmd,
         update_detail=update_detail,
+        install_mode=install_mode,
         config_exists=config_exists,
         config_valid=config_valid,
-        macos_fast_focus_installed=_macos_fast_focus_installed(),
+        macos_fast_focus_installed=fast_focus_installed,
     )
 
 
@@ -868,7 +928,8 @@ def _macos_fast_focus_check(ctx: SetupContext) -> SetupCheck:
         status=STATUS_WARN,
         detail=(
             "optional, not installed: falls back to osascript "
-            f"(noticeably slower window activation). install: {_macos_fast_focus_install_cmd()}"
+            "(noticeably slower window activation). install: "
+            f"{_macos_fast_focus_install_cmd(ctx.install_mode, ctx.base_dir)}"
         ),
     )
 
@@ -1287,7 +1348,9 @@ def _tmux_binding_fix(ctx: SetupContext) -> SetupFix:
 
 def _macos_fast_focus_fix(ctx: SetupContext) -> SetupFix:
     installed = ctx.macos_fast_focus_installed
-    install_cmd = _macos_fast_focus_install_cmd()
+    install_mode = ctx.install_mode
+    base_dir = ctx.base_dir
+    install_cmd = _macos_fast_focus_install_cmd(install_mode, base_dir)
     return SetupFix(
         id="macos_fast_focus",
         title="macOS fast-focus backend (pyobjc, optional)",
@@ -1301,7 +1364,7 @@ def _macos_fast_focus_fix(ctx: SetupContext) -> SetupFix:
         currently_correct=installed,
         required=False,
         recommended=False,  # opt-in: never auto-selected by setup's defaults
-        apply_create=_install_macos_fast_focus,
+        apply_create=lambda: _install_macos_fast_focus(install_mode, base_dir),
         apply_remove=None,  # uninstalling a python package is out of scope here
         preview_create=(
             f"current: {'installed' if installed else 'not installed'}",
@@ -1309,7 +1372,7 @@ def _macos_fast_focus_fix(ctx: SetupContext) -> SetupFix:
         ),
         preview_remove=(
             "uninstall not supported: run "
-            f'`uv pip uninstall --python "{sys.executable}" pyobjc-framework-Cocoa` by hand.',
+            f'`uv pip uninstall --python "{sys.executable}" {FAST_FOCUS_PACKAGE}` by hand.',
         ),
         current_state_text="installed" if installed else "not installed (optional)",
     )
