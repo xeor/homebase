@@ -1346,6 +1346,7 @@ def _fake_uv_tool_receipt(
     (tool_dir / "uv-receipt.toml").write_text(
         f"[tool]\nrequirements = [{requirement}]\n"
     )
+    monkeypatch.setattr(setup_tools.sys, "prefix", str(tool_dir))
     monkeypatch.setattr(setup_tools.sys, "executable", str(tool_dir / "bin" / "python3"))
 
 
@@ -1375,6 +1376,30 @@ def test_uv_tool_fast_focus_reuses_editable_source(
     cmd = setup_tools._macos_fast_focus_install_cmd("uv-tool", tmp_path)
     assert '--editable "/home/u/homebase"' in cmd
     assert setup_tools.FAST_FOCUS_PACKAGE in cmd
+
+
+def test_uv_tool_receipt_found_when_venv_python_is_symlink(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # A uv tool venv's bin/python is a symlink to the base interpreter.
+    # The receipt lookup must not resolve() it (that escapes the tool
+    # dir) — it relies on sys.prefix / the unresolved exe path instead.
+    tool_dir = tmp_path / "tools" / "homebase"
+    (tool_dir / "bin").mkdir(parents=True)
+    (tool_dir / "uv-receipt.toml").write_text(
+        '[tool]\nrequirements = [{ name = "homebase", '
+        'git = "https://github.com/xeor/homebase.git" }]\n'
+    )
+    base_python = tmp_path / "base" / "bin" / "python3"
+    base_python.parent.mkdir(parents=True)
+    base_python.write_text("")
+    venv_python = tool_dir / "bin" / "python3"
+    venv_python.symlink_to(base_python)
+    monkeypatch.setattr(setup_tools.sys, "prefix", str(tool_dir))
+    monkeypatch.setattr(setup_tools.sys, "executable", str(venv_python))
+
+    req = setup_tools._uv_tool_receipt_requirement()
+    assert req is not None and req["git"] == "https://github.com/xeor/homebase.git"
 
 
 def test_uv_tool_fast_focus_pypi_only_when_recorded_source_is_pypi(

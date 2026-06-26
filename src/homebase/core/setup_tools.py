@@ -500,15 +500,16 @@ def _uv_tool_receipt_requirement() -> dict | None:
     """Return the recorded ``homebase`` requirement from the uv tool
     receipt of the running install, or ``None``.
 
-    The receipt sits next to the tool venv at
-    ``<uv-tool-dir>/homebase/uv-receipt.toml``; for a uv-tool install
-    the running interpreter is ``.../homebase/bin/python*``, so the
-    receipt is found by walking up from ``sys.executable``."""
+    The receipt sits at the uv tool venv root
+    (``<uv-tool-dir>/homebase/uv-receipt.toml``), which is ``sys.prefix``
+    for a uv-tool install. ``sys.executable`` must NOT be ``.resolve()``'d:
+    a uv venv's ``bin/python`` is a symlink to the base interpreter, so
+    resolving it walks out of the tool dir and the receipt is missed."""
     import tomllib
 
-    exe = Path(sys.executable).resolve()
-    for parent in exe.parents:
-        receipt = parent / "uv-receipt.toml"
+    roots = [Path(sys.prefix), *Path(sys.executable).parents]
+    for root in roots:
+        receipt = root / "uv-receipt.toml"
         if not receipt.is_file():
             continue
         try:
@@ -1428,6 +1429,7 @@ def _macos_fast_focus_fix(ctx: SetupContext) -> SetupFix:
         apply_create=lambda: _install_macos_fast_focus(install_mode, base_dir),
         apply_remove=None,  # uninstalling a python package is out of scope here
         preview_create=(
+            f"install method: {install_mode} ({ctx.update_detail})",
             f"current: {'installed' if installed else 'not installed'}",
             f"would run: {install_cmd}",
         ),

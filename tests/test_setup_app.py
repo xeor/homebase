@@ -83,12 +83,27 @@ def test_format_self_update_manual(tmp_path: Path) -> None:
     assert "needs manual action" in text or "manual action" in text
 
 
+def test_format_self_update_shows_install_method_and_escapes_command(
+    tmp_path: Path,
+) -> None:
+    from rich.text import Text
+
+    # When the fast-focus extra is installed the self-update command
+    # carries homebase[macos-fast-focus]; it must render, not crash.
+    cmd = 'uv tool install --force "homebase[macos-fast-focus] @ git+https://x/y.git"'
+    text = setup_app._format_self_update_static(_ctx(tmp_path, update_cmd=cmd))
+    assert "install method:" in text
+    rendered = Text.from_markup(text)
+    assert "homebase[macos-fast-focus]" in rendered.plain
+
+
 def test_format_diagnostics_includes_paths_and_tools(tmp_path: Path) -> None:
     text = setup_app._format_diagnostics(_ctx(tmp_path))
     assert "uv:" in text
     assert "git:" in text
     assert "expected binding" in text
     assert "bind-key t old" in text
+    assert "install method:" in text
 
 
 def test_format_debug_intro_lists_tools() -> None:

@@ -210,14 +210,18 @@ def _format_overview(checks: list[SetupCheck]) -> str:
 
 
 def _format_self_update_static(ctx: SetupContext) -> str:
-    lines: list[str] = []
+    lines: list[str] = [
+        f"[bold]install method:[/] {escape(ctx.install_mode)} "
+        f"({escape(ctx.update_detail)})",
+        "",
+    ]
     if ctx.update_cmd:
         lines.append("[bold bright_green]Self-update available[/]")
-        lines.append(f"  command: [bold]{ctx.update_cmd}[/]")
-        lines.append(f"  detail:  {ctx.update_detail}")
+        lines.append(f"  command: [bold]{escape(ctx.update_cmd)}[/]")
+        lines.append(f"  detail:  {escape(ctx.update_detail)}")
     else:
         lines.append("[bold bright_yellow]Self-update needs manual action[/]")
-        lines.append(f"  detail:  {ctx.update_detail or '<unknown>'}")
+        lines.append(f"  detail:  {escape(ctx.update_detail) or '<unknown>'}")
     lines.append("")
     lines.append("[bold]Diagnostics:[/]")
     launcher = str(ctx.launcher_path) if ctx.launcher_path is not None else "<not found>"
@@ -234,6 +238,7 @@ def _format_diagnostics(ctx: SetupContext) -> str:
         f"[bold]homebase dir:[/]    {ctx.homebase_dir}",
         f"[bold]target launcher:[/] {ctx.target}",
         f"[bold]dest launcher:[/]   {ctx.dest}",
+        f"[bold]install method:[/]  {escape(ctx.install_mode)} ({escape(ctx.update_detail)})",
         "",
         f"[bold]uv:[/]    {ctx.uv_bin or '[bright_red]<missing>[/]'}",
         f"[bold]git:[/]   {ctx.git_bin or '[bright_red]<missing>[/]'}",
