@@ -60,6 +60,21 @@ def focus_tmux_client_app(tmux: Callable[..., str], base_dir: Path) -> None:
         )
 
 
+def process_ancestry(pid: int) -> list[tuple[int, str]]:
+    """Public wrapper: ``[(pid, comm), …]`` from ``pid`` up to the
+    session root. Used by the setup Debug tab to show why a terminal
+    ``.app`` was or wasn't found in the chain."""
+    return _process_ancestry(pid)
+
+
+def macos_app_for_client_pid(pid: int) -> tuple[int, Path] | None:
+    """The ``(app_pid, app_bundle)`` that ``focus_tmux_client_app``
+    would activate for ``pid``, or ``None`` when no ``.app`` is found
+    in the ancestry (the case that silently falls back to System
+    Events)."""
+    return _macos_app_for_ancestry(_process_ancestry(pid))
+
+
 def _process_ancestry(pid: int) -> list[tuple[int, str]]:
     try:
         proc = subprocess.run(

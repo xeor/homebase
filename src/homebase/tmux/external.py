@@ -99,6 +99,19 @@ def external_tmux_command_prefix_and_session(
     return resolved[1], resolved[3]
 
 
+def resolve_external_tmux_target(
+    base_dir: Path,
+    *,
+    quiet: bool = True,
+) -> ExternalTmuxTarget | None:
+    """Public accessor for the same ``(context, prefix, tmux_fn,
+    session_target)`` resolution that ``b open`` uses outside tmux.
+
+    Used by the setup Debug tab so the focus diagnostic targets the
+    exact session/socket a real ``b open`` would act on."""
+    return _external_tmux_target(base_dir, quiet=quiet)
+
+
 def _external_tmux_target(
     base_dir: Path,
     *,

@@ -91,6 +91,83 @@ def test_format_diagnostics_includes_paths_and_tools(tmp_path: Path) -> None:
     assert "bind-key t old" in text
 
 
+def test_format_debug_intro_lists_tools() -> None:
+    from homebase.core.setup_model import SetupDebugTool
+
+    tools = [
+        SetupDebugTool(id="a", label="Tool A", description="does a", run=lambda: ""),
+        SetupDebugTool(id="b", label="Tool B", description="does b", run=lambda: ""),
+    ]
+    # Intro shows the first tool's detail; the rest live in the left menu.
+    text = setup_app._format_debug_intro(tools)
+    assert "Tool A" in text
+    assert "does a" in text
+    assert setup_app._format_debug_intro([]) == "[dim]No debug tools available.[/]"
+
+    info = setup_app._format_debug_tool_info(tools[1])
+    assert "Tool B" in info and "does b" in info
+
+
+def test_real_app_debug_tool_runs_and_logs(tmp_path: Path) -> None:
+    """Drive the Debug tab: press a debug tool button and confirm its
+    run() callable is invoked off the main thread."""
+    import asyncio
+
+    from textual.app import App
+
+    from homebase.core.setup_model import SetupDebugTool
+
+    invoked: list[str] = []
+
+    tool = SetupDebugTool(
+        id="probe",
+        label="Probe",
+        description="test probe",
+        run=lambda: invoked.append("ran") or "probe report line",
+    )
+
+    original_run = App.run
+
+    def fake_run(self):
+        async def driver():
+            from textual.widgets import ListView, TabbedContent
+
+            async with self.run_test() as pilot:
+                await pilot.pause()
+                self.query_one(TabbedContent).active = "debug"
+                await pilot.pause()
+                menu = self.query_one("#debug_menu", ListView)
+                menu.focus()
+                menu.index = 0
+                await pilot.pause()
+                await pilot.press("enter")
+                await pilot.pause()
+                if self._debug_thread is not None:
+                    self._debug_thread.join(timeout=5)
+                await pilot.pause()
+                assert self._debug_last_report == "probe report line"
+                self.action_debug_clear()
+                assert self._debug_last_report == ""
+                self.exit(None)
+
+        asyncio.run(driver())
+        return None
+
+    App.run = fake_run
+    try:
+        setup_app.run_setup_app(
+            _ctx(tmp_path),
+            [],
+            [],
+            apply_fn=lambda *_a, **_kw: [],
+            debug_tools=[tool],
+        )
+    finally:
+        App.run = original_run
+
+    assert invoked == ["ran"]
+
+
 def test_real_app_apply_without_changes_is_safe(tmp_path: Path) -> None:
     """End-to-end UI test: build the real app on a fully-configured
     workspace, press Ctrl+S, and verify no apply runs (because there

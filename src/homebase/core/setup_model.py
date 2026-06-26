@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable
+from typing import Callable, TypeVar, cast
+
+_T = TypeVar("_T")
 
 STATUS_PASS = "PASS"
 STATUS_WARN = "WARN"
@@ -89,6 +91,58 @@ class FixResult:
         return self.intent in {INTENT_KEEP, INTENT_ABSENT}
 
 
+@dataclass
+class MainThreadActivator:
+    """Lets a worker-thread debug tool run a callable on the process main
+    thread. The setup app installs ``call`` (its ``call_from_thread``)
+    once its event loop is running; until then ``run`` executes inline.
+
+    macOS window activation must happen on the main thread: off it,
+    ``NSRunningApplication.activateWithOptions_`` blocks ~1s on
+    frontmost-app arbitration, while the live `b` focus path (already on
+    the main thread) returns immediately."""
+
+    call: Callable[[Callable[[], object]], object] | None = None
+
+    def run(self, fn: Callable[[], _T]) -> _T:
+        if self.call is not None:
+            return cast(_T, self.call(fn))
+        return fn()
+
+
+@dataclass(frozen=True)
+class SetupDebugOption:
+    """One runnable variant inside a :class:`SetupDebugTool` — e.g. a
+    specific activation backend to force. ``run`` returns a Rich-markup
+    report, executed in the same worker-thread context as a tool."""
+
+    id: str
+    label: str
+    run: Callable[[], str]
+
+
+@dataclass(frozen=True)
+class SetupDebugTool:
+    """A single on-demand diagnostic exposed in the setup app's Debug tab.
+
+    A tool either runs directly (``run`` set, ``options`` empty) or
+    offers a set of ``options`` to choose between (``run`` unused). When
+    ``options`` are present the Debug tab shows them as a second list the
+    user drills into; ``detail`` (if set) returns a live, Rich-markup
+    string describing what the tool would do right now — used to show
+    which backend auto-detect resolves to.
+
+    Reports are executed in a worker thread, so they may block on
+    subprocesses (osascript, tmux) without freezing the UI."""
+
+    id: str
+    label: str
+    description: str
+    run: Callable[[], str] | None = None
+    options: tuple[SetupDebugOption, ...] = ()
+    detail: Callable[[], str] | None = None
+
+
 @dataclass(frozen=True)
 class SetupContext:
     base_dir: Path
@@ -167,8 +221,11 @@ __all__ = [
     "INTENT_CREATE",
     "INTENT_KEEP",
     "INTENT_REMOVE",
+    "MainThreadActivator",
     "SetupCheck",
     "SetupContext",
+    "SetupDebugOption",
+    "SetupDebugTool",
     "SetupFix",
     "SetupSummary",
     "STATUS_FAIL",

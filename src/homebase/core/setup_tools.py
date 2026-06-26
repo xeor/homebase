@@ -21,8 +21,10 @@ from .setup_model import (
     STATUS_SKIP,
     STATUS_WARN,
     FixResult,
+    MainThreadActivator,
     SetupCheck,
     SetupContext,
+    SetupDebugTool,
     SetupFix,
     SetupSummary,
 )
@@ -1945,6 +1947,8 @@ def _run_app_loop(
     dry_run: bool,
     prompt_yes_no: Callable[[str, bool], bool],
     allow_rerun_failed: bool,
+    debug_tools: list[SetupDebugTool] | None = None,
+    debug_activator: MainThreadActivator | None = None,
 ) -> list[FixResult]:
     """Run the Textual app in a loop, refreshing state when the user
     chooses "Back to setup" after applying. Returns the accumulated
@@ -1977,6 +1981,8 @@ def _run_app_loop(
             current_fixes,
             apply_fn=_apply_intents,
             dry_run=dry_run,
+            debug_tools=debug_tools or [],
+            debug_activator=debug_activator,
         )
         if outcome is None:
             # Either Textual import failed inside run_setup_app, or
@@ -2020,6 +2026,8 @@ def cmd_setup(
     dry_run: bool = False,
     json_output: bool = False,
     allow_rerun_failed: bool = True,
+    debug_tools: list[SetupDebugTool] | None = None,
+    debug_activator: MainThreadActivator | None = None,
 ) -> int:
     ctx = _gather_context(
         base_dir,
@@ -2071,6 +2079,8 @@ def cmd_setup(
             dry_run=dry_run,
             prompt_yes_no=prompt_yes_no,
             allow_rerun_failed=allow_rerun_failed,
+            debug_tools=debug_tools or [],
+            debug_activator=debug_activator,
         )
     else:
         results = _run_fix_loop(

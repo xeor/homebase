@@ -20,8 +20,11 @@ from .setup_model import (
     STATUS_WARN,
     ApplyOutcome,
     FixResult,
+    MainThreadActivator,
     SetupCheck,
     SetupContext,
+    SetupDebugOption,
+    SetupDebugTool,
     SetupFix,
 )
 
@@ -368,6 +371,51 @@ def _format_action_plan(fixes: list[SetupFix], selected: set[str]) -> str:
     return "\n".join(lines)
 
 
+_DEBUG_HINT_LINE = (
+    "[bold]Enter[/] run   [bold]c[/] clear   [bold]y[/] copy output   "
+    "[bold]↑↓[/] select"
+)
+
+
+def _format_debug_intro(debug_tools: list[SetupDebugTool]) -> str:
+    if not debug_tools:
+        return "[dim]No debug tools available.[/]"
+    return _format_debug_tool_info(debug_tools[0])
+
+
+def _format_debug_tool_info(tool: SetupDebugTool) -> str:
+    footer = (
+        "[dim]Press Enter to choose a method, then Enter to run it.[/]"
+        if tool.options
+        else "[dim]Press Enter to run. Output is appended below (c clears).[/]"
+    )
+    return "\n".join([f"[bold]{tool.label}[/]", "", tool.description, "", footer])
+
+
+def _copy_to_system_clipboard(text: str) -> tuple[bool, str]:
+    """Best-effort native clipboard write. Returns (ok, detail)."""
+    if sys.platform == "darwin":
+        cmd = ["pbcopy"]
+    elif sys.platform.startswith("linux"):
+        cmd = ["xclip", "-selection", "clipboard"]
+    else:
+        return False, f"no native clipboard for {sys.platform}"
+    try:
+        proc = subprocess.run(
+            cmd,
+            input=text,
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=5,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return False, f"{cmd[0]}: {type(exc).__name__}: {exc}"
+    if proc.returncode != 0:
+        return False, f"{cmd[0]} exited {proc.returncode}: {proc.stderr.strip()}"
+    return True, cmd[0]
+
+
 def run_setup_app(
     ctx: SetupContext,
     checks: list[SetupCheck],
@@ -375,6 +423,8 @@ def run_setup_app(
     *,
     apply_fn: Callable[..., list[FixResult]],
     dry_run: bool = False,
+    debug_tools: list[SetupDebugTool] | None = None,
+    debug_activator: MainThreadActivator | None = None,
 ) -> ApplyOutcome | None:
     """Launch the tabbed Textual setup app.
 
@@ -397,6 +447,9 @@ def run_setup_app(
         from textual.widgets import (
             Button,
             Header,
+            Label,
+            ListItem,
+            ListView,
             RichLog,
             SelectionList,
             Static,
@@ -418,6 +471,8 @@ def run_setup_app(
 
     fix_order = _ordered_fixes(fixes)
     fix_by_id = {fx.id: fx for fx in fix_order}
+    debug_tool_list = list(debug_tools or [])
+    debug_tool_by_id = {tool.id: tool for tool in debug_tool_list}
 
     class ApplyDialog(ModalScreen[ApplyOutcome]):
         """Modal log dialog shown while apply runs.
@@ -731,6 +786,37 @@ def run_setup_app(
             background: $surface;
         }
 
+        /* --- Debug tab (left menu | info+config / output / hints) - */
+        #debug_body { height: 1fr; padding: 1 1 0 1; }
+        #debug_menu {
+            width: 34;
+            height: 1fr;
+            border: round $panel;
+            margin: 0 1 0 0;
+        }
+        #debug_menu > ListItem { padding: 0 1; }
+        #debug_right { width: 1fr; height: 1fr; }
+        #debug_info {
+            height: auto;
+            max-height: 45%;
+            border: round $accent;
+            padding: 0 1;
+            margin: 0 0 1 0;
+        }
+        #debug_options {
+            height: auto;
+            max-height: 40%;
+            border: round $warning;
+            margin: 0 0 1 0;
+        }
+        #debug_options > ListItem { padding: 0 1; }
+        #debug_log {
+            height: 1fr;
+            border: round $accent;
+            background: $surface;
+        }
+        #debug_hint { height: 1; color: $text-muted; padding: 0 1; }
+
         /* --- bottom cancel bar (overview only) -------------------
          * action_bar height matches the natural Button height (3)
          * so the label sits vertically centered. margin-bottom keeps
@@ -772,7 +858,7 @@ def run_setup_app(
         #dialog_buttons { height: 3; align-horizontal: right; }
         #dialog_buttons Button { margin: 0 0 0 1; min-width: 18; }
         """
-        TAB_ORDER = ("overview", "fixes", "self_update", "diagnostics")
+        TAB_ORDER = ("overview", "fixes", "self_update", "diagnostics", "debug")
         BINDINGS = [
             Binding("ctrl+s", "apply", "Apply"),
             Binding("q", "cancel", "Cancel"),
@@ -790,29 +876,39 @@ def run_setup_app(
             Binding("ctrl+a", "all", "Select all"),
             Binding("ctrl+n", "none", "Select none"),
             Binding("u", "run_self_update", "Run update"),
+            Binding("c", "debug_clear", "Clear", show=False),
+            Binding("y", "debug_copy", "Copy", show=False),
             Binding("left", "prev_tab", "Prev tab"),
             Binding("right", "next_tab", "Next tab"),
             Binding("1", "show_tab('overview')", "Overview", show=False),
             Binding("2", "show_tab('fixes')", "Fixes", show=False),
             Binding("3", "show_tab('self_update')", "Self-update", show=False),
             Binding("4", "show_tab('diagnostics')", "Diagnostics", show=False),
+            Binding("5", "show_tab('debug')", "Debug", show=False),
         ]
 
         def __init__(self) -> None:
             super().__init__()
             self._update_proc: subprocess.Popen[str] | None = None
             self._update_thread: threading.Thread | None = None
+            self._debug_thread: threading.Thread | None = None
+            self._debug_detail_thread: threading.Thread | None = None
+            self._debug_selected_id: str | None = (
+                debug_tool_list[0].id if debug_tool_list else None
+            )
+            self._debug_options_tool_id: str | None = None
+            self._debug_last_report: str = ""
 
         def compose(self) -> ComposeResult:
             yield Header(show_clock=False)
             with TabbedContent(initial="fixes"):
-                with TabPane("Overview", id="overview"):
+                with TabPane("Overview [1]", id="overview"):
                     with VerticalScroll():
                         yield Static(
                             Text.from_markup(_format_overview(checks)),
                             classes="pane_text",
                         )
-                with TabPane("Fixes", id="fixes"):
+                with TabPane("Fixes [2]", id="fixes"):
                     with Container(id="fixes_grid"):
                         rows = [
                             (
@@ -844,7 +940,7 @@ def run_setup_app(
                             )
                             yield Button("Select all (Ctrl+A)", id="btn_all")
                             yield Button("Select none (Ctrl+N)", id="btn_none")
-                with TabPane("Self-update", id="self_update"):
+                with TabPane("Self-update [3]", id="self_update"):
                     with Vertical(id="self_update_body"):
                         yield Static(
                             Text.from_markup(_format_self_update_static(ctx)),
@@ -862,12 +958,42 @@ def run_setup_app(
                             wrap=True,
                             id="self_update_log",
                         )
-                with TabPane("Diagnostics", id="diagnostics"):
+                with TabPane("Diagnostics [4]", id="diagnostics"):
                     with VerticalScroll():
                         yield Static(
                             Text.from_markup(_format_diagnostics(ctx)),
                             classes="pane_text",
                         )
+                with TabPane("Debug [5]", id="debug"):
+                    with Horizontal(id="debug_body"):
+                        yield ListView(
+                            *[
+                                ListItem(
+                                    Label(tool.label),
+                                    id=f"debug_item_{tool.id}",
+                                )
+                                for tool in debug_tool_list
+                            ],
+                            id="debug_menu",
+                        )
+                        with Vertical(id="debug_right"):
+                            yield Static(
+                                Text.from_markup(
+                                    _format_debug_intro(debug_tool_list)
+                                ),
+                                id="debug_info",
+                            )
+                            yield ListView(id="debug_options")
+                            yield RichLog(
+                                highlight=False,
+                                markup=True,
+                                wrap=True,
+                                id="debug_log",
+                            )
+                            yield Static(
+                                Text.from_markup(_DEBUG_HINT_LINE),
+                                id="debug_hint",
+                            )
             with Horizontal(id="action_bar"):
                 yield Button(
                     "Cancel & Quit (q)", id="btn_cancel", variant="warning"
@@ -876,14 +1002,29 @@ def run_setup_app(
         # --- lifecycle ----------------------------------------------
 
         def on_mount(self) -> None:
+            # Let worker-thread debug tools marshal the macOS activation
+            # onto this (main) thread — the same context as live `b`.
+            if debug_activator is not None:
+                debug_activator.call = self.call_from_thread
             self._sync_focus_to_active_tab()
             self._refresh_detail()
             self._refresh_action_bar()
+
+        def on_unmount(self) -> None:
+            if debug_activator is not None:
+                debug_activator.call = None
 
         def on_tabbed_content_tab_activated(self, event) -> None:
             self._sync_focus_to_active_tab(event.pane.id)
             self._refresh_detail()
             self._refresh_action_bar(event.pane.id)
+            if event.pane.id == "debug" and self._debug_selected_id is not None:
+                tool = debug_tool_by_id.get(self._debug_selected_id)
+                if tool is not None:
+                    # Now that the tab is active, run the (possibly slow)
+                    # live detail probe and (re)build the method list.
+                    self._refresh_debug_info(tool)
+                    self._populate_debug_options(tool)
 
         def on_selection_list_selection_highlighted(self, _event) -> None:
             self._refresh_detail()
@@ -898,6 +1039,132 @@ def run_setup_app(
             # none, restored state on tab activation, etc.).
             self._refresh_row_labels()
             self._refresh_action_bar()
+
+        def on_list_view_highlighted(self, event) -> None:
+            list_id = getattr(event.list_view, "id", None)
+            if list_id != "debug_menu":
+                return
+            tool = self._tool_for_item(event.item)
+            if tool is None:
+                return
+            self._debug_selected_id = tool.id
+            self._refresh_debug_info(tool)
+            self._populate_debug_options(tool)
+
+        def on_list_view_selected(self, event) -> None:
+            list_id = getattr(event.list_view, "id", None)
+            if list_id == "debug_menu":
+                tool = self._tool_for_item(event.item)
+                if tool is None:
+                    return
+                self._debug_selected_id = tool.id
+                if tool.options:
+                    # Drill into the method list rather than running.
+                    self._focus_debug_options()
+                elif tool.run is not None:
+                    self._run_debug_report(tool.label, tool.run)
+                return
+            if list_id == "debug_options":
+                option = self._option_for_item(event.item)
+                if option is not None:
+                    self._run_debug_report(option.label, option.run)
+
+        @staticmethod
+        def _tool_for_item(item) -> "SetupDebugTool | None":
+            item_id = getattr(item, "id", None)
+            if not item_id or not item_id.startswith("debug_item_"):
+                return None
+            return debug_tool_by_id.get(item_id[len("debug_item_") :])
+
+        def _option_for_item(self, item) -> "SetupDebugOption | None":
+            item_id = getattr(item, "id", None)
+            if not item_id or not item_id.startswith("debug_opt_"):
+                return None
+            tool = debug_tool_by_id.get(self._debug_options_tool_id or "")
+            if tool is None:
+                return None
+            opt_id = item_id[len("debug_opt_") :]
+            return next((o for o in tool.options if o.id == opt_id), None)
+
+        def _populate_debug_options(self, tool: "SetupDebugTool") -> None:
+            from textual.css.query import NoMatches
+
+            try:
+                options = self.query_one("#debug_options", ListView)
+            except NoMatches:
+                return
+            if self._debug_options_tool_id == tool.id:
+                return
+            self._debug_options_tool_id = tool.id
+            options.clear()
+            options.display = bool(tool.options)
+            for opt in tool.options:
+                options.append(
+                    ListItem(Label(opt.label), id=f"debug_opt_{opt.id}")
+                )
+
+        def _focus_debug_options(self) -> None:
+            from textual.css.query import NoMatches
+
+            try:
+                options = self.query_one("#debug_options", ListView)
+            except NoMatches:
+                return
+            if not options.display:
+                return
+            if options.index is None:
+                options.index = 0
+            options.focus()
+
+        def _refresh_debug_info(self, tool: "SetupDebugTool") -> None:
+            from textual.css.query import NoMatches
+
+            try:
+                info = self.query_one("#debug_info", Static)
+            except NoMatches:
+                return
+            info.update(Text.from_markup(_format_debug_tool_info(tool)))
+            if tool.detail is not None and self._active_tab_id() == "debug":
+                self._start_debug_detail(tool)
+
+        def _start_debug_detail(self, tool: "SetupDebugTool") -> None:
+            if (
+                self._debug_detail_thread is not None
+                and self._debug_detail_thread.is_alive()
+            ):
+                return
+            detail_fn = tool.detail
+            if detail_fn is None:
+                return
+            tool_id = tool.id
+
+            def _work() -> None:
+                from rich.markup import escape
+
+                try:
+                    text = detail_fn()
+                except Exception as exc:  # noqa: BLE001 - surface any probe crash inline
+                    text = f"[bright_red]detail probe failed: {escape(str(exc))}[/]"
+                self.call_from_thread(self._apply_debug_detail, tool_id, text)
+
+            t = threading.Thread(target=_work, daemon=True)
+            self._debug_detail_thread = t
+            t.start()
+
+        def _apply_debug_detail(self, tool_id: str, detail_text: str) -> None:
+            from textual.css.query import NoMatches
+
+            if self._debug_selected_id != tool_id:
+                return
+            tool = debug_tool_by_id.get(tool_id)
+            if tool is None:
+                return
+            try:
+                info = self.query_one("#debug_info", Static)
+            except NoMatches:
+                return
+            body = _format_debug_tool_info(tool) + "\n\n" + detail_text
+            info.update(Text.from_markup(body))
 
         def _refresh_row_labels(self) -> None:
             """Update the action word at the start of every Fix row so
@@ -935,6 +1202,8 @@ def run_setup_app(
                 return active == "fixes"
             if action == "run_self_update":
                 return active == "self_update"
+            if action in ("debug_clear", "debug_copy"):
+                return active == "debug"
             return True
 
         # --- helpers -----------------------------------------------
@@ -964,6 +1233,8 @@ def run_setup_app(
             try:
                 if active_id == "fixes":
                     self.query_one("#fixes_list", SelectionList).focus()
+                elif active_id == "debug" and debug_tool_list:
+                    self.query_one("#debug_menu", ListView).focus()
                 else:
                     self.query_one(Tabs).focus()
             except NoMatches:
@@ -1226,6 +1497,96 @@ def run_setup_app(
             button = self.query_one("#btn_run_update", Button)
             button.label = "Run update (u)" if ctx.update_cmd else "Run update — unavailable"
             button.disabled = not ctx.update_cmd
+
+        # --- debug tools ----------------------------------------
+
+        def action_debug_clear(self) -> None:
+            from textual.css.query import NoMatches
+
+            try:
+                self.query_one("#debug_log", RichLog).clear()
+            except NoMatches:
+                return
+            self._debug_last_report = ""
+
+        def action_debug_copy(self) -> None:
+            if not self._debug_last_report:
+                self.notify("Nothing to copy yet.", severity="warning", timeout=4)
+                return
+            # Terminal OSC52 path (works over SSH / supported terminals).
+            self.copy_to_clipboard(self._debug_last_report)
+            # Native clipboard fallback; OSC52 is silently dropped by many
+            # terminals, so on macOS also push straight to pbcopy.
+            sys_ok, sys_detail = _copy_to_system_clipboard(self._debug_last_report)
+            if sys_ok:
+                self.notify("Output copied to clipboard.", timeout=4)
+            else:
+                self.notify(
+                    f"Sent to terminal clipboard (OSC52). Native copy: {sys_detail}",
+                    timeout=6,
+                )
+
+        def _run_debug_report(
+            self, label: str, run_fn: "Callable[[], str]"
+        ) -> None:
+            if self._debug_thread is not None and self._debug_thread.is_alive():
+                return
+            log = self.query_one("#debug_log", RichLog)
+            # The log is never auto-cleared — runs accumulate so earlier
+            # output stays visible. Only `c` clears it.
+            log.write("[dim]" + "─" * 48 + "[/]")
+            log.write(f"[bold]running: {label}…[/]")
+            self._set_debug_running(True)
+
+            def _work() -> None:
+                from rich.markup import escape
+
+                try:
+                    report = run_fn()
+                except Exception as exc:  # noqa: BLE001 - surface any tool crash in the log
+                    import traceback
+
+                    tb = traceback.format_exc()
+                    self._debug_last_report = (
+                        f"debug tool crashed: {type(exc).__name__}: {exc}\n{tb}"
+                    )
+                    self.call_from_thread(
+                        log.write,
+                        f"[bright_red bold]debug tool crashed: "
+                        f"{type(exc).__name__}: {escape(str(exc))}[/]",
+                    )
+                    for line in tb.splitlines():
+                        self.call_from_thread(log.write, f"[bright_red]{escape(line)}[/]")
+                else:
+                    self._debug_last_report = Text.from_markup(report).plain
+                    self.call_from_thread(log.write, report)
+                self.call_from_thread(self._set_debug_running, False)
+
+            t = threading.Thread(target=_work, daemon=True)
+            self._debug_thread = t
+            t.start()
+
+        def _set_debug_running(self, running: bool) -> None:
+            from textual.css.query import NoMatches
+
+            try:
+                menu = self.query_one("#debug_menu", ListView)
+            except NoMatches:
+                return
+            menu.disabled = running
+            try:
+                options = self.query_one("#debug_options", ListView)
+            except NoMatches:
+                options = None
+            if options is not None:
+                options.disabled = running
+            if not running:
+                # Return focus to wherever the run was launched from so the
+                # user can immediately pick another method or tool.
+                if options is not None and options.display:
+                    options.focus()
+                else:
+                    menu.focus()
 
     app = _SetupApp()
     return app.run()

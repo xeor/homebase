@@ -97,6 +97,17 @@ def cmd_setup(
     dry_run: bool = False,
     json_output: bool = False,
 ) -> int:
+    from ..core.setup_model import MainThreadActivator
+    from ..tmux.focus_debug import build_focus_debug_tools
+    from .debug_tools import build_dev_debug_tools
+
+    # Shared with the setup app so the macOS focus activation runs on the
+    # main thread (the same context as live `b`); see MainThreadActivator.
+    debug_activator = MainThreadActivator()
+    debug_tools = build_focus_debug_tools(
+        base_dir, debug_activator
+    ) + build_dev_debug_tools(base_dir)
+
     return setup_tools.cmd_setup(
         base_dir,
         bin_dir,
@@ -107,6 +118,8 @@ def cmd_setup(
         select_fix_ids_fn=None,
         dry_run=dry_run,
         json_output=json_output,
+        debug_tools=debug_tools,
+        debug_activator=debug_activator,
     )
 
 
