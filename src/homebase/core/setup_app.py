@@ -7,6 +7,8 @@ import threading
 from pathlib import Path
 from typing import Callable
 
+from rich.markup import escape
+
 from .setup_model import (
     INTENT_ABSENT,
     INTENT_CANNOT_CREATE,
@@ -125,10 +127,18 @@ def _right_pane_for_intent(
             f"[bold]Current:[/] {fix.current_state_text or '<unknown>'}"
         )
     if intent == INTENT_CREATE:
-        body = "\n".join(fix.preview_create) if fix.preview_create else "<no preview available>"
+        body = (
+            "\n".join(escape(line) for line in fix.preview_create)
+            if fix.preview_create
+            else "<no preview available>"
+        )
         return "Preview · install", body
     if intent == INTENT_REMOVE:
-        body = "\n".join(fix.preview_remove) if fix.preview_remove else "<no preview available>"
+        body = (
+            "\n".join(escape(line) for line in fix.preview_remove)
+            if fix.preview_remove
+            else "<no preview available>"
+        )
         return "Preview · remove", body
     return "Status", fix.current_state_text or ""
 
@@ -526,7 +536,6 @@ def run_setup_app(
             self.query_one("#apply_log", RichLog).write(line)
 
         def _do_apply(self) -> None:
-            from rich.markup import escape
 
             def log_fn(line: str, err: bool) -> None:
                 color = "bright_red" if err else "white"
@@ -1139,8 +1148,6 @@ def run_setup_app(
             tool_id = tool.id
 
             def _work() -> None:
-                from rich.markup import escape
-
                 try:
                     text = detail_fn()
                 except Exception as exc:  # noqa: BLE001 - surface any probe crash inline
@@ -1539,8 +1546,6 @@ def run_setup_app(
             self._set_debug_running(True)
 
             def _work() -> None:
-                from rich.markup import escape
-
                 try:
                     report = run_fn()
                 except Exception as exc:  # noqa: BLE001 - surface any tool crash in the log

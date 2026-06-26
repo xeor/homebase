@@ -376,6 +376,24 @@ def test_right_pane_for_remove_shows_remove_preview() -> None:
     assert "- old line" in body
 
 
+def test_right_pane_escapes_bracketed_preview_command() -> None:
+    # A preview line containing pip extras (e.g. homebase[macos-fast-focus])
+    # must not be parsed as Rich markup, or Text.from_markup raises
+    # MissingStyle on render.
+    from rich.text import Text
+
+    fix = SetupFix(
+        id="x", title="X",
+        currently_present=False, currently_correct=False,
+        recommended=True,
+        apply_create=lambda: None,
+        preview_create=('would run: uv tool install "homebase[macos-fast-focus]"',),
+    )
+    _, body = setup_app._right_pane_for_intent(fix, INTENT_CREATE)
+    rendered = Text.from_markup(body)
+    assert "homebase[macos-fast-focus]" in rendered.plain
+
+
 def test_right_pane_for_absent_says_no_action() -> None:
     fix = SetupFix(
         id="x", title="X",
