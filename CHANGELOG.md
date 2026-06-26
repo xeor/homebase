@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.6.0 - 2026-06-26
+
+- Add debug tools.
+
+
 ## 0.5.2 - 2026-06-25
 
 - Improved version resolution logic
