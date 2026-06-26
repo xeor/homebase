@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.6.1 - 2026-06-26
+
+- Keep `pyobjc` pinned across updates instead of upgrading it
+- Add more debug tooling
+
+
 ## 0.6.0 - 2026-06-26
 
 - Add debug tools.
