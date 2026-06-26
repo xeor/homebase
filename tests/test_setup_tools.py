@@ -1338,6 +1338,55 @@ def test_macos_fast_focus_install_cmd_records_extra_for_managed_modes(
     assert f"homebase[{setup_tools.FAST_FOCUS_EXTRA}]" in pip
 
 
+def _fake_uv_tool_receipt(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, requirement: str
+) -> None:
+    tool_dir = tmp_path / "tools" / "homebase"
+    (tool_dir / "bin").mkdir(parents=True)
+    (tool_dir / "uv-receipt.toml").write_text(
+        f"[tool]\nrequirements = [{requirement}]\n"
+    )
+    monkeypatch.setattr(setup_tools.sys, "executable", str(tool_dir / "bin" / "python3"))
+
+
+def test_uv_tool_fast_focus_reuses_git_source(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # Homebase is not on PyPI: a git install must reinstall from the
+    # recorded git source, never a bare homebase[extra] PyPI request.
+    _fake_uv_tool_receipt(
+        monkeypatch,
+        tmp_path,
+        '{ name = "homebase", git = "https://example.com/x/homebase?rev=abc" }',
+    )
+    cmd = setup_tools._macos_fast_focus_install_cmd("uv-tool", tmp_path)
+    assert "git+https://example.com/x/homebase?rev=abc" in cmd
+    assert f"homebase[{setup_tools.FAST_FOCUS_EXTRA}] @ git+" in cmd
+
+
+def test_uv_tool_fast_focus_reuses_editable_source(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _fake_uv_tool_receipt(
+        monkeypatch,
+        tmp_path,
+        '{ name = "homebase", editable = "/home/u/homebase" }',
+    )
+    cmd = setup_tools._macos_fast_focus_install_cmd("uv-tool", tmp_path)
+    assert '--editable "/home/u/homebase"' in cmd
+    assert setup_tools.FAST_FOCUS_PACKAGE in cmd
+
+
+def test_uv_tool_fast_focus_pypi_only_when_recorded_source_is_pypi(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _fake_uv_tool_receipt(monkeypatch, tmp_path, '{ name = "homebase" }')
+    cmd = setup_tools._macos_fast_focus_install_cmd("uv-tool", tmp_path)
+    assert cmd == (
+        f'uv tool install --force "homebase[{setup_tools.FAST_FOCUS_EXTRA}]"'
+    )
+
+
 def test_self_update_preserves_fast_focus_extra(tmp_path: Path) -> None:
     # When the extra is already installed, the self-update command keeps
     # it so the upgrade doesn't drop it again.

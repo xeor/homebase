@@ -496,6 +496,64 @@ def _detect_install_mode(
     return "unknown", "launcher path unavailable"
 
 
+def _uv_tool_receipt_requirement() -> dict | None:
+    """Return the recorded ``homebase`` requirement from the uv tool
+    receipt of the running install, or ``None``.
+
+    The receipt sits next to the tool venv at
+    ``<uv-tool-dir>/homebase/uv-receipt.toml``; for a uv-tool install
+    the running interpreter is ``.../homebase/bin/python*``, so the
+    receipt is found by walking up from ``sys.executable``."""
+    import tomllib
+
+    exe = Path(sys.executable).resolve()
+    for parent in exe.parents:
+        receipt = parent / "uv-receipt.toml"
+        if not receipt.is_file():
+            continue
+        try:
+            data = tomllib.loads(receipt.read_text())
+        except (OSError, tomllib.TOMLDecodeError):
+            return None
+        for req in data.get("tool", {}).get("requirements", []):
+            if isinstance(req, dict) and req.get("name") == "homebase":
+                return req
+        return None
+    return None
+
+
+def _uv_tool_fast_focus_cmd() -> str | None:
+    """Reinstall command that adds the Cocoa extra while reusing the
+    source recorded in the uv tool receipt (git/url/editable/path).
+
+    Homebase is not on PyPI, so a plain ``homebase[extra]`` request
+    only works for an install that actually came from PyPI. Returns
+    ``None`` when no receipt is found (caller falls back to the PyPI
+    form)."""
+    req = _uv_tool_receipt_requirement()
+    if req is None:
+        return None
+    spec = f"homebase[{FAST_FOCUS_EXTRA}]"
+    git = req.get("git")
+    if git:
+        return f'uv tool install --force "{spec} @ git+{git}"'
+    url = req.get("url")
+    if url:
+        return f'uv tool install --force "{spec} @ {url}"'
+    editable = req.get("editable")
+    if editable:
+        return (
+            f'uv tool install --force --editable "{editable}" '
+            f"--with {FAST_FOCUS_PACKAGE}"
+        )
+    path = req.get("path")
+    if path:
+        return f'uv tool install --force "{spec} @ {Path(path).as_uri()}"'
+    # Plain PyPI requirement (name, optionally version-pinned).
+    specifier = req.get("specifier", "")
+    return f'uv tool install --force "{spec}{specifier}"'
+
+
 def _install_command(
     install_mode: str, base_dir: Path, *, with_fast_focus: bool
 ) -> str:
@@ -514,6 +572,9 @@ def _install_command(
         return cmd
     if install_mode == "uv-tool":
         if with_fast_focus:
+            cmd = _uv_tool_fast_focus_cmd()
+            if cmd is not None:
+                return cmd
             return f'uv tool install --force "homebase[{FAST_FOCUS_EXTRA}]"'
         return "uv tool upgrade homebase"
     if install_mode == "pip":
