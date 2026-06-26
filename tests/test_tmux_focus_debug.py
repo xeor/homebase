@@ -115,6 +115,98 @@ def test_activate_with_appkit_warns_when_not_installed(monkeypatch) -> None:
     assert elapsed == 0.0
 
 
+class _FakeApp:
+    def __init__(self, pid: int, name: str, bundle: str, *, active: bool = False):
+        self._pid = pid
+        self._name = name
+        self._bundle = bundle
+        self._active = active
+
+    def processIdentifier(self):  # noqa: N802
+        return self._pid
+
+    def localizedName(self):  # noqa: N802
+        return self._name
+
+    def bundleIdentifier(self):  # noqa: N802
+        return self._bundle
+
+    def isActive(self):  # noqa: N802
+        return self._active
+
+    def activationPolicy(self):  # noqa: N802
+        return 0
+
+    def isFinishedLaunching(self):  # noqa: N802
+        return True
+
+    def isTerminated(self):  # noqa: N802
+        return False
+
+    def isHidden(self):  # noqa: N802
+        return False
+
+    def ownsMenuBar(self):  # noqa: N802
+        return self._active
+
+
+def test_appkit_diagnostics_reports_state_and_workspace() -> None:
+    target = _FakeApp(123, "kitty", "net.kovidgoyal.kitty")
+    frontmost = _FakeApp(456, "Terminal", "com.apple.Terminal", active=True)
+
+    class _FakeWorkspace:
+        def frontmostApplication(self):  # noqa: N802
+            return frontmost
+
+        def menuBarOwningApplication(self):  # noqa: N802
+            return frontmost
+
+    class _FakeNSWorkspace:
+        @staticmethod
+        def sharedWorkspace():  # noqa: N802
+            return _FakeWorkspace()
+
+    detail = "\n".join(
+        focus_debug._appkit_diagnostics(target, 123, False, True, _FakeNSWorkspace)
+    )
+    assert "activate returned:  True" in detail
+    assert "net.kovidgoyal.kitty" in detail
+    assert "running pid:        123" in detail
+    assert "regular (0)" in detail
+    # the wrong app actually frontmost is the key diagnostic signal
+    assert "workspace frontmost:" in detail
+    assert "Terminal (pid 456, com.apple.Terminal)" in detail
+
+
+def test_appkit_diagnostics_flags_pid_mismatch() -> None:
+    target = _FakeApp(999, "kitty", "net.kovidgoyal.kitty")
+
+    class _FakeWorkspace:
+        def frontmostApplication(self):  # noqa: N802
+            return None
+
+        def menuBarOwningApplication(self):  # noqa: N802
+            return None
+
+    class _FakeNSWorkspace:
+        @staticmethod
+        def sharedWorkspace():  # noqa: N802
+            return _FakeWorkspace()
+
+    detail = "\n".join(
+        focus_debug._appkit_diagnostics(target, 123, False, True, _FakeNSWorkspace)
+    )
+    assert "!= detected 123" in detail
+    assert "workspace frontmost: <none>" in detail
+
+
+def test_activation_policy_name_known_and_unknown() -> None:
+    assert "regular" in focus_debug._activation_policy_name(0)
+    assert "accessory" in focus_debug._activation_policy_name(1)
+    assert "prohibited" in focus_debug._activation_policy_name(2)
+    assert "unknown (7)" in focus_debug._activation_policy_name(7)
+
+
 def test_activator_run_uses_installed_call() -> None:
     calls: list[object] = []
 

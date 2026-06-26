@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import platform
 import subprocess
 import sys
 import time
@@ -112,6 +113,70 @@ def _pyobjc_status() -> tuple[bool, str]:
     return True, "available"
 
 
+# activationPolicy() values; accessory/prohibited apps cannot be made
+# frontmost the normal way, which is a common reason activation "succeeds"
+# but the window never comes forward.
+_ACTIVATION_POLICY_NAMES = {
+    0: "regular (0) — normal app, can take focus",
+    1: "accessory (1) — agent/UIElement, won't normally take focus",
+    2: "prohibited (2) — background only, cannot take focus",
+}
+
+
+def _activation_policy_name(policy: int) -> str:
+    return _ACTIVATION_POLICY_NAMES.get(int(policy), f"unknown ({policy})")
+
+
+def _appkit_app_desc(app: object) -> str:
+    """One-line ``name (pid, bundle)`` for an ``NSRunningApplication``."""
+    if app is None:
+        return "<none>"
+    return (
+        f"{app.localizedName() or '<unnamed>'} "
+        f"(pid {app.processIdentifier()}, {app.bundleIdentifier() or '<no bundle>'})"
+    )
+
+
+def _appkit_frontmost_name() -> str:
+    try:
+        from AppKit import NSWorkspace
+    except ImportError as exc:
+        return f"<pyobjc not installed: {exc}>"
+    return _appkit_app_desc(NSWorkspace.sharedWorkspace().frontmostApplication())
+
+
+def _appkit_diagnostics(
+    running: object,
+    app_pid: int,
+    active_before: bool,
+    activate_returned: bool,
+    ns_workspace: object,
+) -> list[str]:
+    """State of the target app and the workspace right after an AppKit
+    activation attempt. Pinpoints the case where ``activateWithOptions_``
+    reports success but the app never becomes frontmost (TCC / Spaces /
+    activation-policy issues, or another app holding activation)."""
+    running_pid = int(running.processIdentifier())
+    pid_note = "" if running_pid == app_pid else f"  [!= detected {app_pid}]"
+    workspace = ns_workspace.sharedWorkspace()
+    lines = [
+        f"activate returned:  {activate_returned}",
+        f"bundle id:          {running.bundleIdentifier() or '<none>'}",
+        f"localized name:     {running.localizedName() or '<none>'}",
+        f"running pid:        {running_pid}{pid_note}",
+        f"activation policy:  {_activation_policy_name(running.activationPolicy())}",
+        f"finished launching: {bool(running.isFinishedLaunching())}",
+        f"terminated:         {bool(running.isTerminated())}",
+        f"hidden:             {bool(running.isHidden())}",
+        f"owns menu bar:      {bool(running.ownsMenuBar())}",
+        f"isActive before:    {active_before}",
+        f"isActive after:     {bool(running.isActive())}",
+        f"workspace frontmost: {_appkit_app_desc(workspace.frontmostApplication())}",
+        f"workspace menubar:   {_appkit_app_desc(workspace.menuBarOwningApplication())}",
+    ]
+    return lines
+
+
 # --- focus / switch: one tool, selectable backend -------------------
 
 
@@ -166,6 +231,8 @@ def _run_focus(base_dir: Path, method: str, activator: MainThreadActivator) -> s
         "",
         f"platform: {_esc(sys.platform)}",
     ]
+    if sys.platform == "darwin":
+        lines.append(f"macOS:    {_esc(platform.mac_ver()[0] or '<unknown>')}")
 
     ctx = _resolve_focus_context(base_dir)
     if isinstance(ctx, str):
@@ -200,10 +267,12 @@ def _run_focus(base_dir: Path, method: str, activator: MainThreadActivator) -> s
     )
     lines.append(f"[bold]{_esc(chosen)}[/]: {_ok(ok)}   [bold]{_ms(elapsed)}[/]")
     if detail:
-        lines.append(f"  {_esc(detail)}")
+        for detail_line in detail.splitlines():
+            lines.append(f"  {_esc(detail_line)}")
 
     lines.append("")
-    lines.append("[bold]frontmost after:[/] " + _esc(_frontmost_app_name()))
+    lines.append("[bold]frontmost after (System Events):[/] " + _esc(_frontmost_app_name()))
+    lines.append("[bold]frontmost after (AppKit):[/] " + _esc(_appkit_frontmost_name()))
     lines.append(
         "[dim]timing is the activation call only; the visible switch completes "
         "asynchronously after it returns. osascript backends spawn a process "
@@ -226,6 +295,7 @@ def _activate_with(
             from AppKit import (
                 NSApplicationActivateIgnoringOtherApps,
                 NSRunningApplication,
+                NSWorkspace,
             )
         except ImportError as exc:
             return (
@@ -239,6 +309,8 @@ def _activate_with(
         if running is None:
             return False, f"no running application for pid {app_pid}", 0.0
 
+        active_before = bool(running.isActive())
+
         def _activate() -> tuple[bool, float]:
             # Must run on the main thread; off it this call blocks ~1s.
             start = time.perf_counter()
@@ -248,7 +320,10 @@ def _activate_with(
             return ok, time.perf_counter() - start
 
         ok, elapsed = activator.run(_activate)
-        return ok, "", elapsed
+        detail = "\n".join(
+            _appkit_diagnostics(running, app_pid, active_before, ok, NSWorkspace)
+        )
+        return ok, detail, elapsed
     if method == "osascript":
         if app_bundle is None:
             return False, "no app bundle (no .app in ancestry)", 0.0
