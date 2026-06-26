@@ -99,21 +99,21 @@ def _right_pane_for_intent(
             "[bold bright_green]✓ Already configured — nothing to change.[/]",
             "",
             "[bold]What was verified:[/]",
-            f"  {fix.current_state_text or '<state unknown>'}",
+            f"  {escape(fix.current_state_text or '<state unknown>')}",
         ]
         if fix.description:
             body_lines.append("")
-            body_lines.append(fix.description)
+            body_lines.append(escape(fix.description))
         return "Verified", "\n".join(body_lines)
     if intent == INTENT_ABSENT:
         body_lines = [
             "[dim]· Not installed and not selected — no action.[/]",
             "",
-            f"[bold]Current:[/] {fix.current_state_text or '<unknown>'}",
+            f"[bold]Current:[/] {escape(fix.current_state_text or '<unknown>')}",
         ]
         if fix.description:
             body_lines.append("")
-            body_lines.append(fix.description)
+            body_lines.append(escape(fix.description))
         return "Status", "\n".join(body_lines)
     if intent == INTENT_CANNOT_CREATE:
         return "Status", (
@@ -124,7 +124,7 @@ def _right_pane_for_intent(
         return "Status", (
             "[bright_red]Setup cannot uninstall this — remove it by "
             "hand if you really want to.[/]\n\n"
-            f"[bold]Current:[/] {fix.current_state_text or '<unknown>'}"
+            f"[bold]Current:[/] {escape(fix.current_state_text or '<unknown>')}"
         )
     if intent == INTENT_CREATE:
         body = (
@@ -140,7 +140,7 @@ def _right_pane_for_intent(
             else "<no preview available>"
         )
         return "Preview · remove", body
-    return "Status", fix.current_state_text or ""
+    return "Status", escape(fix.current_state_text or "")
 
 
 def _fix_state_text(fix: SetupFix) -> str:
@@ -188,15 +188,19 @@ def _format_overview(checks: list[SetupCheck]) -> str:
         rows.append(f"[bold underline]{title}[/]")
         for c in group_checks:
             seen.add(c.id)
-            rows.append(f"  {_status_marker(c.status)} [bold]{c.name}[/]: {c.detail}")
+            rows.append(
+                f"  {_status_marker(c.status)} [bold]{escape(c.name)}[/]: {escape(c.detail)}"
+            )
             for line in c.extra_lines:
-                rows.append(f"      {line.lstrip()}")
+                rows.append(f"      {escape(line.lstrip())}")
         rows.append("")
     leftovers = [c for c in checks if c.id not in seen]
     if leftovers:
         rows.append("[bold underline]Other[/]")
         for c in leftovers:
-            rows.append(f"  {_status_marker(c.status)} [bold]{c.name}[/]: {c.detail}")
+            rows.append(
+                f"  {_status_marker(c.status)} [bold]{escape(c.name)}[/]: {escape(c.detail)}"
+            )
         rows.append("")
     pass_count = sum(1 for c in checks if c.status == STATUS_PASS)
     warn_count = sum(1 for c in checks if c.status == STATUS_WARN)

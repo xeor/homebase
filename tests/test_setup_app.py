@@ -72,6 +72,27 @@ def test_format_overview_lists_each_check_and_summary() -> None:
     assert "FAIL=1" in text
 
 
+def test_format_overview_escapes_bracketed_detail() -> None:
+    from rich.text import Text
+
+    # The macos-fast-focus WARN detail embeds the install command
+    # `homebase[macos-fast-focus]`; the brackets must not be parsed as
+    # Rich markup or Text.from_markup raises MissingStyle and `b setup`
+    # crashes on machines where the extra isn't installed.
+    checks = [
+        SetupCheck(
+            id="macos_fast_focus",
+            name="macOS fast-focus backend",
+            status=STATUS_WARN,
+            detail="not installed: uv tool install 'homebase[macos-fast-focus]'",
+            extra_lines=("  diag: homebase[macos-fast-focus]",),
+        ),
+    ]
+    text = setup_app._format_overview(checks)
+    rendered = Text.from_markup(text)
+    assert "homebase[macos-fast-focus]" in rendered.plain
+
+
 def test_format_self_update_with_command(tmp_path: Path) -> None:
     text = setup_app._format_self_update_static(_ctx(tmp_path))
     assert "Self-update available" in text
