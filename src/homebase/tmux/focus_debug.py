@@ -22,7 +22,8 @@ _FOCUS_METHODS: dict[str, str] = {
     "auto": "Auto-detect",
     "appkit": "Force: AppKit (pyobjc)",
     "osascript": "Force: osascript activate",
-    "system_events": "Force: System Events",
+    "system_events": "Force: System Events (in-process, fast)",
+    "system_events_osascript": "Force: System Events (osascript)",
 }
 
 
@@ -222,16 +223,31 @@ def _appkit_diagnostics(
 
 
 def _focus_detail(base_dir: Path) -> str:
-    """Live one-liner for the info panel: what auto-detect resolves to
-    for the current target right now, plus the detected app."""
+    """Live one-liner for the info panel: the configured backend, what
+    auto-detect resolves to for the current target, and the detected app."""
+    configured = client_focus._configured_focus_method(base_dir)
+    if configured == "auto":
+        configured_line = (
+            "[bold]config tmux_focus.method:[/] "
+            f"{_esc(_FOCUS_METHODS.get(configured, configured))} "
+            "[dim](default; set to a backend id to enforce one)[/]"
+        )
+    else:
+        configured_line = (
+            "[bright_cyan]config tmux_focus.method:[/] "
+            f"[bold]{_esc(configured)}[/] "
+            f"{_esc(_FOCUS_METHODS.get(configured, configured))} "
+            "[dim](enforced; `b open` runs only this backend)[/]"
+        )
     ctx = _resolve_focus_context(base_dir)
     if isinstance(ctx, str):
-        return f"[bright_yellow]auto-detect: unavailable — {_esc(ctx)}[/]"
+        return f"{configured_line}\n[bright_yellow]auto-detect: unavailable — {_esc(ctx)}[/]"
     session, _client_pid_val, _ancestry, app = ctx
     method, why = _auto_method(app)
     app_bundle = app[1] if app is not None else None
     return (
-        f"[bold]auto-detect will use:[/] "
+        f"{configured_line}\n"
+        f"[bold]auto-detect would use:[/] "
         f"{_esc(_FOCUS_METHODS.get(method, method))} [dim]({why})[/]\n"
         f"target session: {_esc(session)}   "
         f"app: {_esc(app_bundle) if app_bundle is not None else '<none>'}"
@@ -319,7 +335,33 @@ def _run_focus(base_dir: Path, method: str, activator: MainThreadActivator) -> s
         "asynchronously after it returns. osascript backends spawn a process "
         "and compile AppleScript, so they run ~10-50x slower than AppKit.[/]"
     )
+    lines.append("")
+    lines.extend(_enforce_hint(base_dir, method))
     return "\n".join(lines)
+
+
+def _enforce_hint(base_dir: Path, method: str) -> list[str]:
+    """How to pin the just-tested backend as the live default. Only the
+    config-enforceable ids appear (the osascript System Events variant is
+    a debug-only comparison, not a live backend)."""
+    from ..core.constants import TMUX_FOCUS_METHODS
+
+    configured = client_focus._configured_focus_method(base_dir)
+    out = [f"[dim]live config tmux_focus.method = {_esc(configured)}[/]"]
+    if method not in TMUX_FOCUS_METHODS:
+        out.append(
+            f"[dim]'{_esc(method)}' is a debug-only comparison; not selectable "
+            "via config. `system_events` is the live in-process equivalent.[/]"
+        )
+        return out
+    if method == configured:
+        out.append("[dim]this backend is already the configured default.[/]")
+        return out
+    out.append(
+        "[bold]enforce:[/] set in `.homebase/config.yaml`:\n"
+        f"  [bright_cyan]tmux_focus:\n    method: {_esc(method)}[/]"
+    )
+    return out
 
 
 def _activate_with(
@@ -372,6 +414,22 @@ def _activate_with(
         ok, detail = _osascript_activate_bundle(app_bundle)
         return ok, detail, time.perf_counter() - start
     if method == "system_events":
+        pids = [pid for pid, _ in ancestry]
+        app_name = app_bundle.stem if app_bundle is not None else None
+        start = time.perf_counter()
+        # In-process NSAppleScript must run on the main thread, like the
+        # live `b` path; the activator hops there when run from the TUI.
+        ok, used, detail = activator.run(
+            lambda: client_focus.system_events_set_frontmost(app_name, pids)
+        )
+        elapsed = time.perf_counter() - start
+        text = f"method: {used}   pids: {pids}"
+        if app_name:
+            text += f"   app name: {app_name}"
+        if detail:
+            text += f"\n{detail}"
+        return ok, text, elapsed
+    if method == "system_events_osascript":
         pids = [pid for pid, _ in ancestry]
         start = time.perf_counter()
         ok, detail = _osascript_system_events_focus(pids)

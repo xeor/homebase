@@ -92,6 +92,9 @@ def test_focus_tmux_client_app_falls_back_to_system_events_when_both_fail(
     monkeypatch.setattr(client_focus.sys, "platform", "darwin")
     monkeypatch.setattr(client_focus.subprocess, "run", fake_run)
     monkeypatch.setattr(client_focus, "_activate_via_appkit", lambda _pid: False)
+    # Force the osascript fallback so the System Events step is testable
+    # without invoking real NSAppleScript on a machine with pyobjc.
+    monkeypatch.setattr(client_focus, "_foundation_available", lambda: False)
 
     client_focus.focus_tmux_client_app(tmux_fn, tmp_path)
 
@@ -136,3 +139,112 @@ def test_focus_tmux_client_app_writes_debug_timers_when_enabled(
     # fake osascript returns empty stdout, so the frontmost poll reports false
     assert wait_record["ok"] is False
     assert all(isinstance(record["seconds"], float) for record in records)
+
+
+def test_frontmost_by_name_script_targets_process_and_escapes_quotes() -> None:
+    script = client_focus._frontmost_by_name_script('we"ird')
+    assert 'first process whose name is "we\\"ird"' in script
+    assert "System Events" in script
+    # no full-process enumeration in the fast path
+    assert "whose unix id" not in script
+
+
+def test_system_events_prefers_name_then_unix_id(monkeypatch) -> None:
+    monkeypatch.setattr(client_focus, "_foundation_available", lambda: True)
+    seen: list[str] = []
+
+    def fake_run(source: str) -> tuple[bool, str]:
+        seen.append(source)
+        return ("first process whose name" in source, "")
+
+    monkeypatch.setattr(client_focus, "_run_applescript_in_process", fake_run)
+
+    ok, method, _detail = client_focus.system_events_set_frontmost("kitty", [100, 200])
+    assert ok is True
+    assert method == "nsapplescript:name"
+    assert len(seen) == 1  # name hit, unix-id never tried
+
+
+def test_system_events_falls_back_to_unix_id_when_name_fails(monkeypatch) -> None:
+    monkeypatch.setattr(client_focus, "_foundation_available", lambda: True)
+
+    def fake_run(source: str) -> tuple[bool, str]:
+        return ("whose unix id" in source, "" if "whose unix id" in source else "no match")
+
+    monkeypatch.setattr(client_focus, "_run_applescript_in_process", fake_run)
+
+    ok, method, _detail = client_focus.system_events_set_frontmost("kitty", [100])
+    assert ok is True
+    assert method == "nsapplescript:unix_id"
+
+
+def test_system_events_uses_osascript_when_pyobjc_absent(monkeypatch) -> None:
+    monkeypatch.setattr(client_focus, "_foundation_available", lambda: False)
+    monkeypatch.setattr(
+        client_focus, "_osascript_unix_id_focus", lambda pids: (True, f"pids {pids}")
+    )
+
+    ok, method, detail = client_focus.system_events_set_frontmost("kitty", [100])
+    assert ok is True
+    assert method == "osascript:unix_id"
+    assert "100" in detail
+
+
+def test_forced_system_events_skips_appkit_even_when_available(
+    tmp_path: Path, monkeypatch
+) -> None:
+    from homebase.config import store as config_store
+
+    config_store.save_global_config_dict(
+        tmp_path, {"tmux_focus": {"method": "system_events"}}
+    )
+    calls: list[list[str]] = []
+    appkit_called: list[int] = []
+
+    def tmux_fn(*_args: str) -> str:
+        return "300"
+
+    monkeypatch.setattr(client_focus.sys, "platform", "darwin")
+    monkeypatch.setattr(client_focus.subprocess, "run", _fake_run_for_ancestry(calls))
+    monkeypatch.setattr(
+        client_focus, "_activate_via_appkit", lambda pid: appkit_called.append(pid) or True
+    )
+    se_calls: list[tuple[str | None, list[int]]] = []
+    monkeypatch.setattr(
+        client_focus,
+        "system_events_set_frontmost",
+        lambda name, pids: se_calls.append((name, pids)) or (True, "nsapplescript:name", ""),
+    )
+
+    client_focus.focus_tmux_client_app(tmux_fn, tmp_path)
+
+    assert appkit_called == []  # forced backend bypasses the auto waterfall
+    assert se_calls == [("kitty", [300, 200, 150, 100])]
+
+
+def test_forced_appkit_does_not_fall_through_on_failure(
+    tmp_path: Path, monkeypatch
+) -> None:
+    from homebase.config import store as config_store
+
+    config_store.save_global_config_dict(
+        tmp_path, {"tmux_focus": {"method": "appkit"}}
+    )
+    calls: list[list[str]] = []
+
+    def tmux_fn(*_args: str) -> str:
+        return "300"
+
+    monkeypatch.setattr(client_focus.sys, "platform", "darwin")
+    monkeypatch.setattr(client_focus.subprocess, "run", _fake_run_for_ancestry(calls))
+    monkeypatch.setattr(client_focus, "_activate_via_appkit", lambda _pid: False)
+
+    def fail_se(*_args, **_kwargs):
+        raise AssertionError("system events must not run when appkit is enforced")
+
+    monkeypatch.setattr(client_focus, "system_events_set_frontmost", fail_se)
+
+    client_focus.focus_tmux_client_app(tmux_fn, tmp_path)
+
+    # Only ancestry lookup; no osascript activate, no System Events fallback.
+    assert [cmd[:2] for cmd in calls] == [["ps", "-axo"]]

@@ -152,6 +152,24 @@ def test_nested_discovery_toggle_persists(tmp_path: Path) -> None:
     assert prefs.nested_discovery_enabled(tmp_path) is False
 
 
+def test_load_tmux_focus_method_default_when_unset(tmp_path: Path) -> None:
+    assert prefs.load_tmux_focus_method(tmp_path) == "auto"
+
+
+def test_load_tmux_focus_method_reads_config(tmp_path: Path) -> None:
+    config_store.save_global_config_dict(
+        tmp_path, {"tmux_focus": {"method": "system_events"}}
+    )
+    assert prefs.load_tmux_focus_method(tmp_path) == "system_events"
+
+
+def test_load_tmux_focus_method_falls_back_on_unknown(tmp_path: Path) -> None:
+    config_store.save_global_config_dict(
+        tmp_path, {"tmux_focus": {"method": "nope"}}
+    )
+    assert prefs.load_tmux_focus_method(tmp_path) == "auto"
+
+
 def test_save_and_load_filter_query_roundtrip(tmp_path: Path) -> None:
     prefs.save_filter_query(tmp_path, "#x", name="x")
     named, saved = prefs.load_saved_filter_queries(tmp_path)

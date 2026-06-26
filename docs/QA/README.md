@@ -25,11 +25,11 @@ docs/QA/
 
 ## Status snapshot
 
-Last run: `2026-06-24` · source: 225 files / 53k LOC · tests: 187 files / ~38k LOC
+Last run: `2026-06-26` · source: 225 files / 53k LOC · tests: 187 files / ~38k LOC
 
 | Tool          | Metric                          | Baseline     | Target        | Status   |
 |---------------|---------------------------------|--------------|---------------|----------|
-| pytest        | tests passing                   | 2243/2243    | all           | green    |
+| pytest        | tests passing                   | 2301/2301    | all           | green    |
 | ruff          | lint findings                   | 0            | 0             | green    |
 | mypy          | errors / files affected         | 0 / 0        | 0 / 0         | green    |
 | pytest-cov    | branch coverage                 | 66.4 %       | 75 %          | baseline |

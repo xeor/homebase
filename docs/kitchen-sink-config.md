@@ -351,6 +351,26 @@ open_mode:
   # until this is set or `b --tmux-session <name-or-id>` is passed.
   # tmux_session: main
 
+# macOS: which backend brings the terminal window frontmost when
+# `b open` targets a tmux session in another window. Other platforms
+# ignore this. Default `auto` tries the fastest working backend in
+# order; pin a single backend here if auto picks one your machine
+# silently ignores (macOS focus-stealing prevention can drop AppKit /
+# osascript-activate requests without error).
+#
+#   auto            try appkit -> osascript -> system_events, first win
+#   appkit          Cocoa NSRunningApplication.activate (needs pyobjc)
+#   osascript       `tell application "<app>" to activate` subprocess
+#   system_events   System Events set-frontmost (Accessibility proxy;
+#                   exempt from focus-stealing prevention, slowest)
+#
+# Test backends before enforcing: `b setup` -> Debug -> "Focus / switch
+# tmux terminal". The info panel shows the configured + auto-detected
+# backend; run each option to time it and see which actually moves the
+# window. The report prints the exact `tmux_focus.method` line to set.
+tmux_focus:
+  method: auto
+
 # Notes integration for built-in notes actions.
 notes:
   # Variables are rendered through action/template engine.

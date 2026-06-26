@@ -55,6 +55,17 @@ TMUX_BIN_CANDIDATES = (
 )
 TMUX_SHELL_COMMANDS = {"sh", "bash", "zsh", "fish", "nu", "nushell", "tmux"}
 
+# macOS terminal-window focus backend used by `b open` (outside tmux) and
+# the `b setup` Debug focus tool. The `.homebase/config.yaml` key
+# `tmux_focus.method` overrides backend selection. `auto` keeps the
+# built-in waterfall (appkit -> osascript activate -> system_events);
+# the others force a single backend (the case where the OS silently
+# ignores Cocoa activation and only the System Events / Accessibility
+# path works).
+TMUX_FOCUS_METHOD_AUTO = "auto"
+TMUX_FOCUS_METHODS = ("auto", "appkit", "osascript", "system_events")
+TMUX_FOCUS_METHOD_DEFAULT = TMUX_FOCUS_METHOD_AUTO
+
 COLOR_ERROR_HEX = "#FF6B6B"
 COLOR_WARN_HEX = "#FFD166"
 COLOR_INFO_HEX = "#7FB8FF"

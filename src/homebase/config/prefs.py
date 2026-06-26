@@ -33,6 +33,8 @@ from ..core.constants import (
     TABLE_COLUMN_VIEWS,
     TABLE_DATE_COLOR_COLUMNS,
     TABLE_SIDE_WIDTH_PRESETS,
+    TMUX_FOCUS_METHOD_DEFAULT,
+    TMUX_FOCUS_METHODS,
     WIP_OPEN_SYMBOL_MAP,
 )
 from ..core.models import Action, PostCommandOption
@@ -230,6 +232,14 @@ def load_open_mode_config(base_dir: Path) -> dict[str, str]:
         data,
         default_profile=str(OPEN_MODE_CONFIG["profile"]),
         known_profiles={str(p.get("id", "")) for p in OPEN_MODE_PROFILES},
+    )
+
+
+def load_tmux_focus_method(base_dir: Path) -> str:
+    return workspace_settings.load_tmux_focus_method(
+        load_global_config_dict(base_dir),
+        default=TMUX_FOCUS_METHOD_DEFAULT,
+        known=set(TMUX_FOCUS_METHODS),
     )
 
 

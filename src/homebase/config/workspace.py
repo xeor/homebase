@@ -844,3 +844,15 @@ def set_nested_discovery_enabled(data: object, *, enabled: bool) -> dict[str, ob
     discovery["nested"] = nested
     out["discovery"] = discovery
     return out
+
+
+def load_tmux_focus_method(data: object, *, default: str, known: set[str]) -> str:
+    """`tmux_focus.method` from config, validated against ``known``.
+    Unknown or missing values fall back to ``default`` (never raises)."""
+    if not isinstance(data, dict):
+        return default
+    raw = data.get("tmux_focus", {})
+    if not isinstance(raw, dict):
+        return default
+    method = str(raw.get("method", "")).strip()
+    return method if method in known else default
