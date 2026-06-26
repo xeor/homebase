@@ -145,6 +145,36 @@ def _appkit_frontmost_name() -> str:
     return _appkit_app_desc(NSWorkspace.sharedWorkspace().frontmostApplication())
 
 
+def _ax_process_trusted() -> str:
+    try:
+        from ApplicationServices import AXIsProcessTrusted
+    except ImportError as exc:
+        return f"<unavailable: {exc}>"
+    return str(bool(AXIsProcessTrusted()))
+
+
+def _appkit_requester_lines() -> list[str]:
+    """State of the *calling* process. Cocoa focus-stealing prevention
+    keys off the requester, not the target: a non-regular or inactive
+    caller can't bring another app forward, and ``activateWithOptions_``
+    silently reports success anyway. This is the side the target-only
+    diagnostics never show."""
+    try:
+        from AppKit import NSRunningApplication
+    except ImportError as exc:
+        return [f"requester:          <pyobjc unavailable: {exc}>"]
+    me = NSRunningApplication.currentApplication()
+    if me is None:
+        return ["requester:          <no NSRunningApplication.currentApplication()>"]
+    return [
+        f"requester app:      {_appkit_app_desc(me)}",
+        f"requester policy:   {_activation_policy_name(me.activationPolicy())}",
+        f"requester isActive: {bool(me.isActive())}",
+        f"requester menubar:  {bool(me.ownsMenuBar())}",
+        f"requester AX trust: {_ax_process_trusted()}",
+    ]
+
+
 def _appkit_diagnostics(
     running: object,
     app_pid: int,
@@ -174,6 +204,7 @@ def _appkit_diagnostics(
         f"workspace frontmost: {_appkit_app_desc(workspace.frontmostApplication())}",
         f"workspace menubar:   {_appkit_app_desc(workspace.menuBarOwningApplication())}",
     ]
+    lines.extend(_appkit_requester_lines())
     return lines
 
 
