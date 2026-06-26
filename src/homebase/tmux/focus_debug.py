@@ -146,11 +146,21 @@ def _appkit_frontmost_name() -> str:
 
 
 def _ax_process_trusted() -> str:
+    """Whether the calling process is Accessibility-trusted. Read via
+    ctypes from the system ApplicationServices framework so it works
+    without the optional pyobjc ApplicationServices submodule."""
+    import ctypes
+    import ctypes.util
+
+    path = ctypes.util.find_library("ApplicationServices")
+    if path is None:
+        return "<ApplicationServices framework not found>"
     try:
-        from ApplicationServices import AXIsProcessTrusted
-    except ImportError as exc:
+        lib = ctypes.CDLL(path)
+        lib.AXIsProcessTrusted.restype = ctypes.c_bool
+        return str(bool(lib.AXIsProcessTrusted()))
+    except (OSError, AttributeError) as exc:
         return f"<unavailable: {exc}>"
-    return str(bool(AXIsProcessTrusted()))
 
 
 def _appkit_requester_lines() -> list[str]:
