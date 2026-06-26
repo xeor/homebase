@@ -368,6 +368,12 @@ open_mode:
 # tmux terminal". The info panel shows the configured + auto-detected
 # backend; run each option to time it and see which actually moves the
 # window. The report prints the exact `tmux_focus.method` line to set.
+#
+# The `system_events` backend's first call is cold (~0.5-1s: it loads
+# Open Scripting and launches the System Events helper). The TUI warms it
+# in the background (precompiles the script, keeps System Events alive)
+# so the first real `b open` is fast; nothing to configure. `b setup` ->
+# Debug -> "Probe macOS focus backends" times the warm-up.
 tmux_focus:
   method: auto
 

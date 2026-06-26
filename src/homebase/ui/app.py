@@ -57,6 +57,7 @@ from ..config.prefs import (
     load_table_behavior_config,
     load_table_columns_config,
     load_table_date_column_styles,
+    load_tmux_focus_method,
     load_ui_state,
     resolve_filter_expression,
     save_ui_state,
@@ -107,6 +108,7 @@ from ..core.constants import (
     TABLE_COLUMN_VIEWS,
     TABLE_SIDE_WIDTH_PRESETS,
     UI_TICK_BUSY_S,
+    UI_TICK_FOCUS_WARM_S,
     UI_TICK_GIT_REFRESH_S,
     UI_TICK_HOOK_REFRESH_S,
     UI_TICK_MICRO_RECONCILE_S,
@@ -143,7 +145,7 @@ from ..metadata.api import (
     save_base_tags,
     save_base_wip,
 )
-from ..tmux.external import is_inside_current_tmux_pane
+from ..tmux.external import is_inside_current_tmux_pane, prewarm_focus
 from ..tmux.flow import (
     _tmux_command_prefix,
     tmux_find_panes_for_cwd,
@@ -985,6 +987,9 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
             ),
         )
         self.call_after_refresh(self._initial_worktree_health_scan)
+        if sys.platform == "darwin":
+            self.set_interval(UI_TICK_FOCUS_WARM_S, self._maybe_warm_focus_backend)
+            self.call_after_refresh(self._maybe_warm_focus_backend)
         for wid in (
             self.query_one("#side", Vertical),
             self.query_one("#side_main_tabs", Tabs),
@@ -3256,6 +3261,34 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
             (p for p in OPEN_MODE_PROFILES if str(p.get("id")) == profile), None
         )
         return spec or OPEN_MODE_PROFILES[0]
+
+    def _maybe_warm_focus_backend(self) -> None:
+        """Keep the macOS System Events focus backend warm in the
+        background so the first `b open` is not cold (~0.5-1s). Only runs
+        when the open profile uses tmux and the focus method can use
+        System Events. Always off the UI thread."""
+        if sys.platform != "darwin":
+            return
+        if not bool(self._open_profile_spec().get("use_tmux", False)):
+            return
+        if load_tmux_focus_method(self.base_dir) not in ("auto", "system_events"):
+            return
+
+        def _warm() -> None:
+            ok, detail = prewarm_focus(self.base_dir)
+            if ok or detail in ("not darwin", "pyobjc Foundation unavailable"):
+                return
+            logged = getattr(self, "_focus_warm_logged", None)
+            if logged is None:
+                logged = set()
+                self._focus_warm_logged = logged
+            if detail not in logged:
+                logged.add(detail)
+                self.call_from_thread(
+                    lambda: self._log(f"focus warm-up failed: {detail}", "warn")
+                )
+
+        threading.Thread(target=_warm, daemon=True).start()
 
     def _open_selected_in_tmux_mode(self, row: ProjectRow) -> bool:
         spec = self._open_profile_spec()

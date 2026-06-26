@@ -8,6 +8,7 @@ from functools import partial
 from pathlib import Path
 from typing import Callable
 
+from ..core.constants import UI_TICK_FOCUS_WARM_S
 from ..core.setup_model import MainThreadActivator, SetupDebugOption, SetupDebugTool
 from . import client_focus
 from .external import resolve_external_tmux_target
@@ -603,6 +604,22 @@ def _report_macos_backends() -> str:
             "  [dim]without pyobjc, activation uses osascript (slower) and "
             "depends on the TCC permissions probed below.[/]"
         )
+
+    lines.append("")
+    lines.append("[bold]System Events warm-up (compile + keep alive)[/]")
+    if client_focus._foundation_available():
+        start = time.perf_counter()
+        warm_ok, warm_detail = client_focus.warm_up_focus_backend()
+        lines.append(f"  warm-up: {_ok(warm_ok)}   [bold]{_ms(time.perf_counter() - start)}[/]")
+        if warm_detail:
+            lines.append(f"    {_esc(warm_detail)}")
+        lines.append(
+            "  [dim]first call initializes Open Scripting + launches System "
+            "Events (~0.5-1s); the TUI re-runs this in the background every "
+            f"{int(UI_TICK_FOCUS_WARM_S)}s so the first `b open` is already warm.[/]"
+        )
+    else:
+        lines.append("  [dim]pyobjc Foundation unavailable; warm-up uses osascript path.[/]")
 
     lines.append("")
     lines.append("[bold]osascript / System Events (TCC)[/]")

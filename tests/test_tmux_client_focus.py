@@ -190,6 +190,57 @@ def test_system_events_uses_osascript_when_pyobjc_absent(monkeypatch) -> None:
     assert "100" in detail
 
 
+def test_warm_up_precompiles_and_pings_without_focusing(monkeypatch) -> None:
+    monkeypatch.setattr(client_focus.sys, "platform", "darwin")
+    monkeypatch.setattr(client_focus, "_foundation_available", lambda: True)
+    compiled: list[str] = []
+    executed: list[str] = []
+
+    def fake_compile(source: str):
+        compiled.append(source)
+        return object()
+
+    def fake_run(source: str) -> tuple[bool, str]:
+        executed.append(source)
+        return True, ""
+
+    monkeypatch.setattr(client_focus, "_get_or_compile_locked", fake_compile)
+    monkeypatch.setattr(client_focus, "_run_applescript_in_process", fake_run)
+
+    ok, detail = client_focus.warm_up_focus_backend("kitty")
+
+    assert ok is True
+    # by-name script precompiled; only the no-op ping is executed (no
+    # focus-changing script runs during warm-up)
+    assert compiled == [client_focus._frontmost_by_name_script("kitty")]
+    assert executed == [client_focus._WARMUP_SCRIPT]
+    assert "set frontmost" not in client_focus._WARMUP_SCRIPT
+
+
+def test_warm_up_skips_when_not_darwin(monkeypatch) -> None:
+    monkeypatch.setattr(client_focus.sys, "platform", "linux")
+    ok, detail = client_focus.warm_up_focus_backend("kitty")
+    assert ok is False
+    assert detail == "not darwin"
+
+
+def test_warm_up_reports_when_pyobjc_absent(monkeypatch) -> None:
+    monkeypatch.setattr(client_focus.sys, "platform", "darwin")
+    monkeypatch.setattr(client_focus, "_foundation_available", lambda: False)
+    ok, detail = client_focus.warm_up_focus_backend("kitty")
+    assert ok is False
+    assert "Foundation" in detail
+
+
+def test_precompile_no_op_without_app_name(monkeypatch) -> None:
+    calls: list[str] = []
+    monkeypatch.setattr(
+        client_focus, "_get_or_compile_locked", lambda s: calls.append(s)
+    )
+    client_focus.precompile_focus_scripts(None)
+    assert calls == []
+
+
 def test_forced_system_events_skips_appkit_even_when_available(
     tmp_path: Path, monkeypatch
 ) -> None:

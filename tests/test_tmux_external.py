@@ -14,6 +14,52 @@ def _run_external_open(base_dir: Path, path: Path) -> int:
     )
 
 
+def test_prewarm_focus_skips_off_darwin(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(tmux_external.sys, "platform", "linux")
+    assert tmux_external.prewarm_focus(tmp_path) == (False, "not darwin")
+
+
+def test_prewarm_focus_resolves_app_name_and_warms(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(tmux_external.sys, "platform", "darwin")
+    monkeypatch.setattr(
+        tmux_external,
+        "resolve_external_tmux_target",
+        lambda *_a, **_k: (None, [], lambda *_a: "4321\n", "work"),
+    )
+    monkeypatch.setattr(
+        tmux_external.client_focus,
+        "macos_app_for_client_pid",
+        lambda pid: (100, Path("/Applications/kitty.app")),
+    )
+    warmed: list[str | None] = []
+    monkeypatch.setattr(
+        tmux_external.client_focus,
+        "warm_up_focus_backend",
+        lambda name=None: warmed.append(name) or (True, ""),
+    )
+
+    assert tmux_external.prewarm_focus(tmp_path) == (True, "")
+    assert warmed == ["kitty"]
+
+
+def test_prewarm_focus_warms_generically_when_no_target(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setattr(tmux_external.sys, "platform", "darwin")
+    monkeypatch.setattr(
+        tmux_external, "resolve_external_tmux_target", lambda *_a, **_k: None
+    )
+    warmed: list[str | None] = []
+    monkeypatch.setattr(
+        tmux_external.client_focus,
+        "warm_up_focus_backend",
+        lambda name=None: warmed.append(name) or (True, ""),
+    )
+
+    assert tmux_external.prewarm_focus(tmp_path) == (True, "")
+    assert warmed == [None]  # no app name, still warms OSA + System Events
+
+
 def test_list_panes_args_for_session_scans_every_window() -> None:
     assert tmux_external._list_panes_args_for_session(
         ("list-panes", "-a", "-F", "#{pane_id}"),

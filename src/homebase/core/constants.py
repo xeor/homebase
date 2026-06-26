@@ -569,6 +569,9 @@ UI_TICK_MICRO_RECONCILE_S = 0.25
 UI_TICK_HOOK_REFRESH_S = 2.0
 UI_TICK_WORKTREE_HEALTH_S = 60.0
 UI_TICK_TMUX_CONTEXT_S = 5.0
+# How often the TUI re-warms the macOS focus backend in the background
+# (keeps System Events running so the first `b open` is not cold).
+UI_TICK_FOCUS_WARM_S = 120.0
 BENCHMARK_SUITE_VERSION = 1
 BENCHMARK_SCORE_MODEL = "pow(day/elapsed, k)"
 BENCHMARK_SCORE_REF_SECONDS = 30.0

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import subprocess
 import sys
+import threading
 from pathlib import Path
 from typing import Callable
 
@@ -241,11 +242,24 @@ def _wait_until_frontmost(pid: int, timeout: float = 3.0) -> bool:
     return proc.returncode == 0 and proc.stdout.strip().lower() == "true"
 
 
-# Compiled NSAppleScript objects keyed by source. Compiling is the
-# expensive part of the AppleScript path; `b open` targets the same
-# terminal over and over, so the cache turns every call after the first
-# into a pure execute.
+# Compiled NSAppleScript objects keyed by source. Compiling (~130ms) and
+# the first OSA execute ever in the process (~0.5-1s, incl. launching
+# System Events) are the expensive parts; `b open` targets the same
+# terminal repeatedly, so the cache turns every later call into a pure
+# ~25ms execute. `warm_up_focus_backend` pays both costs ahead of time.
 _COMPILED_APPLESCRIPTS: dict[str, object] = {}
+
+# Serializes all NSAppleScript access. NSAppleScript objects are not
+# thread-safe; the background warm-up (worker thread) and the live focus
+# call (TUI main thread) can otherwise race on the shared cache and the
+# process-wide Open Scripting subsystem.
+_OSA_LOCK = threading.RLock()
+
+# No-op System Events ping run by the warm-up: a trivial property fetch
+# that initializes Open Scripting and resets System Events' idle timer so
+# the daemon stays running, without enumerating the process/AX tree (that
+# would cost ~150ms; this is sub-millisecond once warm).
+_WARMUP_SCRIPT = 'tell application "System Events" to return (name is not "")'
 
 
 def _foundation_available() -> bool:
@@ -254,6 +268,44 @@ def _foundation_available() -> bool:
     except ImportError:
         return False
     return True
+
+
+def _get_or_compile_locked(source: str) -> object:
+    """Return the cached compiled script for ``source``, compiling (the
+    ~130ms parse step, no execute) on first use. Caller must hold
+    ``_OSA_LOCK``."""
+    from Foundation import NSAppleScript
+
+    script = _COMPILED_APPLESCRIPTS.get(source)
+    if script is None:
+        script = NSAppleScript.alloc().initWithSource_(source)
+        script.compileAndReturnError_(None)
+        _COMPILED_APPLESCRIPTS[source] = script
+    return script
+
+
+def precompile_focus_scripts(app_name: str | None) -> None:
+    """Compile and cache the script the live focus call will execute, so
+    that call only pays the execute. No-op without an app name (the
+    unix-id fallback varies per attach and is compiled lazily)."""
+    if not app_name:
+        return
+    with _OSA_LOCK:
+        _get_or_compile_locked(_frontmost_by_name_script(app_name))
+
+
+def warm_up_focus_backend(app_name: str | None = None) -> tuple[bool, str]:
+    """Prepare the System Events backend off the hot path: precompile the
+    by-name script and run a no-op query so Open Scripting is initialized
+    and System Events is already running. The first real focus otherwise
+    pays ~0.5-1s for this. Idempotent, cheap once warm, and safe to call
+    from a background thread."""
+    if sys.platform != "darwin":
+        return False, "not darwin"
+    if not _foundation_available():
+        return False, "pyobjc Foundation unavailable"
+    precompile_focus_scripts(app_name)
+    return _run_applescript_in_process(_WARMUP_SCRIPT)
 
 
 def _applescript_escape(text: str) -> str:
@@ -290,17 +342,14 @@ def _frontmost_by_unix_id_script(pids: list[int]) -> str:
 
 
 def _run_applescript_in_process(source: str) -> tuple[bool, str]:
-    """Execute AppleScript via a cached ``NSAppleScript`` — no subprocess
-    and compiled once per distinct source. Must run on the main thread.
+    """Execute AppleScript via a cached, precompiled ``NSAppleScript`` —
+    no subprocess, compiled once per distinct source. Serialized by
+    ``_OSA_LOCK`` so the live call and the background warm-up never race.
     Both focus scripts return a boolean, so ``(ok, detail)`` reflects the
     script result, not merely "did it run"."""
-    from Foundation import NSAppleScript
-
-    script = _COMPILED_APPLESCRIPTS.get(source)
-    if script is None:
-        script = NSAppleScript.alloc().initWithSource_(source)
-        _COMPILED_APPLESCRIPTS[source] = script
-    result, error = script.executeAndReturnError_(None)
+    with _OSA_LOCK:
+        script = _get_or_compile_locked(source)
+        result, error = script.executeAndReturnError_(None)
     if result is None:
         if error is None:
             return False, "AppleScript failed (no result, no error info)"
