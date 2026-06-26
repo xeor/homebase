@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.7.0 - 2026-06-26
+
+- Project cache layer reworked, with a focus/navigation logic overhaul
+- Fixed installation bug
+- Various bug fixes
+
+
 ## 0.6.1 - 2026-06-26
 
 - Keep `pyobjc` pinned across updates instead of upgrading it
