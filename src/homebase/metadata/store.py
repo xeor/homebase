@@ -42,9 +42,6 @@ def load_base_data(
     return copy.deepcopy(data)
 
 
-def _clear_base_data_cache() -> None:
-    _BASE_DATA_CACHE.clear()
-
 
 def save_base_data(
     path: Path,

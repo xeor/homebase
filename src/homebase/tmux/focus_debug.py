@@ -6,7 +6,7 @@ import sys
 import time
 from functools import partial
 from pathlib import Path
-from typing import Callable
+from typing import Any, Callable
 
 from ..core.constants import UI_TICK_FOCUS_WARM_S
 from ..core.setup_model import MainThreadActivator, SetupDebugOption, SetupDebugTool
@@ -129,7 +129,7 @@ def _activation_policy_name(policy: int) -> str:
     return _ACTIVATION_POLICY_NAMES.get(int(policy), f"unknown ({policy})")
 
 
-def _appkit_app_desc(app: object) -> str:
+def _appkit_app_desc(app: Any) -> str:
     """One-line ``name (pid, bundle)`` for an ``NSRunningApplication``."""
     if app is None:
         return "<none>"
@@ -188,11 +188,11 @@ def _appkit_requester_lines() -> list[str]:
 
 
 def _appkit_diagnostics(
-    running: object,
+    running: Any,
     app_pid: int,
     active_before: bool,
     activate_returned: bool,
-    ns_workspace: object,
+    ns_workspace: Any,
 ) -> list[str]:
     """State of the target app and the workspace right after an AppKit
     activation attempt. Pinpoints the case where ``activateWithOptions_``

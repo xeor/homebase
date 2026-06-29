@@ -36,38 +36,3 @@ def test_load_runtime_config_uses_loaders(tmp_path: Path) -> None:
     assert cfg.property_defs == ["a"]
     assert cfg.named_filters == {"n": "#x"}
     assert cfg.raycast_config == {"sort": "opened"}
-
-
-def test_validate_custom_hotkeys_accepts_unique_non_reserved() -> None:
-    err = runtime_init.validate_custom_hotkeys(
-        [
-            {"id": "vscode", "hotkey": "f5", "target": "custom:vscode"},
-            {"id": "term", "hotkey": "ctrl+f5", "target": "custom:term"},
-        ],
-        reserved_hotkeys={"ctrl+a", "tab"},
-    )
-    assert err is None
-
-
-def test_validate_custom_hotkeys_rejects_duplicates() -> None:
-    err = runtime_init.validate_custom_hotkeys(
-        [
-            {"id": "one", "hotkey": "f5", "target": "archive"},
-            {"id": "two", "hotkey": "F5", "target": "restore"},
-        ],
-        reserved_hotkeys=set(),
-    )
-    assert err is not None
-    assert "f5" in err
-    assert "one" in err
-    assert "two" in err
-
-
-def test_validate_custom_hotkeys_rejects_reserved() -> None:
-    err = runtime_init.validate_custom_hotkeys(
-        [{"id": "bad", "hotkey": "ctrl+a", "target": "archive"}],
-        reserved_hotkeys={"ctrl+a", "tab"},
-    )
-    assert err is not None
-    assert "ctrl+a" in err
-    assert "bad" in err

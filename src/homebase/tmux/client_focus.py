@@ -4,7 +4,7 @@ import subprocess
 import sys
 import threading
 from pathlib import Path
-from typing import Callable
+from typing import Any, Callable
 
 from ..core import debug_timers
 from ..core.constants import TMUX_FOCUS_METHOD_AUTO
@@ -270,7 +270,7 @@ def _foundation_available() -> bool:
     return True
 
 
-def _get_or_compile_locked(source: str) -> object:
+def _get_or_compile_locked(source: str) -> Any:
     """Return the cached compiled script for ``source``, compiling (the
     ~130ms parse step, no execute) on first use. Caller must hold
     ``_OSA_LOCK``."""

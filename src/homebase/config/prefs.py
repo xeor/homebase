@@ -8,7 +8,6 @@ from ..core.constants import (
     CACHE_PROFILE_CONFIG,
     DEFAULT_ARCHIVE_TZ_NAME,
     NAMED_FILTERS,
-    NEW_PROJECT_DEFAULTS,
     NOTES_CONFIG,
     OPEN_MODE_CONFIG,
     OPEN_MODE_PROFILES,
@@ -37,7 +36,7 @@ from ..core.constants import (
     TMUX_FOCUS_METHODS,
     WIP_OPEN_SYMBOL_MAP,
 )
-from ..core.models import Action, PostCommandOption
+from ..core.models import Action
 from ..core.utils import normalize_filter_expression
 from . import cache_profile as cache_profile_config
 from . import open_mode as open_mode_config
@@ -46,52 +45,6 @@ from . import workspace as workspace_settings
 from .store import load_global_config_dict, save_global_config_dict
 
 _FILTER_TOKEN_RE = re.compile(r"\(|\)|\bOR\b|\||[^\s()|]+", re.IGNORECASE)
-
-
-def load_post_command_options(base_dir: Path) -> list[PostCommandOption]:
-    raw = load_global_config_dict(base_dir)
-
-    items: list[object] = []
-    if isinstance(raw, dict):
-        new_conf = raw.get("new", {})
-        if isinstance(new_conf, dict):
-            val = new_conf.get("post-commands", [])
-            if isinstance(val, list):
-                items = val
-
-    out: list[PostCommandOption] = []
-    used: set[str] = set()
-
-    def alloc_id(seed: str) -> str:
-        base = re.sub(r"[^a-z0-9]+", "_", seed.lower()).strip("_") or "cmd"
-        key = base
-        i = 2
-        while key in used:
-            key = f"{base}_{i}"
-            i += 1
-        used.add(key)
-        return key
-
-    for item in items:
-        if isinstance(item, str):
-            command = item.strip()
-            if not command:
-                continue
-            key = alloc_id(command)
-            out.append(PostCommandOption(key=key, label=command, command=command))
-            continue
-        if not isinstance(item, dict):
-            continue
-        label = str(item.get("label", "")).strip()
-        command = str(item.get("command", "")).strip()
-        if not command:
-            continue
-        seed = label or command
-        key = alloc_id(seed)
-        label = label or command
-        out.append(PostCommandOption(key=key, label=label, command=command))
-
-    return out
 
 
 def load_archive_timezone_name(base_dir: Path) -> str:
@@ -309,83 +262,6 @@ def save_open_mode_config(base_dir: Path, conf: dict[str, str]) -> None:
         known_profiles={str(p.get("id", "")) for p in OPEN_MODE_PROFILES},
     )
     save_global_config_dict(base_dir, updated)
-
-
-def load_new_project_defaults(base_dir: Path) -> dict[str, object]:
-    data = load_global_config_dict(base_dir)
-    raw = data.get("new_project", {}) if isinstance(data, dict) else {}
-    out = dict(NEW_PROJECT_DEFAULTS)
-    if not isinstance(raw, dict):
-        return out
-
-    name_options_raw = raw.get("name_options", [])
-    if isinstance(name_options_raw, list):
-        out["name_options"] = [
-            str(v).strip() for v in name_options_raw if str(v).strip()
-        ]
-
-    template_raw = raw.get("template")
-    if template_raw is None:
-        out["template"] = None
-    else:
-        template = str(template_raw).strip()
-        out["template"] = template or None
-
-    post_commands_raw = raw.get("post_commands", [])
-    if isinstance(post_commands_raw, list):
-        out["post_commands"] = [
-            str(v).strip() for v in post_commands_raw if str(v).strip()
-        ]
-
-    tags_raw = raw.get("tags", [])
-    if isinstance(tags_raw, list):
-        out["tags"] = [str(v).strip() for v in tags_raw if str(v).strip()]
-
-    after_create = str(raw.get("after_create", "open")).strip() or "open"
-    out["after_create"] = after_create
-    return out
-
-
-def save_new_project_defaults(base_dir: Path, conf: dict[str, object]) -> None:
-    data = load_global_config_dict(base_dir)
-    raw_name_options = conf.get("name_options", [])
-    raw_post_commands = conf.get("post_commands", [])
-    raw_tags = conf.get("tags", [])
-
-    name_options = (
-        [str(v).strip() for v in raw_name_options if str(v).strip()]
-        if isinstance(raw_name_options, list)
-        else []
-    )
-    post_commands = (
-        [str(v).strip() for v in raw_post_commands if str(v).strip()]
-        if isinstance(raw_post_commands, list)
-        else []
-    )
-    tags = (
-        [str(v).strip() for v in raw_tags if str(v).strip()]
-        if isinstance(raw_tags, list)
-        else []
-    )
-
-    template_raw = conf.get("template")
-    template: str | None
-    if template_raw is None:
-        template = None
-    else:
-        t = str(template_raw).strip()
-        template = t or None
-
-    after_create = str(conf.get("after_create", "open")).strip() or "open"
-
-    data["new_project"] = {
-        "name_options": sorted(set(name_options)),
-        "template": template,
-        "post_commands": sorted(set(post_commands)),
-        "tags": sorted(set(tags)),
-        "after_create": after_create,
-    }
-    save_global_config_dict(base_dir, data)
 
 
 def _table_catalog_for_view(view_mode: str) -> list[dict[str, object]]:

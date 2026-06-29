@@ -27,14 +27,6 @@ def cache_db_path(base_dir: Path) -> Path:
     return cache_store.cache_db_path(base_dir)
 
 
-def _cache_connect(base_dir: Path) -> sqlite3.Connection:
-    return cache_store.cache_connect(base_dir)
-
-
-def _cache_init(conn: sqlite3.Connection) -> None:
-    cache_store.cache_init(conn, cache_schema_version=CACHE_SCHEMA_VERSION)
-
-
 def cache_load_rows(
     base_dir: Path,
     max_age_s: int = CACHE_MAX_AGE_S,

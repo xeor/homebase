@@ -6,7 +6,6 @@ import shlex
 import shutil
 import subprocess
 import sys
-import textwrap
 from datetime import datetime
 from pathlib import Path
 from typing import Callable
@@ -143,47 +142,11 @@ def recommended_tmux_save_binding(script_path: Path, tmux_bin: str = "") -> str:
     )
 
 
-def compact_path_for_display(path_text: str) -> str:
-    raw = str(path_text)
-    home = str(Path.home())
-    if home and raw.startswith(home):
-        return "~" + raw[len(home) :]
-    return raw
-
-
-def binding_display_lines(binding: str, width: int = 88) -> list[str]:
-    compact = compact_path_for_display(binding)
-    return textwrap.wrap(compact, width=width, break_long_words=False, break_on_hyphens=False) or [compact]
-
-
 def _is_tmux_bind_line(line: str) -> bool:
     stripped = str(line).strip()
     if not stripped or stripped.startswith("#"):
         return False
     return stripped.startswith("bind-key ") or stripped.startswith("bind ")
-
-
-def is_acceptable_tmux_save_binding(line: str) -> bool:
-    """Returns True if `line` defines a working ``b tmux save`` binding.
-
-    Parser-style: tolerates whitespace, quoting, and path variation;
-    only checks that the essential pieces are present. Used so the
-    binding doesn't read as "stale" because of a trivial difference."""
-    if not _is_tmux_bind_line(line):
-        return False
-    stripped = str(line).strip()
-    if "tmux save" not in stripped:
-        return False
-    if "#{pane_id}" not in stripped:
-        return False
-    if "session_id" not in stripped:
-        return False
-    # The legacy form invoked the entry-point via `uv run --script`,
-    # which sometimes failed silently. Treat it as stale so setup can
-    # offer the rewrite.
-    if "uv run --script" in stripped:
-        return False
-    return True
 
 
 def _normalize_binding(line: str) -> str:
@@ -205,23 +168,6 @@ def has_recommended_tmux_binding(tmux_conf_text: str, expected_line: str = "") -
         _normalize_binding(line) == expected_norm
         for line in tmux_conf_text.splitlines()
     )
-
-
-def has_any_tmux_save_binding(tmux_conf_text: str) -> bool:
-    """True if there's ANY `b tmux save` binding (acceptable or
-    legacy). Used to detect "present" state for the fix."""
-    for raw in tmux_conf_text.splitlines():
-        if not _is_tmux_bind_line(raw):
-            continue
-        line = str(raw).strip()
-        if "tmux save" not in line:
-            continue
-        # The line must actually invoke `b tmux save`; the legacy form
-        # has 'tmux save' as a sub-command after a path ending in /b,
-        # which still satisfies the loose check.
-        if " save" in line:
-            return True
-    return False
 
 
 def tmux_save_binding_lines(tmux_conf_text: str) -> list[str]:
@@ -573,9 +519,9 @@ def _install_command(
         return cmd
     if install_mode == "uv-tool":
         if with_fast_focus:
-            cmd = _uv_tool_fast_focus_cmd()
-            if cmd is not None:
-                return cmd
+            fast_focus_cmd = _uv_tool_fast_focus_cmd()
+            if fast_focus_cmd is not None:
+                return fast_focus_cmd
             return f'uv tool install --force "homebase[{FAST_FOCUS_EXTRA}]"'
         return "uv tool upgrade homebase"
     if install_mode == "pip":
@@ -583,17 +529,6 @@ def _install_command(
             return f'python -m pip install -U "homebase[{FAST_FOCUS_EXTRA}]"'
         return "python -m pip install -U homebase"
     return ""
-
-
-def _detect_self_update(
-    base_dir: Path,
-    launcher_path: Path | None,
-    *,
-    fast_focus_installed: bool = False,
-) -> tuple[str, str]:
-    mode, detail = _detect_install_mode(base_dir, launcher_path)
-    cmd = _install_command(mode, base_dir, with_fast_focus=fast_focus_installed)
-    return detail, cmd
 
 
 # --- context gather --------------------------------------------------

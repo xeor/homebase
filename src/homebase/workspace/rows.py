@@ -27,10 +27,6 @@ def _resolve_include_nested(base_dir: Path, include_nested: bool | None) -> bool
     return discovery_helpers.resolve_include_nested(base_dir, include_nested)
 
 
-def _discovery_zone_depth(base_dir: Path, path: Path) -> tuple[str, int]:
-    return discovery_helpers.discovery_zone_depth(base_dir, path)
-
-
 def _discovery_marker_allowed(
     base_dir: Path,
     marker_dir: Path,

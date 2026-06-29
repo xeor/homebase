@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Callable
 
 from ...core.models import ProjectRow
 from ...metadata.api import property_tokens
@@ -39,31 +38,3 @@ def has_open_pane(path: Path, open_pane_count_by_project: dict[Path, int]) -> bo
     return open_pane_count_by_project.get(path, 0) > 0
 
 
-def has_readme_file(row: ProjectRow) -> bool:
-    if row.packed:
-        return False
-    try:
-        if not row.path.is_dir():
-            return False
-    except OSError:
-        return False
-    readme_path = row.path / "README.md"
-    try:
-        return readme_path.is_file()
-    except OSError:
-        return False
-
-
-def has_notes_file(
-    row: ProjectRow,
-    *,
-    resolve_notes_path_for_row: Callable[[ProjectRow], Path],
-) -> bool:
-    try:
-        notes_path = resolve_notes_path_for_row(row)
-    except (OSError, ValueError, RuntimeError):
-        return False
-    try:
-        return notes_path.is_file()
-    except OSError:
-        return False

@@ -21,13 +21,11 @@ from ..core.constants import (
 from ..core.models import ProjectRow
 from ..metadata.api import (
     detect_properties,
-    ensure_base_marker,
     load_base_meta,
     load_base_repo_dir,
     load_base_worktree,
     normalize_property_keys,
     property_tokens,
-    save_base_tags,
 )
 
 
@@ -135,58 +133,6 @@ def run_post_commands(target_dir: Path, commands: list[str]) -> None:
             raise ValueError(
                 f"post command failed ({cmd}) with exit code {result.returncode}"
             )
-
-
-def create_project(
-    base_dir: Path,
-    folder_name: str,
-    add_date_prefix: bool,
-    add_tmp_suffix: bool,
-    copier_template: str | None = None,
-    initial_tags: list[str] | None = None,
-) -> Path:
-    final_name = resolve_new_project_name(folder_name, add_date_prefix, add_tmp_suffix)
-    target = base_dir / final_name
-    if target.exists():
-        raise ValueError(f"target already exists: {target}")
-
-    target.mkdir(parents=True)
-
-    if copier_template:
-        template_dir = (base_dir / ".copier" / copier_template).resolve()
-        if not template_dir.is_dir():
-            shutil.rmtree(target, ignore_errors=True)
-            raise ValueError(f"template not found: {copier_template}")
-        copier_yml = template_dir / "copier.yml"
-        copier_yaml = template_dir / "copier.yaml"
-        has_copier_config = copier_yml.is_file() or copier_yaml.is_file()
-
-        if has_copier_config:
-            if shutil.which("copier") is None:
-                shutil.rmtree(target, ignore_errors=True)
-                raise ValueError("copier is not installed")
-            try:
-                subprocess.run(
-                    ["copier", "copy", "--trust", str(template_dir), str(target)],
-                    check=True,
-                )
-            except subprocess.CalledProcessError as exc:
-                shutil.rmtree(target, ignore_errors=True)
-                details = f"copier exited with code {exc.returncode}"
-                raise ValueError(f"copier failed: {details}") from exc
-        else:
-            try:
-                scaffold_template_directory(template_dir, target)
-            except (OSError, ValueError):
-                shutil.rmtree(target, ignore_errors=True)
-                raise
-
-    ensure_base_marker(target)
-    tags_to_write = sorted({t.strip() for t in (initial_tags or []) if t.strip()})
-    if tags_to_write:
-        save_base_tags(base_dir, target, tags_to_write)
-
-    return target
 
 
 def cmd_new(
@@ -367,10 +313,6 @@ def _porcelain_dirty(path: Path) -> str:
         )
     except (subprocess.SubprocessError, OSError, ValueError):
         return "?"
-
-
-def _git_clear_cache() -> None:
-    _GIT_INFO_CACHE.clear()
 
 
 def _resolve_repo_path(path: Path, repo_dir: str) -> Path:

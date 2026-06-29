@@ -385,10 +385,6 @@ def _repair_via_prune(issue: WorktreeIssue) -> tuple[bool, str]:
     return True, f"removed orphan admin entry {admin_entry}"
 
 
-def list_workspace_parents(base_dir: Path) -> list[Path]:
-    return _collect_potential_parents(base_dir)
-
-
 __all__ = [
     "WorktreeIssue",
     "audit_workspace",

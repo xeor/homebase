@@ -106,10 +106,6 @@ def _tmux_notify(message: str, pane_id: str = "", delay_ms: int = 4000) -> None:
     )
 
 
-def _tmux_parse_rows(raw: str, fields: int) -> list[list[str]]:
-    return tmux_core.tmux_parse_rows(raw, fields)
-
-
 def _tmux_list_sessions() -> list[dict[str, str]]:
     return tmux_core.tmux_list_sessions(tmux=tmux)
 
@@ -150,22 +146,6 @@ def _tmux_resolve_session_window(
         tmux_active_window_in_session=_tmux_active_window_in_session,
         tmux_display=lambda value, target: _tmux_display(value, target=target),
     )
-
-
-def _first_token_basename(cmdline: str) -> str:
-    return tmux_core.first_token_basename(cmdline)
-
-
-def _tty_process_rows(tty: str) -> list[tuple[int, int, int, int, str]]:
-    return tmux_core.tty_process_rows(tty)
-
-
-def _is_descendant_pid(pid: int, ancestor: int, parent_by_pid: dict[int, int]) -> bool:
-    return tmux_core.is_descendant_pid(pid, ancestor, parent_by_pid)
-
-
-def _pid_command_line(pid: int) -> str:
-    return tmux_core.pid_command_line(pid)
 
 
 def _pane_best_run_command_debug(pane: dict[str, str]) -> dict[str, object]:

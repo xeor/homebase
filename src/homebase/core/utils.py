@@ -259,12 +259,6 @@ def parse_archive_timestamp(value: str, archive_tz: tzinfo) -> int:
     return 0
 
 
-def archive_year_from_name(name: str) -> str | None:
-    if len(name) >= 4 and name[:4].isdigit():
-        return name[:4]
-    return None
-
-
 # Match a leading YYYY-MM-DD followed by one or more separators
 # (``_``, whitespace, ``-``, ``.``). The rest is optional so a bare
 # date with no stem still matches. Mirrors ``date_detect._DATE_PREFIX_RE``
@@ -272,19 +266,6 @@ def archive_year_from_name(name: str) -> str | None:
 _DATE_PREFIX_PATTERN = re.compile(
     r"^(\d{4})-(\d{2})-(\d{2})(?:[_\s\-.]+(.*))?$", re.DOTALL,
 )
-
-
-def normalize_date_prefix(name: str) -> str:
-    m = _DATE_PREFIX_PATTERN.match(name)
-    if not m:
-        return name
-    year, month, day, rest = m.groups()
-    if month == "00":
-        month = "01"
-    if day == "00":
-        day = "01"
-    suffix = f"_{rest}" if rest else ""
-    return f"{year}-{month}-{day}{suffix}"
 
 
 def split_archive_name(name: str, parse_timestamp: Callable[[str], int]) -> tuple[str, int]:

@@ -9,7 +9,6 @@ from homebase.config import store as config_store
 from homebase.core.constants import (
     DEFAULT_ARCHIVE_TZ_NAME,
     NAMED_FILTERS,
-    NEW_PROJECT_DEFAULTS,
     SAVED_FILTER_QUERIES,
     WIP_OPEN_SYMBOL_MAP,
 )
@@ -20,51 +19,6 @@ def _clear_cache() -> None:
     config_store.clear_global_config_cache()
     NAMED_FILTERS.clear()
     SAVED_FILTER_QUERIES.clear()
-
-
-def test_load_post_command_options_strings(tmp_path: Path) -> None:
-    config_store.save_global_config_dict(
-        tmp_path,
-        {"new": {"post-commands": ["echo hi", "  ", "echo hi"]}},
-    )
-    out = prefs.load_post_command_options(tmp_path)
-    keys = [item.key for item in out]
-    assert keys[0] == "echo_hi"
-    assert "echo_hi_2" in keys
-
-
-def test_load_post_command_options_dicts(tmp_path: Path) -> None:
-    config_store.save_global_config_dict(
-        tmp_path,
-        {
-            "new": {
-                "post-commands": [
-                    {"label": "Setup", "command": "make setup"},
-                    {"command": "echo only-command"},
-                    {"label": "", "command": ""},  # skipped
-                    "not-a-dict-or-str-skipped",
-                    123,
-                ]
-            }
-        },
-    )
-    out = prefs.load_post_command_options(tmp_path)
-    assert [(o.label, o.command) for o in out] == [
-        ("Setup", "make setup"),
-        ("echo only-command", "echo only-command"),
-        ("not-a-dict-or-str-skipped", "not-a-dict-or-str-skipped"),
-    ]
-
-
-def test_load_post_command_options_handles_invalid_shapes(tmp_path: Path) -> None:
-    config_store.save_global_config_dict(tmp_path, {"new": "scalar"})
-    assert prefs.load_post_command_options(tmp_path) == []
-
-    config_store.clear_global_config_cache()
-    config_store.save_global_config_dict(
-        tmp_path, {"new": {"post-commands": "scalar"}}
-    )
-    assert prefs.load_post_command_options(tmp_path) == []
 
 
 def test_load_and_save_archive_timezone(tmp_path: Path) -> None:
@@ -111,37 +65,6 @@ def test_load_wip_symbol_map_returns_defaults_on_invalid_shape(tmp_path: Path) -
     config_store.clear_global_config_cache()
     config_store.save_global_config_dict(tmp_path, {"wip": {"hotkeys": "scalar"}})
     assert prefs.load_wip_symbol_map(tmp_path) == dict(WIP_OPEN_SYMBOL_MAP)
-
-
-def test_load_and_save_new_project_defaults(tmp_path: Path) -> None:
-    initial = prefs.load_new_project_defaults(tmp_path)
-    assert initial.keys() == set(NEW_PROJECT_DEFAULTS.keys())
-
-    prefs.save_new_project_defaults(
-        tmp_path,
-        {
-            "name_options": ["b", "a", "  "],
-            "template": "  ",
-            "post_commands": ["echo", "echo"],
-            "tags": ["alpha", "beta"],
-            "after_create": "  ",
-        },
-    )
-    loaded = prefs.load_new_project_defaults(tmp_path)
-    assert loaded["name_options"] == ["a", "b"]
-    assert loaded["template"] is None
-    assert loaded["post_commands"] == ["echo"]
-    assert loaded["tags"] == ["alpha", "beta"]
-    assert loaded["after_create"] == "open"
-
-
-def test_load_new_project_defaults_returns_defaults_for_invalid_shape(
-    tmp_path: Path,
-) -> None:
-    config_store.save_global_config_dict(tmp_path, {"new_project": "scalar"})
-    assert prefs.load_new_project_defaults(tmp_path).keys() == set(
-        NEW_PROJECT_DEFAULTS.keys()
-    )
 
 
 def test_nested_discovery_toggle_persists(tmp_path: Path) -> None:

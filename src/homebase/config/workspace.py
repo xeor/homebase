@@ -8,8 +8,6 @@ from ..core.models import Action, BuiltinActionMeta
 from . import cache_profile as cache_profile_config
 
 ActionKind = Literal["builtin", "shell", "filepicker", "note", "tab"]
-ActionScope = Literal["target", "workspace", "tab"]
-ActionSource = Literal["builtin", "config", "overridden"]
 
 _VAR_RE = re.compile(r"\{\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}\}")
 _HEX_COLOR_RE = re.compile(r"^#[0-9A-Fa-f]{6}$")
@@ -406,100 +404,6 @@ def load_favorites(
             row["style"] = style_rules
         out.append(row)
     return out
-
-
-def merge_actions(
-    builtins: dict[str, BuiltinActionMeta],
-    user_actions: dict[str, dict[str, object]] | None,
-    custom_actions_legacy: list[dict[str, str]],
-) -> dict[str, Action]:
-    merged: dict[str, Action] = {}
-    override_map = user_actions or {}
-    for action_id, meta in builtins.items():
-        override = override_map.get(action_id, {})
-        label = str(override.get("label", meta.default_label)).strip() or meta.default_label
-        source: ActionSource = "overridden" if "label" in override else "builtin"
-        merged[action_id] = Action(
-            id=action_id,
-            label=label,
-            kind="builtin",
-            scope=meta.scope,
-            multi="joined",
-            confirm=meta.default_confirm_prompt,
-            hidden=False,
-            view_scope=meta.view_scope,
-            source=source,
-        )
-
-    for legacy in custom_actions_legacy:
-        cid = str(legacy.get("id", "")).strip()
-        if not cid:
-            continue
-        label = str(legacy.get("label", cid)).strip() or cid
-        scope_raw = str(legacy.get("scope", "target")).strip().lower()
-        scope = "workspace" if scope_raw == "global" else "target"
-        if cid in merged:
-            current = merged[cid]
-            merged[cid] = Action(
-                id=current.id,
-                label=label,
-                kind=current.kind,
-                scope=current.scope,
-                multi=current.multi,
-                command=current.command,
-                list_command=current.list_command,
-                op=current.op,
-                confirm=current.confirm,
-                hidden=current.hidden,
-                view_scope=current.view_scope,
-                source="overridden",
-            )
-            continue
-
-        command = str(legacy.get("command", "")).strip()
-        list_command = str(legacy.get("list_command", "")).strip()
-        run_command = str(legacy.get("run_command", "")).strip()
-        note_command = str(legacy.get("note_command", "")).strip()
-        loop_on_multi = str(legacy.get("loop_on_multi", "")).strip().lower() in {
-            "1",
-            "true",
-            "yes",
-            "on",
-        }
-        if list_command and run_command:
-            merged[cid] = Action(
-                id=cid,
-                label=label,
-                kind="filepicker",
-                scope="target",
-                multi="joined",
-                command=run_command,
-                list_command=list_command,
-                source="config",
-            )
-            continue
-        if note_command:
-            merged[cid] = Action(
-                id=cid,
-                label=label,
-                kind="note",
-                scope="target",
-                multi="joined",
-                op=note_command,
-                source="config",
-            )
-            continue
-        if command:
-            merged[cid] = Action(
-                id=cid,
-                label=label,
-                kind="shell",
-                scope=cast(ActionScope, scope),
-                multi="per_row" if loop_on_multi else "joined",
-                command=command,
-                source="config",
-            )
-    return merged
 
 
 def load_suffixes(data: object, *, default_suffixes: list[str]) -> list[str]:

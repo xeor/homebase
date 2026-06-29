@@ -677,18 +677,6 @@ def _benchmark_run_suite(
     return dataset, metrics, notes, seed_elapsed_s, suite_elapsed_s
 
 
-def _benchmark_metric_names() -> list[str]:
-    # Core score set kept stable across versions so history stays comparable.
-    return [
-        "collect_projects",
-        "collect_archived",
-        "cache_store_rows_full",
-        "cache_load_rows_warm",
-        "query_plain_name_scan",
-        "query_expr_scan_1",
-    ]
-
-
 def _benchmark_metric_map(run: dict[str, object]) -> dict[str, float]:
     return benchmark_report.metric_map(run)
 
@@ -812,12 +800,6 @@ def _benchmark_results_compat_warnings(
     runs: list[dict[str, object]],
 ) -> list[str]:
     return benchmark_report.results_compat_warnings(runs)
-
-
-def _run_filtered_metric_total(
-    run: dict[str, object], ignore_featuresets: set[str]
-) -> float | None:
-    return benchmark_report.run_filtered_metric_total(run, ignore_featuresets)
 
 
 def _run_filtered_metric_counts(

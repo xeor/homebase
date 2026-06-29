@@ -96,13 +96,6 @@ class PropertyDef:
         return False
 
 
-@dataclass(frozen=True)
-class PostCommandOption:
-    key: str
-    label: str
-    command: str
-
-
 @dataclass
 class ProjectRow:
     path: Path

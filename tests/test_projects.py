@@ -67,7 +67,7 @@ def _init_git_repo(repo: Path) -> None:
 def test_git_info_caches_branch_and_ts_until_index_changes(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     _init_git_repo(repo)
-    projects._git_clear_cache()
+    projects._GIT_INFO_CACHE.clear()
 
     branch1, dirty1, ts1 = projects.git_info(repo, repo_dir=".")
     assert dirty1 == ""
@@ -92,7 +92,7 @@ def test_git_info_caches_branch_and_ts_until_index_changes(tmp_path: Path) -> No
 def test_git_info_cache_keeps_staged_dirty_under_working_tree_check(tmp_path: Path) -> None:
     repo = tmp_path / "repo_staged"
     _init_git_repo(repo)
-    projects._git_clear_cache()
+    projects._GIT_INFO_CACHE.clear()
 
     (repo / "f.txt").write_text("staged-change\n", encoding="utf-8")
     subprocess.run(["git", "add", "f.txt"], cwd=repo, check=True)
@@ -111,7 +111,7 @@ def test_git_info_cache_invalidates_on_soft_reset_head(tmp_path: Path) -> None:
     (repo / "f.txt").write_text("v2\n", encoding="utf-8")
     subprocess.run(["git", "add", "f.txt"], cwd=repo, check=True)
     subprocess.run(["git", "commit", "-q", "-m", "v2"], cwd=repo, check=True, env=env)
-    projects._git_clear_cache()
+    projects._GIT_INFO_CACHE.clear()
 
     _, _, ts_v2 = projects.git_info(repo, repo_dir=".")
     assert ts_v2 == int(datetime(2024, 6, 15, 12, 0, 0).timestamp())
@@ -124,7 +124,7 @@ def test_git_info_cache_invalidates_on_soft_reset_head(tmp_path: Path) -> None:
 def test_git_info_returns_unverified_when_dirty_skipped(tmp_path: Path) -> None:
     repo = tmp_path / "repo2"
     _init_git_repo(repo)
-    projects._git_clear_cache()
+    projects._GIT_INFO_CACHE.clear()
 
     _, dirty_warm, _ = projects.git_info(repo, include_dirty=True, repo_dir=".")
     assert dirty_warm == ""
@@ -149,7 +149,7 @@ def test_git_info_resolves_worktree_branch(tmp_path: Path) -> None:
         check=True,
         capture_output=True,
     )
-    projects._git_clear_cache()
+    projects._GIT_INFO_CACHE.clear()
 
     wt_branch, wt_dirty, wt_ts = projects.git_info(wt, repo_dir=".")
     assert wt_branch == "featx"
@@ -169,7 +169,7 @@ def test_git_info_worktree_cache_invalidates_on_commit(tmp_path: Path) -> None:
         check=True,
         capture_output=True,
     )
-    projects._git_clear_cache()
+    projects._GIT_INFO_CACHE.clear()
 
     _, _, ts1 = projects.git_info(wt, repo_dir=".")
     env = {
@@ -276,70 +276,6 @@ def test_resolve_row_size_refresh_branches(tmp_path: Path) -> None:
 
     size_c, _ = projects._resolve_row_size(d, size_b, count_b, force_refresh=True)
     assert size_c == 150
-
-
-def test_create_project_writes_marker_and_tags(tmp_path: Path) -> None:
-    base = tmp_path / "base"
-    base.mkdir()
-    target = projects.create_project(
-        base,
-        "alpha",
-        add_date_prefix=False,
-        add_tmp_suffix=False,
-        copier_template=None,
-        initial_tags=["alpha", "  ", "beta", "alpha"],
-    )
-    assert target.is_dir()
-    assert (target / ".base.yaml").is_file()
-    text = (target / ".base.yaml").read_text()
-    # tags deduped and sorted
-    assert "alpha" in text and "beta" in text
-
-
-def test_create_project_rejects_existing_target(tmp_path: Path) -> None:
-    import pytest
-
-    base = tmp_path / "base"
-    base.mkdir()
-    (base / "alpha").mkdir()
-    with pytest.raises(ValueError, match="already exists"):
-        projects.create_project(
-            base, "alpha", add_date_prefix=False, add_tmp_suffix=False
-        )
-
-
-def test_create_project_scaffolds_plain_template(tmp_path: Path) -> None:
-    base = tmp_path / "base"
-    base.mkdir()
-    tmpl_dir = base / ".copier" / "plain"
-    (tmpl_dir / "subdir").mkdir(parents=True)
-    (tmpl_dir / "subdir" / "inner.txt").write_text("inner\n")
-    (tmpl_dir / "root.txt").write_text("root\n")
-    target = projects.create_project(
-        base,
-        "beta",
-        add_date_prefix=False,
-        add_tmp_suffix=False,
-        copier_template="plain",
-    )
-    assert (target / "root.txt").read_text() == "root\n"
-    assert (target / "subdir" / "inner.txt").read_text() == "inner\n"
-
-
-def test_create_project_missing_template_raises(tmp_path: Path) -> None:
-    import pytest
-
-    base = tmp_path / "base"
-    base.mkdir()
-    with pytest.raises(ValueError, match="template not found"):
-        projects.create_project(
-            base,
-            "gamma",
-            add_date_prefix=False,
-            add_tmp_suffix=False,
-            copier_template="missing",
-        )
-    assert not (base / "gamma").exists()
 
 
 def test_scaffold_template_directory_noops_on_empty(tmp_path: Path) -> None:

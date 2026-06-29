@@ -442,11 +442,3 @@ def save_base_repo_dir(path: Path, repo_dir: str) -> None:
     data = load_base_data(path)
     data["repo_dir"] = value
     save_base_data(path, data)
-
-
-def clear_base_repo_dir(path: Path) -> None:
-    ensure_base_marker(path)
-    data = load_base_data(path)
-    if data.pop("repo_dir", None) is None:
-        return
-    save_base_data(path, data)

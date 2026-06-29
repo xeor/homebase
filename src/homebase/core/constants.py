@@ -6,10 +6,8 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from .models import BuiltinActionMeta, BuiltinHotkey, PropertyDef
 
-TS_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:Z|[+-]\d{2}:?\d{2})$")
 DATE_PREFIX_RE = re.compile(r"^\d{4}-\d{2}-\d{2}_")
 ARCHIVE_YEAR_DIR_RE = re.compile(r"^\d{4}$")
-ARCHIVE_YEAR_PREFIX_RE = re.compile(r"^\d{4}")
 
 DEFAULT_ARCHIVE_TZ_NAME = "Europe/Oslo"
 ARCHIVE_TZ_NAME = DEFAULT_ARCHIVE_TZ_NAME
@@ -74,7 +72,6 @@ COLOR_SUCCESS_HEX = "#7DFF9B"
 COLOR_AGE_UNIT_HEX = "#7CFC7C"
 COLOR_NAV_HEX = "#4DA3FF"
 COLOR_INTERACTIVE_HEX = "#3BC9B5"
-COLOR_MUTED_HEX = "#8A94A6"
 COLOR_ARCHIVE_HEX = "#8D84C6"
 COLOR_DYNAMIC_ENV_HEX = "#FFB347"
 COLOR_DYNAMIC_FILE_HEX = "#4DA3FF"
@@ -438,8 +435,6 @@ NAMED_FILTERS: dict[str, str] = {}
 SAVED_FILTER_QUERIES: list[str] = []
 SUFFIXES: list[str] = ["tmp", "fork"]
 FILE_VIEW_EXCLUDE_PATTERNS: list[str] = []
-CUSTOM_ACTIONS: list[dict[str, str]] = []
-CUSTOM_HOTKEYS: list[dict[str, str]] = []
 OPEN_MODE_CONFIG: dict[str, str] = {
     "profile": "shell_cd",
 }
@@ -461,7 +456,6 @@ NOTES_CONFIG: dict[str, object] = {
         "command": "mv {{ OLD_NOTE_PATH_Q }} {{ NEW_NOTE_PATH_Q }}",
     },
 }
-VALID_NOTE_COMMANDS: frozenset[str] = frozenset({"add_log"})
 TABLE_BEHAVIOR_CONFIG: dict[str, object] = {
     "pin_wip_top": False,
     "side_width_pct": 33,
@@ -485,13 +479,6 @@ TABLE_DATE_COLOR_COLUMNS: tuple[str, ...] = (
     "archived_at",
 )
 TABLE_SIDE_WIDTH_PRESETS = [20, 25, 30, 33, 35, 40, 45, 50]
-NEW_PROJECT_DEFAULTS: dict[str, object] = {
-    "name_options": [],
-    "template": None,
-    "post_commands": [],
-    "tags": [],
-    "after_create": "open",
-}
 RECONCILE_USAGE_CACHE_LIMIT = 4000
 OPEN_MODE_PROFILES: list[dict[str, object]] = [
     {

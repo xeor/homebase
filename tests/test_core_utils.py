@@ -81,22 +81,6 @@ def test_split_archive_name_bare_date_returns_empty_stem() -> None:
     assert ts > 0
 
 
-def test_normalize_date_prefix_replaces_zero_month_and_day() -> None:
-    assert core_utils.normalize_date_prefix("2003-00-00_x") == "2003-01-01_x"
-
-
-def test_normalize_date_prefix_replaces_zero_day_only() -> None:
-    assert core_utils.normalize_date_prefix("2008-09-00_phpmylogin.tgz") == "2008-09-01_phpmylogin.tgz"
-
-
-def test_normalize_date_prefix_noop_on_valid_date() -> None:
-    assert core_utils.normalize_date_prefix("2025-05-11_demo") == "2025-05-11_demo"
-
-
-def test_normalize_date_prefix_noop_without_prefix() -> None:
-    assert core_utils.normalize_date_prefix("weird-no-date") == "weird-no-date"
-
-
 def test_existing_path_case_mismatch_returns_none_for_missing(tmp_path: Path) -> None:
     assert core_utils.existing_path_case_mismatch(tmp_path / "missing.md") is None
 

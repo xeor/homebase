@@ -11,34 +11,6 @@ import yaml
 from .constants import HOMEBASE_DIR_NAME, NESTED_DISCOVERY_REPORT_FILE_NAME
 
 
-def scan_nested_project_paths(
-    base_dir: Path,
-    *,
-    archive_dir_name: str,
-    base_marker_file: str,
-    discovery_should_skip_active_walk_path: Callable[[Path, Path, Path], bool],
-    discovery_prune_walk_dirnames: Callable[[list[str]], None],
-) -> list[Path]:
-    out: list[Path] = []
-    base_res = base_dir.resolve()
-    archive_root = (base_dir / archive_dir_name).resolve()
-    for dirpath, dirnames, filenames in os.walk(base_dir, topdown=True):
-        cur = Path(dirpath).resolve()
-        if discovery_should_skip_active_walk_path(base_dir, archive_root, cur):
-            dirnames[:] = []
-            continue
-        discovery_prune_walk_dirnames(dirnames)
-        if base_marker_file not in filenames or cur == base_res:
-            continue
-        rel = cur.relative_to(base_res)
-        if len(rel.parts) <= 1:
-            continue
-        out.append(cur)
-        dirnames[:] = []
-    out.sort(key=lambda path: str(path))
-    return out
-
-
 def suggest_flat_name(base_dir: Path, nested_path: Path) -> str:
     rel = nested_path.resolve().relative_to(base_dir.resolve())
     parts = [p for p in rel.parts if p]

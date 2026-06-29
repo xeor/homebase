@@ -26,12 +26,6 @@ from homebase.core.setup_model import (
 # --- pure helpers ---------------------------------------------------
 
 
-def test_compact_path_for_display_uses_tilde() -> None:
-    home = Path.home()
-    out = setup_tools.compact_path_for_display(str(home / "x"))
-    assert out.startswith("~")
-
-
 def test_shell_init_target_paths() -> None:
     home = Path.home()
     assert setup_tools._shell_init_target_for_shell("fish") == (
@@ -66,11 +60,6 @@ def test_shell_init_installed_detects_present_and_missing(tmp_path: Path) -> Non
     assert not setup_tools._shell_init_installed("bash", body, bash_target, rc)
 
 
-def test_has_any_tmux_save_binding_detects_bind_line() -> None:
-    text = 'bind-key t run-shell -b "uv run --script b.py b tmux save"\n'
-    assert setup_tools.has_any_tmux_save_binding(text) is True
-
-
 def test_tmux_save_binding_lines_returns_only_binding_lines() -> None:
     text = "\n".join(
         [
@@ -93,40 +82,6 @@ def test_recommended_tmux_save_binding_contains_expected_parts() -> None:
     assert "display-popup" in line
     assert "#{pane_id}" in line
     assert "session_id" in line
-
-
-def test_acceptable_tmux_save_binding_recognises_recommended_form() -> None:
-    line = setup_tools.recommended_tmux_save_binding(Path("/usr/local/bin/b"))
-    assert setup_tools.is_acceptable_tmux_save_binding(line)
-
-
-def test_acceptable_tmux_save_binding_rejects_legacy_uv_run_script() -> None:
-    legacy = (
-        "bind-key t run-shell -b "
-        "'TMUX_BIN=/opt/homebrew/bin/tmux /opt/homebrew/bin/uv run --script "
-        "/Users/x/.local/share/uv/tools/homebase/bin/b tmux save "
-        "--pane-id \"#{pane_id}\" --session-id \"#{q:session_id}\"'"
-    )
-    assert not setup_tools.is_acceptable_tmux_save_binding(legacy)
-
-
-def test_acceptable_tmux_save_binding_tolerates_whitespace_and_quoting() -> None:
-    variants = [
-        "bind-key  t  display-popup -E -w 80% -h 50% '/path/to/b tmux save --pane-id \"#{pane_id}\" --session-id \"#{q:session_id}\"'",
-        "bind t display-popup -E /opt/homebase/b tmux save --pane-id '#{pane_id}' --session-id '#{q:session_id}'",
-    ]
-    for line in variants:
-        assert setup_tools.is_acceptable_tmux_save_binding(line), line
-
-
-def test_acceptable_tmux_save_binding_rejects_unrelated_lines() -> None:
-    for line in (
-        "",
-        "# comment",
-        "bind-key x run-shell 'echo hi'",
-        "bind-key t run-shell 'tmux save'",  # missing pane_id + session_id
-    ):
-        assert not setup_tools.is_acceptable_tmux_save_binding(line), line
 
 
 def test_state_text_labels() -> None:
@@ -614,37 +569,6 @@ def test_self_update_check_includes_diagnostics_when_unclear(
     assert "self-update diagnostics" in joined
     assert "launcher:" in joined
     assert "python:" in joined
-
-
-def test_detect_self_update_for_local_repo(tmp_path: Path) -> None:
-    (tmp_path / "src" / "homebase").mkdir(parents=True)
-    (tmp_path / "pyproject.toml").write_text("[project]\nname='homebase'\n")
-    detail, cmd = setup_tools._detect_self_update(tmp_path, None)
-    assert "local editable" in detail
-    assert "uv tool install --editable" in cmd
-
-
-def test_detect_self_update_for_uv_tool_path(tmp_path: Path) -> None:
-    detail, cmd = setup_tools._detect_self_update(
-        tmp_path,
-        Path("/Users/me/.local/share/uv/tools/homebase/bin/b"),
-    )
-    assert "uv tool" in detail
-    assert cmd == "uv tool upgrade homebase"
-
-
-def test_detect_self_update_for_uv_tool_python_runtime(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    monkeypatch.setattr(setup_tools.sys, "executable", "/Users/me/.local/share/uv/tools/homebase/bin/python")
-    detail, cmd = setup_tools._detect_self_update(tmp_path, None)
-    assert "uv tool runtime" in detail
-    assert cmd == "uv tool upgrade homebase"
-
-
-def test_detect_self_update_for_site_packages_runtime(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    monkeypatch.setattr(setup_tools.sys, "executable", "/venv/lib/python3.11/site-packages/bin/python")
-    detail, cmd = setup_tools._detect_self_update(tmp_path, None)
-    assert "python environment install" in detail
-    assert cmd == "python -m pip install -U homebase"
 
 
 # --- tmux helpers ---------------------------------------------------
@@ -1410,21 +1334,6 @@ def test_uv_tool_fast_focus_pypi_only_when_recorded_source_is_pypi(
     assert cmd == (
         f'uv tool install --force "homebase[{setup_tools.FAST_FOCUS_EXTRA}]"'
     )
-
-
-def test_self_update_preserves_fast_focus_extra(tmp_path: Path) -> None:
-    # When the extra is already installed, the self-update command keeps
-    # it so the upgrade doesn't drop it again.
-    (tmp_path / "src" / "homebase").mkdir(parents=True)
-    (tmp_path / "pyproject.toml").write_text("[project]\nname='homebase'\n")
-
-    _, plain = setup_tools._detect_self_update(tmp_path, None)
-    assert setup_tools.FAST_FOCUS_PACKAGE not in plain
-
-    _, with_extra = setup_tools._detect_self_update(
-        tmp_path, None, fast_focus_installed=True
-    )
-    assert setup_tools.FAST_FOCUS_PACKAGE in with_extra
 
 
 def test_install_macos_fast_focus_passes_unresolved_executable(
