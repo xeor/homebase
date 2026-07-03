@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.9.0 - 2026-07-03
+
+- Config editor and settings improvements
+- Better visibility of pending favorite removals
+
+
 ## 0.7.0 - 2026-06-26
 
 - Project cache layer reworked, with a focus/navigation logic overhaul
