@@ -7,8 +7,10 @@ import threading
 from pathlib import Path
 from typing import Callable
 
+import yaml
 from rich.markup import escape
 
+from .config_presets import ConfigEnv, build_presets
 from .setup_model import (
     INTENT_ABSENT,
     INTENT_CANNOT_CREATE,
@@ -477,6 +479,8 @@ def run_setup_app(
             Tabs,
         )
         from textual.widgets._toggle_button import ToggleButton
+
+        from .config_editor import ConfigEditorWidget
     except ImportError:
         return None
 
@@ -492,6 +496,26 @@ def run_setup_app(
     fix_by_id = {fx.id: fx for fx in fix_order}
     debug_tool_list = list(debug_tools or [])
     debug_tool_by_id = {tool.id: tool for tool in debug_tool_list}
+
+    config_env = ConfigEnv(
+        platform=sys.platform,
+        has_git=bool(ctx.git_bin),
+        has_tmux=bool(ctx.tmux_bin),
+        shell=ctx.completion_shell or "",  # nosec B604 - dataclass field, not a subprocess shell
+    )
+    config_presets = build_presets(config_env)
+    config_current: dict[str, object] = {}
+    if ctx.config_path.exists():
+        loaded = yaml.safe_load(ctx.config_path.read_text(encoding="utf-8"))
+        if isinstance(loaded, dict):
+            config_current = loaded
+
+    def _save_config(desired: dict[str, object]) -> None:
+        ctx.config_path.parent.mkdir(parents=True, exist_ok=True)
+        ctx.config_path.write_text(
+            yaml.safe_dump(desired, sort_keys=False, allow_unicode=True),
+            encoding="utf-8",
+        )
 
     class ApplyDialog(ModalScreen[ApplyOutcome]):
         """Modal log dialog shown while apply runs.
@@ -876,7 +900,14 @@ def run_setup_app(
         #dialog_buttons { height: 3; align-horizontal: right; }
         #dialog_buttons Button { margin: 0 0 0 1; min-width: 18; }
         """
-        TAB_ORDER = ("overview", "fixes", "self_update", "diagnostics", "debug")
+        TAB_ORDER = (
+            "overview",
+            "fixes",
+            "self_update",
+            "diagnostics",
+            "debug",
+            "config",
+        )
         BINDINGS = [
             Binding("ctrl+s", "apply", "Apply"),
             Binding("q", "cancel", "Cancel"),
@@ -903,6 +934,7 @@ def run_setup_app(
             Binding("3", "show_tab('self_update')", "Self-update", show=False),
             Binding("4", "show_tab('diagnostics')", "Diagnostics", show=False),
             Binding("5", "show_tab('debug')", "Debug", show=False),
+            Binding("6", "show_tab('config')", "Config", show=False),
         ]
 
         def __init__(self) -> None:
@@ -1012,6 +1044,13 @@ def run_setup_app(
                                 Text.from_markup(_DEBUG_HINT_LINE),
                                 id="debug_hint",
                             )
+                with TabPane("Config [6]", id="config"):
+                    yield ConfigEditorWidget(
+                        config_presets,
+                        config_current,
+                        _save_config,
+                        env=config_env,
+                    )
             with Horizontal(id="action_bar"):
                 yield Button(
                     "Cancel & Quit (q)", id="btn_cancel", variant="warning"
@@ -1214,7 +1253,9 @@ def run_setup_app(
         def check_action(self, action: str, parameters):
             _ = parameters
             active = self._active_tab_id()
-            if action in ("all", "none", "apply"):
+            if action == "apply":
+                return active in ("fixes", "config")
+            if action in ("all", "none"):
                 return active == "fixes"
             if action == "run_self_update":
                 return active == "self_update"
@@ -1249,6 +1290,8 @@ def run_setup_app(
             try:
                 if active_id == "fixes":
                     self.query_one("#fixes_list", SelectionList).focus()
+                elif active_id == "config":
+                    self.query_one("#cfg_list", SelectionList).focus()
                 elif active_id == "debug" and debug_tool_list:
                     self.query_one("#debug_menu", ListView).focus()
                 else:
@@ -1381,6 +1424,9 @@ def run_setup_app(
         # --- actions ----------------------------------------------
 
         def action_apply(self) -> None:
+            if self._active_tab_id() == "config":
+                self.query_one(ConfigEditorWidget).action_apply()
+                return
             widget = self.query_one("#fixes_list", SelectionList)
             selected = {str(value) for value in widget.selected}
             intents = _compute_intents(fix_order, selected)

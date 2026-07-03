@@ -271,6 +271,7 @@ def test_no_orphan_builtin_actions() -> None:
         "full_reconcile",
         "reconcile_all_cache",
         "edit_global_config",
+        "open_config_editor",
         "reload_global_config",
     }
     declared = {

@@ -302,8 +302,16 @@ BUILTIN_ACTIONS: dict[str, BuiltinActionMeta] = {
     ),
     "edit_global_config": BuiltinActionMeta(
         id="edit_global_config",
-        default_label="Edit global config in $EDITOR",
+        default_label="Open config file in $EDITOR",
         help_text="Open global config in editor and reload",
+        scope="workspace",
+        view_scope=("active", "archive"),
+        default_confirm_prompt=None,
+    ),
+    "open_config_editor": BuiltinActionMeta(
+        id="open_config_editor",
+        default_label="Open config editor",
+        help_text="Open the interactive config editor modal",
         scope="workspace",
         view_scope=("active", "archive"),
         default_confirm_prompt=None,
@@ -686,10 +694,8 @@ SIDE_CHILD_TABS: dict[str, list[tuple[str, str]]] = {
         ("hooks", "Hooks"),
     ],
     "settings": [
+        ("general", "General"),
         ("table", "Table"),
-        ("table_config", "Config"),
-        ("open", "Open"),
-        ("global", "Config-file"),
     ],
 }
 

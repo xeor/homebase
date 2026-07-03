@@ -14,6 +14,7 @@ import yaml
 
 from .changelog import ChangelogEntry, entries_since, load_changelog_entries
 from .constants import GLOBAL_CONFIG_FILE_NAME, HOMEBASE_DIR_NAME
+from .diff import color_diff_lines
 from .setup_model import (
     STATUS_FAIL,
     STATUS_PASS,
@@ -961,58 +962,6 @@ def _build_checks(ctx: SetupContext) -> list[SetupCheck]:
 # --- fix building ----------------------------------------------------
 
 
-def _color_diff_lines(
-    current_lines: list[str],
-    desired_lines: list[str],
-    *,
-    header: str = "",
-    max_lines: int = 80,
-) -> tuple[str, ...]:
-    """Return a coloured unified-diff representation as Rich-markup lines.
-
-    - Removed lines are coloured red, added lines green, hunk headers
-      cyan, and unchanged context dim.
-    - Truncates the body at ``max_lines`` with a trailing summary so
-      the preview pane never grows unbounded.
-    - When both sides are identical, returns a single dim ``(no
-      differences)`` line.
-    """
-    import difflib
-
-    diff = list(
-        difflib.unified_diff(
-            current_lines,
-            desired_lines,
-            fromfile="current",
-            tofile="desired",
-            lineterm="",
-            n=2,
-        )
-    )
-    if not diff:
-        return ((f"{header}\n" if header else "") + "[dim](no differences)[/]",)
-
-    out: list[str] = []
-    if header:
-        out.append(f"[dim]{header}[/]")
-    for line in diff:
-        if line.startswith("---") or line.startswith("+++"):
-            out.append(f"[dim]{line}[/]")
-        elif line.startswith("@@"):
-            out.append(f"[bright_cyan]{line}[/]")
-        elif line.startswith("+"):
-            out.append(f"[bright_green]{line}[/]")
-        elif line.startswith("-"):
-            out.append(f"[bright_red]{line}[/]")
-        else:
-            out.append(f"[dim]{line}[/]")
-    if len(out) > max_lines:
-        truncated = len(out) - max_lines
-        out = out[:max_lines]
-        out.append(f"[dim]… (diff truncated; {truncated} more line(s))[/]")
-    return tuple(out)
-
-
 def _gitignore_preview_create(path: Path) -> tuple[str, ...]:
     current = _read_text_lines(path)
     desired = list(current)
@@ -1020,13 +969,13 @@ def _gitignore_preview_create(path: Path) -> tuple[str, ...]:
         if desired and desired[-1].strip() != "":
             desired.append("")
         desired.append("cache.sqlite3")
-    return _color_diff_lines(current, desired, header=f"# {path}")
+    return color_diff_lines(current, desired, header=f"# {path}")
 
 
 def _gitignore_preview_remove(path: Path) -> tuple[str, ...]:
     current = _read_text_lines(path)
     desired = [line for line in current if line.strip() != "cache.sqlite3"]
-    return _color_diff_lines(current, desired, header=f"# {path}")
+    return color_diff_lines(current, desired, header=f"# {path}")
 
 
 def _inline_char_diff_pair(old: str, new: str) -> tuple[str, str]:
@@ -1423,12 +1372,12 @@ def _build_fixes(ctx: SetupContext) -> list[SetupFix]:
                 recommended=True,
                 apply_create=_fix_completion,
                 apply_remove=_remove_completion,
-                preview_create=_color_diff_lines(
+                preview_create=color_diff_lines(
                     _read_text_lines(comp_path),
                     comp_body.splitlines(),
                     header=f"# {comp_path}",
                 ),
-                preview_remove=_color_diff_lines(
+                preview_remove=color_diff_lines(
                     _read_text_lines(comp_path),
                     [],
                     header=f"# delete {comp_path}",
@@ -1484,7 +1433,7 @@ def _build_fixes(ctx: SetupContext) -> list[SetupFix]:
             _remove_shell_init_source_line(rc, source_line)
 
         preview_create_lines = list(
-            _color_diff_lines(
+            color_diff_lines(
                 _read_text_lines(init_path),
                 init_body.splitlines(),
                 header=f"# {init_path}",
@@ -1492,7 +1441,7 @@ def _build_fixes(ctx: SetupContext) -> list[SetupFix]:
             )
         )
         preview_remove_lines = list(
-            _color_diff_lines(
+            color_diff_lines(
                 _read_text_lines(init_path),
                 [],
                 header=f"# delete {init_path}",
@@ -1508,7 +1457,7 @@ def _build_fixes(ctx: SetupContext) -> list[SetupFix]:
             rc_desired_remove = [line for line in rc_current if line.strip() != source_line.strip()]
             preview_create_lines.append("")
             preview_create_lines.extend(
-                _color_diff_lines(
+                color_diff_lines(
                     rc_current,
                     rc_desired_create,
                     header=f"# {ctx.shell_init_rc}",
@@ -1517,7 +1466,7 @@ def _build_fixes(ctx: SetupContext) -> list[SetupFix]:
             )
             preview_remove_lines.append("")
             preview_remove_lines.extend(
-                _color_diff_lines(
+                color_diff_lines(
                     rc_current,
                     rc_desired_remove,
                     header=f"# {ctx.shell_init_rc}",

@@ -502,3 +502,49 @@ def test_intent_label_translates_known_intents() -> None:
     assert "skip" in setup_app._intent_label(INTENT_ABSENT)
     assert "cannot" in setup_app._intent_label(INTENT_CANNOT_CREATE)
     assert "manual" in setup_app._intent_label(INTENT_CANNOT_REMOVE)
+
+
+def test_real_app_config_tab_applies_preset(tmp_path: Path) -> None:
+    """Drive the Config tab: enable a preset and commit, then confirm the
+    injected on_apply callback writes the YAML config file."""
+    import asyncio
+
+    import yaml
+    from textual.app import App
+
+    from homebase.core.config_editor import ConfigEditorWidget
+
+    cfg_path = tmp_path / ".homebase/config.yaml"
+    original_run = App.run
+
+    def fake_run(self):
+        async def driver():
+            from textual.widgets import TabbedContent
+
+            async with self.run_test() as pilot:
+                await pilot.pause()
+                self.query_one(TabbedContent).active = "config"
+                await pilot.pause()
+                widget = self.query_one(ConfigEditorWidget)
+                widget.enabled = {"archive_timezone"}
+                widget._commit()
+                await pilot.pause()
+                self.exit(None)
+
+        asyncio.run(driver())
+        return None
+
+    App.run = fake_run
+    try:
+        setup_app.run_setup_app(
+            _ctx(tmp_path),
+            [],
+            [],
+            apply_fn=lambda *_a, **_kw: [],
+        )
+    finally:
+        App.run = original_run
+
+    assert cfg_path.exists()
+    data = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
+    assert data["archive"]["timezone"] == "Europe/Oslo"

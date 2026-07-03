@@ -34,90 +34,96 @@ def apply_category(row: Any, suffix: str | None, *, suffixes: list[str]) -> Path
     return target
 
 
-def on_data_table_row_highlighted(app: Any, event: Any) -> None:
-    table_id = str(getattr(getattr(event, "data_table", None), "id", "") or "")
-    if table_id == "side_settings_table":
-        try:
-            idx = int(str(event.row_key.value))
-        except (AttributeError, TypeError, ValueError):
-            return
-        if app.side_settings_tab == "open":
-            max_idx = max(0, len(app._open_mode_rows()) - 1)
-            app.open_settings_index = max(0, min(idx, max_idx))
-            app._update_open_settings_details()
-        else:
-            current_columns = app._table_columns_for_view(app.view_mode)
-            app.table_settings_index = max(0, min(idx, len(current_columns) - 1))
-        return
-    if table_id and table_id != "projects":
-        return
-    if app._suspend_project_row_highlight:
-        return
+def _event_table_id(event: Any) -> str:
+    return str(getattr(getattr(event, "data_table", None), "id", "") or "")
 
-    if (
-        app.side_main_tab == "selected"
-        and app.side_selected_tab == "readme"
-        and time.time() > float(app._readme_nav_allow_until)
-    ):
-        return
 
-    highlighted_path: Path | None
+def _row_key_path(event: Any) -> Path | None:
     try:
-        highlighted_path = Path(str(event.row_key.value))
+        return Path(str(event.row_key.value))
     except (TypeError, ValueError):
-        highlighted_path = None
-    if highlighted_path is None:
-        return
-    if not any(app._same_path(row.path, highlighted_path) for row in app._current_rows()):
-        return
+        return None
 
-    if app._restore_pending.get(app.view_mode, False) or app._restore_apply_scroll.get(
-        app.view_mode, False
-    ):
-        target = app._restore_target_path.get(app.view_mode)
-        if target is not None and app._same_path(highlighted_path, target):
-            app.selected_path = highlighted_path
-            app._view_selected_path[app.view_mode] = app.selected_path
-            app._restore_target_path[app.view_mode] = app.selected_path
-            app._restore_pending[app.view_mode] = False
-            app._restore_apply_scroll[app.view_mode] = False
-            app._mark_state_dirty()
-            app._refresh_side()
-        return
 
-    app.selected_path = highlighted_path
-    app._bump_row_usage(app.selected_path, 0.4)
-    app._view_selected_path[app.view_mode] = app.selected_path
-    app._restore_target_path[app.view_mode] = app.selected_path
+def _sync_settings_table_index(app: Any, event: Any) -> bool:
+    """Move the settings-column cursor to the highlighted/selected row.
+
+    Returns True when the event targeted the settings table and was
+    consumed, so the caller stops (the project-table logic must not run)."""
+    if _event_table_id(event) != "side_settings_table":
+        return False
+    try:
+        idx = int(str(event.row_key.value))
+    except (AttributeError, TypeError, ValueError):
+        return True
+    current_columns = app._table_columns_for_view(app.view_mode)
+    app.table_settings_index = max(0, min(idx, len(current_columns) - 1))
+    return True
+
+
+def _commit_selected_row(app: Any, path: Path) -> None:
+    app.selected_path = path
+    app._view_selected_path[app.view_mode] = path
+    app._restore_target_path[app.view_mode] = path
     app._restore_pending[app.view_mode] = False
     app._restore_apply_scroll[app.view_mode] = False
     app._mark_state_dirty()
     app._refresh_side()
 
 
+def _apply_restore_highlight(app: Any, highlighted_path: Path) -> bool:
+    """Consume a highlight while a restore is pending. Returns True if the
+    row-highlight handler should stop (restore mode owns the cursor)."""
+    if not (
+        app._restore_pending.get(app.view_mode, False)
+        or app._restore_apply_scroll.get(app.view_mode, False)
+    ):
+        return False
+    target = app._restore_target_path.get(app.view_mode)
+    if target is not None and app._same_path(highlighted_path, target):
+        _commit_selected_row(app, highlighted_path)
+    return True
+
+
+def _readme_nav_suppresses_highlight(app: Any) -> bool:
+    return (
+        app.side_main_tab == "selected"
+        and app.side_selected_tab == "readme"
+        and time.time() > float(app._readme_nav_allow_until)
+    )
+
+
+def on_data_table_row_highlighted(app: Any, event: Any) -> None:
+    if _sync_settings_table_index(app, event):
+        return
+    table_id = _event_table_id(event)
+    if table_id and table_id != "projects":
+        return
+    if app._suspend_project_row_highlight or _readme_nav_suppresses_highlight(app):
+        return
+
+    highlighted_path = _row_key_path(event)
+    if highlighted_path is None:
+        return
+    if not any(app._same_path(row.path, highlighted_path) for row in app._current_rows()):
+        return
+    if _apply_restore_highlight(app, highlighted_path):
+        return
+
+    app._bump_row_usage(highlighted_path, 0.4)
+    _commit_selected_row(app, highlighted_path)
+
+
 def on_data_table_row_selected(app: Any, event: Any) -> None:
-    table_id = str(getattr(getattr(event, "data_table", None), "id", "") or "")
-    if table_id == "side_settings_table":
-        try:
-            idx = int(str(event.row_key.value))
-        except (AttributeError, TypeError, ValueError):
-            return
-        if app.side_settings_tab == "open":
-            max_idx = max(0, len(app._open_mode_rows()) - 1)
-            app.open_settings_index = max(0, min(idx, max_idx))
-            app._open_mode_select_selected()
-            app._update_open_settings_details()
-        else:
-            current_columns = app._table_columns_for_view(app.view_mode)
-            app.table_settings_index = max(0, min(idx, len(current_columns) - 1))
+    if _sync_settings_table_index(app, event):
         return
-    if table_id != "projects":
+    if _event_table_id(event) != "projects":
         return
-    try:
-        app.selected_path = Path(str(event.row_key.value))
-    except (TypeError, ValueError):
+    path = _row_key_path(event)
+    if path is None:
         return
-    app._bump_row_usage(app.selected_path, 1.2)
+    app.selected_path = path
+    app._bump_row_usage(path, 1.2)
     app.action_open_selected()
 
 

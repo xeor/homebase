@@ -42,30 +42,19 @@ def on_tabs_tab_activated(
 
 @dataclass
 class _TabActiveFlags:
+    settings: bool
+    settings_general: bool
     settings_table: bool
-    settings_config: bool
-    settings_global: bool
     selected_readme: bool
     selected_notes: bool
 
-    @property
-    def settings(self) -> bool:
-        return self.settings_table or self.settings_config
-
 
 def _compute_active_flags(app: Any) -> _TabActiveFlags:
+    settings = app.side_main_tab == "settings"
     return _TabActiveFlags(
-        settings_table=(
-            app.side_main_tab == "settings"
-            and app.side_settings_tab in {"table", "open"}
-        ),
-        settings_config=(
-            app.side_main_tab == "settings"
-            and app.side_settings_tab == "table_config"
-        ),
-        settings_global=(
-            app.side_main_tab == "settings" and app.side_settings_tab == "global"
-        ),
+        settings=settings,
+        settings_general=settings and app.side_settings_tab == "general",
+        settings_table=settings and app.side_settings_tab == "table",
         selected_readme=(
             app.side_main_tab == "selected" and app.side_selected_tab == "readme"
         ),
@@ -97,27 +86,21 @@ def _apply_visibility(
     side_body: Any,
     side_readme_panel: Any,
     side_notes_panel: Any,
-    side_global_panel: Any,
     settings_table: Any,
     settings_notes: Any,
-    settings_config_panel: Any,
+    settings_general: Any,
 ) -> None:
     side_scroll.display = not flags.settings
     side_body.display = (
         not flags.settings
         and not flags.selected_readme
         and not flags.selected_notes
-        and not flags.settings_global
     )
     side_readme_panel.display = not flags.settings and flags.selected_readme
     side_notes_panel.display = not flags.settings and flags.selected_notes
-    side_global_panel.display = flags.settings_global
     settings_table.display = flags.settings_table
-    settings_config_panel.display = flags.settings_config
-    settings_notes.display = (
-        app.side_main_tab == "settings"
-        and app.side_settings_tab in {"table", "open"}
-    )
+    settings_notes.display = flags.settings_table
+    settings_general.display = flags.settings_general
 
 
 def _try_set(widget: Any, attr: str, value: object) -> None:
@@ -152,13 +135,6 @@ def _apply_focus_rules(
         and not app._modal_active()
     ):
         _try_focus(settings_table)
-    if flags.settings_config and not app._modal_active():
-        try:
-            first_cfg = app.query_one("#cfg_pin_wip")
-            if not first_cfg.has_focus:
-                first_cfg.focus()
-        except WIDGET_API_ERRORS:
-            pass
     if (
         app._main_table_was_locked
         and not projects_locked
@@ -179,10 +155,9 @@ def sync_side_tab_visibility(app: Any, *, widget_projects: str) -> None:
     side_body = app.query_one("#side_body")
     side_readme_panel = app.query_one("#side_readme_panel")
     side_notes_panel = app.query_one("#side_notes_panel")
-    side_global_panel = app.query_one("#side_global_panel")
     settings_table = app.query_one("#side_settings_table")
     settings_notes = app.query_one("#side_settings_notes")
-    settings_config_panel = app.query_one("#side_settings_config_panel")
+    settings_general = app.query_one("#side_settings_general")
     app._refresh_settings_tab_labels(settings_tabs)
     selected_tabs.display = app.side_main_tab == "selected"
     info_tabs.display = app.side_main_tab == "info"
@@ -196,10 +171,9 @@ def sync_side_tab_visibility(app: Any, *, widget_projects: str) -> None:
         side_body=side_body,
         side_readme_panel=side_readme_panel,
         side_notes_panel=side_notes_panel,
-        side_global_panel=side_global_panel,
         settings_table=settings_table,
         settings_notes=settings_notes,
-        settings_config_panel=settings_config_panel,
+        settings_general=settings_general,
     )
     projects_locked = main_table_interaction_locked(app)
     _apply_focus_rules(
@@ -209,11 +183,7 @@ def sync_side_tab_visibility(app: Any, *, widget_projects: str) -> None:
 
 
 def main_table_interaction_locked(app: Any) -> bool:
-    if app.side_main_tab == "settings" and app.side_settings_tab in {
-        "table",
-        "table_config",
-        "open",
-    }:
+    if app.side_main_tab == "settings":
         return True
     if app.side_main_tab == "selected" and app.side_selected_tab in {
         "readme",
@@ -230,12 +200,6 @@ def refresh_settings_tab_labels(app: Any, settings_tabs: Any) -> None:
         try:
             if tab_id == "table":
                 tab.label = f"Table {view_suffix}"
-            elif tab_id == "table_config":
-                tab.label = "Config"
-            elif tab_id == "open":
-                tab.label = "Open"
-            elif tab_id == "global":
-                tab.label = "Config-file"
         except WIDGET_API_ERRORS:
             continue
 

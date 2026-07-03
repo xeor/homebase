@@ -23,10 +23,7 @@ from textual.widgets import (
     DataTable,
     Footer,
     Input,
-    Label,
-    Select,
     Static,
-    Switch,
     Tab,
     Tabs,
 )
@@ -66,7 +63,6 @@ from ..core import utils as core_utils
 from ..core.constants import (
     ARCHIVE_DIR_NAME,
     ARCHIVE_TZ,
-    ARCHIVE_TZ_PRESETS,
     BASE_MARKER_FILE,
     BUILTIN_ACTIONS,
     BUILTIN_HOTKEYS,
@@ -375,13 +371,10 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
     #side_settings_tabs { height: 3; margin: 0 0 1 0; }
     #side_settings_table { height: 1fr; display: none; }
     #side_settings_notes { height: 15; display: none; color: $text-muted; }
-    #side_settings_config_panel { height: 1fr; display: none; padding: 0 1; }
-    #side_settings_config_panel .cfg-row { height: 3; align: left middle; }
-    #side_settings_config_panel .cfg-label { width: 1fr; padding: 1 1 0 0; }
-    #side_settings_config_panel Switch { width: auto; }
-    #side_settings_config_panel Select { width: 28; }
-    #side_settings_config_panel Input { width: 12; }
-    #side_settings_config_help { height: auto; color: $text-muted; padding: 1 1 0 1; }
+    #side_settings_general { height: auto; display: none; }
+    #side_settings_general_info { padding: 0 1; margin: 0 0 1 0; }
+    #side_config_editor_open { width: 1fr; margin: 1 1 0 1; }
+    #side_config_file_open { width: 1fr; margin: 1 1 0 1; }
     #side_scroll { height: 1fr; }
     #side_body { padding: 0 1; }
     #side_readme_panel { height: 1fr; display: none; }
@@ -392,10 +385,6 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
     #side_notes { height: 1fr; }
     #side_notes_create { width: 1fr; margin: 1 1 0 1; }
     #side_notes_open { width: 1fr; margin: 1 1 0 1; }
-    #side_global_panel { height: 1fr; display: none; }
-    #side_global_info { height: 1fr; }
-    #side_global_config_reload { width: 1fr; margin: 1 1 0 1; }
-    #side_global_config_edit { width: 1fr; margin: 1 1 0 1; }
     #wip_bar { height: 1; background: $surface-darken-1; color: $text; content-align: left middle; }
     #new_project_box { width: 100%; height: 100%; border: round $accent; background: $surface; padding: 1 2; }
     #new_body { height: 1fr; }
@@ -675,10 +664,8 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
         self.table_settings_index = 0
         self.table_behavior = load_table_behavior_config(self.base_dir)
         self.table_date_color_ranges = load_table_date_column_styles(self.base_dir)
-        self._settings_config_loading = True
         self.open_mode = dict(self.ctx.open_mode_config)
         self.notes_config = dict(self.ctx.notes_config)
-        self.open_settings_index = 0
 
     def _init_hooks_state(self) -> None:
         self.hook_recent: dict[tuple[str, str], list[HookRunRecord]] = {}
@@ -897,60 +884,24 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
                             compact=True,
                             flat=True,
                         )
-                    with Vertical(id="side_global_panel"):
-                        yield Static("", id="side_global_info")
-                        yield Button(
-                            "Reload global config",
-                            id="side_global_config_reload",
-                            variant="default",
-                            compact=True,
-                            flat=True,
-                        )
-                        yield Button(
-                            "Edit global config in $EDITOR",
-                            id="side_global_config_edit",
-                            variant="primary",
-                            compact=True,
-                            flat=True,
-                        )
+                with Vertical(id="side_settings_general"):
+                    yield Static("", id="side_settings_general_info")
+                    yield Button(
+                        "Open config editor",
+                        id="side_config_editor_open",
+                        variant="primary",
+                        compact=True,
+                        flat=True,
+                    )
+                    yield Button(
+                        "Open config file in $EDITOR",
+                        id="side_config_file_open",
+                        variant="default",
+                        compact=True,
+                        flat=True,
+                    )
                 yield Static("", id="side_settings_notes")
                 yield DataTable(id="side_settings_table", cursor_type="row")
-                with Vertical(id="side_settings_config_panel"):
-                    with Horizontal(classes="cfg-row"):
-                        yield Label("Pin WIP rows at top", classes="cfg-label")
-                        yield Switch(id="cfg_pin_wip", value=False)
-                    with Horizontal(classes="cfg-row"):
-                        yield Label("Info panel width", classes="cfg-label")
-                        yield Select(
-                            options=[(f"{p}%", p) for p in TABLE_SIDE_WIDTH_PRESETS],
-                            id="cfg_side_width",
-                            allow_blank=False,
-                            compact=True,
-                            type_to_search=True,
-                        )
-                    with Horizontal(classes="cfg-row"):
-                        yield Label("Preview files (overview)", classes="cfg-label")
-                        yield Input(
-                            id="cfg_preview_limit",
-                            value="8",
-                            type="integer",
-                            max_length=4,
-                            compact=True,
-                        )
-                    with Horizontal(classes="cfg-row"):
-                        yield Label("Archive timezone", classes="cfg-label")
-                        yield Select(
-                            options=[(tz, tz) for tz in ARCHIVE_TZ_PRESETS],
-                            id="cfg_archive_tz",
-                            allow_blank=False,
-                            compact=True,
-                            type_to_search=True,
-                        )
-                    yield Static(
-                        "[dim]tab: next field   space/enter: toggle/open   "
-                        "type to filter dropdowns   enter on number: commit[/]",
-                        id="side_settings_config_help",
-                    )
         yield Static("", id="wip_bar")
         yield Footer()
 
@@ -1002,8 +953,8 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
             self.query_one("#side_readme", ReadmeMarkdownViewer),
             self.query_one("#side_notes_panel", Vertical),
             self.query_one("#side_notes", ReadmeMarkdownViewer),
-            self.query_one("#side_global_panel", Vertical),
-            self.query_one("#side_global_info", Static),
+            self.query_one("#side_settings_general", Vertical),
+            self.query_one("#side_settings_general_info", Static),
             self.query_one("#side_settings_table", DataTable),
             self.query_one("#side_settings_notes", Static),
             self.query_one("#wip_bar", Static),
@@ -1044,10 +995,6 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
         self.call_after_refresh(self._start_probe_open_panes)
         self.set_timer(0.12, self._retry_pending_restore)
         self.set_timer(0.18, self._reflow_table_columns_after_layout)
-        self.call_after_refresh(self._settings_config_finish_boot)
-
-    def _settings_config_finish_boot(self) -> None:
-        self._settings_config_loading = False
 
     def _reflow_table_columns_after_layout(self) -> None:
         self._configure_table_columns()
@@ -2354,8 +2301,8 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
 
     def _global_config_button_actions(self) -> list[tuple[str, str]]:
         return [
-            ("reload_global_config", "[white]Reload global config[/]"),
-            ("edit_global_config", "[white]Edit global config in $EDITOR[/]"),
+            ("open_config_editor", "[white]Open config editor[/]"),
+            ("edit_global_config", "[white]Open config file in $EDITOR[/]"),
         ]
 
     def _visible_button_actions(self) -> list[tuple[str, str]]:
@@ -2371,9 +2318,7 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
                 return self._notes_button_actions()
             return []
         if self.side_main_tab == "settings":
-            if self.side_settings_tab == "global":
-                return self._global_config_button_actions()
-            return []
+            return self._global_config_button_actions()
         return []
 
     def _run_notes_command(
@@ -2420,10 +2365,10 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
     def _refresh_settings_table(self) -> None:
         textual_ui_settings_panel.refresh_settings_table(self)
 
-    def _update_open_settings_details(
-        self, rows: list[tuple[str, str, str]] | None = None
-    ) -> None:
-        textual_ui_settings_panel.update_open_settings_details(self, rows)
+    def _settings_general_info_text(self) -> str:
+        return textual_ui_settings_panel.settings_general_info_text(
+            self, base_dir=self.base_dir
+        )
 
     def _table_pin_wip_top_enabled(self) -> bool:
         return bool(self.table_behavior.get("pin_wip_top", False))
@@ -2432,9 +2377,6 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
         raw = _as_int(self.table_behavior.get("side_width_pct", 33), 33)
         presets = list(TABLE_SIDE_WIDTH_PRESETS) or [raw]
         return min(presets, key=lambda pct: abs(pct - raw))
-
-    def _table_config_save(self) -> None:
-        textual_ui_settings_panel.table_config_save(self, base_dir=self.base_dir)
 
     def _table_settings_save(self) -> None:
         textual_ui_settings_panel.table_settings_save(self, base_dir=self.base_dir)
@@ -2448,15 +2390,6 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
 
     def _table_settings_toggle_enabled(self) -> None:
         textual_ui_settings_panel.table_settings_toggle_enabled(self, base_dir=self.base_dir)
-
-    def _open_mode_save(self) -> None:
-        textual_ui_settings_panel.open_mode_save(self, base_dir=self.base_dir)
-
-    def _open_mode_rows(self) -> list[tuple[str, str, str]]:
-        return textual_ui_settings_panel.open_mode_rows()
-
-    def _open_mode_select_selected(self) -> None:
-        textual_ui_settings_panel.open_mode_select_selected(self, base_dir=self.base_dir)
 
     def _table_settings_reorder(self, delta: int) -> None:
         textual_ui_settings_panel.table_settings_reorder(
@@ -2472,14 +2405,14 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
             base_dir=self.base_dir,
         )
 
+    def _open_config_editor_modal(self) -> None:
+        textual_ui_settings_panel.open_config_editor_modal(self, base_dir=self.base_dir)
+
     def _edit_global_config_and_reload(self) -> None:
         textual_ui_settings_panel.edit_global_config_and_reload(self, base_dir=self.base_dir)
 
     def _reload_global_config(self) -> None:
         textual_ui_settings_panel.reload_global_config(self, base_dir=self.base_dir)
-
-    def _global_config_status_text(self) -> str:
-        return textual_ui_settings_panel.global_config_status_text(self, base_dir=self.base_dir)
 
     def _cache_info_lines(self) -> list[str]:
         return textual_ui_side_panel.cache_info_lines(

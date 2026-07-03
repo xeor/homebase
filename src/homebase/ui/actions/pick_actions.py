@@ -107,6 +107,10 @@ def on_pick_actions(app: Any, value: str | None) -> None:
         app._edit_global_config_and_reload()
         return True
 
+    def _handle_open_config_editor() -> bool:
+        app._open_config_editor_modal()
+        return True
+
     def _handle_reload_global_config() -> bool:
         app._reload_global_config()
         return True
@@ -358,6 +362,7 @@ def on_pick_actions(app: Any, value: str | None) -> None:
         "refresh_cache": _handle_refresh_cache,
         "full_reconcile": _handle_full_reconcile,
         "edit_global_config": _handle_edit_global_config,
+        "open_config_editor": _handle_open_config_editor,
         "reload_global_config": _handle_reload_global_config,
         "reconcile_all_cache": _handle_reconcile_all_cache,
         "reconcile_selection_cache": _handle_reconcile_selection_cache,

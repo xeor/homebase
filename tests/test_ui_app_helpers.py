@@ -287,7 +287,7 @@ def test_global_config_button_actions_returns_two_buttons() -> None:
     _bapp_methods(stub, "_global_config_button_actions")
     out = stub._global_config_button_actions()
     ids = [aid for aid, _label in out]
-    assert ids == ["reload_global_config", "edit_global_config"]
+    assert ids == ["open_config_editor", "edit_global_config"]
 
 
 def test_visible_button_actions_routes_to_readme_when_selected_readme_tab() -> None:
@@ -334,7 +334,7 @@ def test_visible_button_actions_empty_for_other_selected_tabs() -> None:
 def test_visible_button_actions_routes_to_global_config_in_settings() -> None:
     stub = SimpleNamespace(
         side_main_tab="settings",
-        side_settings_tab="global",
+        side_settings_tab="table",
         _readme_button_actions=lambda: [],
         _notes_button_actions=lambda: [],
         _global_config_button_actions=lambda: [("g", "G")],

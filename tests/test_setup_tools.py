@@ -121,31 +121,6 @@ def test_remove_tmux_binding_keeps_other_lines(tmp_path: Path) -> None:
     assert "b tmux save" not in text
 
 
-def test_color_diff_lines_marks_removed_and_added() -> None:
-    diff = setup_tools._color_diff_lines(
-        ["alpha", "beta", "gamma"],
-        ["alpha", "BETA", "gamma"],
-    )
-    joined = "\n".join(diff)
-    assert "bright_red" in joined
-    assert "bright_green" in joined
-    assert "-beta" in joined
-    assert "+BETA" in joined
-
-
-def test_color_diff_lines_handles_identical_inputs() -> None:
-    diff = setup_tools._color_diff_lines(["alpha"], ["alpha"])
-    assert any("no differences" in line for line in diff)
-
-
-def test_color_diff_lines_truncates_long_diffs() -> None:
-    current = [f"line{i}" for i in range(200)]
-    desired = [f"line{i}+" for i in range(200)]
-    diff = setup_tools._color_diff_lines(current, desired, max_lines=20)
-    assert len(diff) <= 21
-    assert any("truncated" in line for line in diff)
-
-
 def test_tmux_preview_create_uses_char_level_inline_diff() -> None:
     old = ("bind-key t display-popup -E -w 80% -h 50% /b tmux save",)
     new = "bind-key t display-popup    -w 70% -h 30% /b tmux save --pause"

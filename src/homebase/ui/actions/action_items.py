@@ -280,8 +280,12 @@ def _global_default_items(app: Any) -> list[tuple[str, str]]:
             f"[white]{_builtin_label('reload_global_config', 'Reload global config')}[/]",
         ),
         (
+            "open_config_editor",
+            f"[white]{_builtin_label('open_config_editor', 'Open config editor')}[/]",
+        ),
+        (
             "edit_global_config",
-            f"[white]{_builtin_label('edit_global_config', 'Edit global config in $EDITOR')}[/]",
+            f"[white]{_builtin_label('edit_global_config', 'Open config file in $EDITOR')}[/]",
         ),
     ]
     if app.active_rows or app.archived_rows:
