@@ -91,7 +91,7 @@ layers = [
   "homebase.commands",
   "homebase.workspace",
   "homebase.hooks",
-  "homebase.tmux | homebase.notes | homebase.filter | homebase.archive | homebase.metadata | homebase.cache",
+  "homebase.tmux | homebase.herdr | homebase.notes | homebase.filter | homebase.archive | homebase.metadata | homebase.cache",
   "homebase.config",
   "homebase.core",
 ]

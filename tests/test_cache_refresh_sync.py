@@ -148,13 +148,19 @@ def test_on_cache_refresh_done_logs_error(tmp_path: Path) -> None:
 def test_on_cache_refresh_done_stores_rows_when_epoch_matches(
     tmp_path: Path, monkeypatch
 ) -> None:
-    app = _make_app(cache_refresh_epoch=1)
-    monkeypatch.setattr(
-        cache_refresh, "cache_store_rows", lambda _bd, _a, _r: 100
-    )
+    app = _make_app(cache_refresh_epoch=1, cache_worker_started_ts=50.7)
+    stored: dict[str, object] = {}
+
+    def fake_store(_bd, _a, _r, *, scan_started_ts):
+        stored["start"] = scan_started_ts
+        return 100
+
+    monkeypatch.setattr(cache_refresh, "cache_store_rows_merged", fake_store)
     outcome = CacheRefreshOutcome(1, [], [], OperationResult.success())
     cache_refresh.on_cache_refresh_done(app, base_dir=tmp_path, outcome=outcome)
     assert app.cache_last_refresh_ts == 100
+    assert app.full_scan_seen_ts == 100
+    assert stored["start"] == 50
     assert app.table_refreshed == 1
 
 
@@ -163,10 +169,10 @@ def test_on_cache_refresh_done_handles_store_error(
 ) -> None:
     app = _make_app(cache_refresh_epoch=1)
 
-    def boom(*_a):
+    def boom(*_a, **_k):
         raise OSError("disk")
 
-    monkeypatch.setattr(cache_refresh, "cache_store_rows", boom)
+    monkeypatch.setattr(cache_refresh, "cache_store_rows_merged", boom)
     outcome = CacheRefreshOutcome(1, [], [], OperationResult.success())
     cache_refresh.on_cache_refresh_done(app, base_dir=tmp_path, outcome=outcome)
     assert any(key == "cache_store" for key, _ in app.logged_errors)
@@ -182,7 +188,7 @@ def test_on_cache_refresh_done_processes_pending(
     )
     outcome = CacheRefreshOutcome(99, [], [], OperationResult.success())
     monkeypatch.setattr(
-        cache_refresh, "cache_store_rows", lambda *_a: 0
+        cache_refresh, "cache_store_rows_merged", lambda *_a, **_k: 0
     )
     cache_refresh.on_cache_refresh_done(app, base_dir=tmp_path, outcome=outcome)
     assert app.cache_refresh_pending is False
@@ -243,3 +249,46 @@ def test_start_cache_refresh_seeds_size_cache_from_existing_rows(
     seed = captured["size_cache"]
     assert isinstance(seed, dict)
     assert len(seed) == 1
+
+
+def test_start_cache_refresh_asks_live_daemon(tmp_path: Path) -> None:
+    import os
+
+    from homebase.cache.daemon_status import DaemonStatus, write_daemon_status
+    from homebase.cache.owner import take_cache_refresh_request
+
+    write_daemon_status(
+        tmp_path,
+        DaemonStatus(
+            pid=os.getpid(), version="t", started_ts=time.time(), heartbeat_ts=time.time(),
+            last_refresh_ts=0, last_refresh_s=0.0, refreshes=0, state="idle",
+        ),
+    )
+    app = _make_app()
+    cache_refresh.start_cache_refresh(
+        app, base_dir=tmp_path, cache_max_age_s=60, reason="tag update", force=True,
+    )
+    assert app.cache_worker_running is False
+    request = take_cache_refresh_request(tmp_path)
+    assert request is not None and request[0] == "tag update"
+    assert "cache refresh requested from cache owner (tag update)" in app.debug_msgs
+
+
+def test_start_cache_refresh_asks_owner_tui(tmp_path: Path) -> None:
+    from homebase.cache.owner import (
+        release_cache_owner,
+        take_cache_refresh_request,
+        try_acquire_cache_owner,
+    )
+
+    held = try_acquire_cache_owner(tmp_path, role="tui")
+    try:
+        app = _make_app()
+        cache_refresh.start_cache_refresh(
+            app, base_dir=tmp_path, cache_max_age_s=60, reason="hard inconsistency", force=True,
+        )
+    finally:
+        release_cache_owner(held)
+    assert app.cache_worker_running is False
+    request = take_cache_refresh_request(tmp_path)
+    assert request is not None and request[0] == "hard inconsistency"

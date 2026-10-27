@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import re
 from pathlib import Path
 from typing import Sequence
@@ -7,6 +8,7 @@ from typing import Sequence
 from ..core.constants import (
     CACHE_PROFILE_CONFIG,
     DEFAULT_ARCHIVE_TZ_NAME,
+    ENV_OPEN_MODE,
     NAMED_FILTERS,
     NOTES_CONFIG,
     OPEN_MODE_CONFIG,
@@ -181,10 +183,15 @@ def save_favorites(base_dir: Path, favorites: Sequence[object]) -> None:
 
 def load_open_mode_config(base_dir: Path) -> dict[str, str]:
     data = load_global_config_dict(base_dir)
-    return open_mode_config.load_open_mode_config(
+    known = {str(p.get("id", "")) for p in OPEN_MODE_PROFILES}
+    conf = open_mode_config.load_open_mode_config(
         data,
         default_profile=str(OPEN_MODE_CONFIG["profile"]),
-        known_profiles={str(p.get("id", "")) for p in OPEN_MODE_PROFILES},
+        known_profiles=known,
+    )
+    override = os.environ.get(ENV_OPEN_MODE, "").strip()
+    return open_mode_config.apply_open_mode_override(
+        conf, override if override in known else ""
     )
 
 

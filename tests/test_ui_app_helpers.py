@@ -417,3 +417,32 @@ def test_managed_process_info_lines_caps_at_twenty_entries() -> None:
     out = stub._managed_process_info_lines()
     # Header (2) + 20 procs * 3 lines each = 62.
     assert len(out) == 2 + 20 * 3
+
+
+# ---- _register_client -------------------------------------------------
+
+
+def test_register_client_lists_this_process(tmp_path: Path) -> None:
+    import os
+
+    from homebase.cache.clients import list_clients, unregister_client
+
+    ui_app._register_client(tmp_path, tmp_path / "p")
+    clients = list_clients(tmp_path)
+    assert [(c.pid, c.cwd) for c in clients] == [(os.getpid(), str(tmp_path / "p"))]
+    unregister_client(tmp_path, os.getpid())
+
+
+# ---- _init_rows_state: saved query ------------------------------------
+
+
+@pytest.mark.parametrize(("clear", "initial", "expected"), [
+    (False, "", "saved"),
+    (True, "", ""),
+    (True, "tag:x", "tag:x"),
+])
+def test_init_rows_state_query(tmp_path: Path, clear: bool, initial: str, expected: str) -> None:
+    stub = SimpleNamespace(base_dir=tmp_path, ctx=SimpleNamespace(clear_query=clear))
+    ui_app.BApp._init_rows_state(stub, initial, {"query": "saved"})  # type: ignore[arg-type]  # stub app
+    assert stub.query == expected
+    assert stub.query_cursor == len(expected)

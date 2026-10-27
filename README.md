@@ -73,9 +73,10 @@ this repository so they can share Homebase context during development,
 but they are optional and are not part of the main `homebase` package,
 runtime dependencies, build, or QA pipeline.
 
-- `integrations/raycast/`: Raycast extension that shells out to `b ls`,
-  `b open`, and `b integration raycast ...` for project search/opening
-  and enabled action dispatch. It has its own `package.json` and
+- `integrations/raycast/`: Raycast extension for project search/opening
+  (herdr spaces or `b open`) and enabled action dispatch. It reads the
+  project list `b daemon` keeps in `.homebase/runtime/raycast.json` and
+  shells out to `b integration raycast ...` for the rest. It has its own `package.json` and
   Raycast build/lint commands.
 - `integrations/browser-tab-sync/`: browser tab-group desired-state
   tool. It has a standalone Python CLI/native host under `cli/`, a
@@ -124,6 +125,9 @@ uv run b ls tag:work       # filter (same syntax as the TUI's QUERY input)
 uv run b ls --git          # re-probe git + show BRANCH column (slower)
 uv run b ls --archived     # list archived projects
 uv run b help              # full subcommand list
+uv run b daemon            # keep the cache fresh for every b (status screen)
+uv run b --open-mode shell_cd  # this run opens in the current shell, whatever open_mode says
+uv run b --clear-query         # start with an empty search instead of the last one
 uv run b new               # new-project wizard
 uv run b archive mv .      # archive current dir
 uv run b benchmark run # synthetic perf bench
@@ -249,12 +253,32 @@ uv sync                       # install with dev extras
 uv run python -m homebase status
 ```
 
+## Cache owner and daemon
+
+One process per base owns background cache work (full rescans, reconcile, git status and
+worktree-health sweeps): `b daemon` while it runs, else the first TUI that takes
+`runtime/cache-owner.lock`. Every other `b` only reads the cache, writes rows for the
+user's own actions (create, rename, tag, ...), asks the owner for a rescan through
+`runtime/cache-refresh.request`, and reloads rows after each owner rescan. A TUI owner
+hands over to a daemon as soon as it sees the daemon's heartbeat.
+
+`b daemon` rescans when the last full scan is older than `CACHE_MAX_AGE_S`, when a
+top-level dir appears/disappears, or on request, and sweeps worktree health. One per base.
+In a terminal it shows a status screen: role (cache owner or waiting), what it does now,
+uptime, version, CPU, memory, cache age and size, next rescan, worktree health, connected
+`b` instances and the log (`r` rescan now, `w` worktree health now, `q` quit). A second
+`b daemon` shows the running one read-only. `--plain` (or no terminal) logs to stdout
+instead; `b daemon --once` does one rescan and exits.
+
 ## Runtime Files
 
 Homebase runtime state/config files live in `<base>/.homebase/`.
 
 - `config.yaml`: global runtime config (`properties`, `create_templates`, filters, hotkeys, open-mode, etc.)
-- `cache.sqlite3`: primary sqlite cache for rows/opened timestamps/reconcile state
+- `cache.sqlite3`: primary sqlite cache for rows/opened timestamps/reconcile state, plus each packed archive's metadata so new processes skip unpacking
+- `runtime/daemon.json`: `b daemon` heartbeat; `runtime/daemon.lock` keeps it single-instance
+- `runtime/cache-owner.lock`: held by the process that owns background cache work (pid and role inside)
+- `runtime/clients/<pid>.json`: one per running `b` TUI, listed by `b daemon`
 - `benchmark.yaml`: benchmark run history written by `b benchmark run`
 - `test.yaml`: synthetic test-suite history written by `b test`
 - `regression-test.yaml`: regression run reports written by `b test regression`
@@ -279,6 +303,7 @@ src/homebase/
 ├── cache/       # sqlite cache, reconcile usage, queue
 ├── metadata/    # .base.yml read/write, property detection, tag index
 ├── tmux/        # tmux core / commands / flow
+├── herdr/       # herdr socket client / panes / open modes
 ├── filter/      # filter engine + tag index
 ├── workspace/   # discovery, project rows, benchmark, regression
 ├── commands/    # CLI command handlers
@@ -293,7 +318,7 @@ src/homebase/
 ```
 
 Layering rule (imports go inward only): `core/` ⇽ nothing; `config/`
-⇽ `core/`; `cache/`, `metadata/`, `archive/`, `tmux/`, `filter/` ⇽
+⇽ `core/`; `cache/`, `metadata/`, `archive/`, `tmux/`, `herdr/`, `filter/` ⇽
 `core/`, `config/`; `workspace/`, `commands/` ⇽ those; `ui/` ⇽
 everything; `cli/` ⇽ everything.
 
@@ -338,6 +363,25 @@ uses it. If multiple sessions or tmux sockets are active, set
 ```sh
 b --tmux-session main
 b --tmux-session main open my-project
+```
+
+#### herdr
+
+The `herdr_*` profiles open projects in [herdr](https://herdr.dev)
+over its socket API (`$HERDR_SOCKET_PATH`, else
+`~/.config/herdr/herdr.sock`):
+
+- `herdr_tab`: new tab in the current workspace.
+- `herdr_tab_goto`: focus a pane already in the project, else new tab.
+- `herdr_workspace`: focus a pane already in the project, else a new
+  workspace named after the project.
+
+They work from inside herdr and from a plain terminal while herdr runs.
+Without a herdr server they fall back to `shell_cd`. herdr panes also
+feed the pane count and the pane query types below.
+
+```sh
+b --open-mode herdr_workspace
 ```
 
 #### macOS: faster window activation (optional)
@@ -404,18 +448,18 @@ properties:
     dir-exists: [.git]
 
   ACT:
-    label: active tmux pane
+    label: open pane
     key: act
     cache_ttl_s: 3
     queries:
-      - type: tmux_open_panes
+      - type: open_panes
 
   EDT:
     label: editor active for project
     key: edt
     cache_ttl_s: 8
     queries:
-      - type: tmux_editor_commands
+      - type: editor_commands
         commands: [code, code-insiders, codium, cursor, zed, nvim, vim]
       - type: sqlite_recent_paths
         db_path: "~/Library/Application Support/VSCodium/User/globalStorage/state.vscdb"
@@ -426,8 +470,11 @@ properties:
 
 Query types currently supported:
 
-- `tmux_open_panes`
-- `tmux_editor_commands`
+- `open_panes`: a tmux or herdr pane is in the project
+- `editor_commands`: a tmux or herdr pane in the project runs one of `commands`
+  (for herdr panes the command is the detected agent, else the foreground process)
+- `tmux_open_panes`, `tmux_editor_commands`: tmux panes only
+- `herdr_open_panes`, `herdr_editor_commands`: herdr panes only
 - `sqlite_recent_paths`
 
 ### Full Config Example

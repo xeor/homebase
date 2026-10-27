@@ -57,7 +57,7 @@ def test_parser_accepts_shell_init_without_shell_arg() -> None:
     parser = cli_parser.build_cli_parser()
     ns = parser.parse_args(["shell-init"])
     assert ns.command == "shell-init"
-    assert ns.shell == ""
+    assert ns.shell is None
 
 
 def test_parser_rejects_unknown_shell_in_shell_init() -> None:

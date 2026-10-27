@@ -38,6 +38,15 @@ HOMEBASE_DIR_NAME = ".homebase"
 GLOBAL_CONFIG_FILE_NAME = "config.yaml"
 RUNTIME_DIR_NAME = "runtime"
 TMUX_CONTEXTS_FILE_NAME = "tmux-contexts.json"
+DAEMON_STATUS_FILE_NAME = "daemon.json"
+DAEMON_LOCK_FILE_NAME = "daemon.lock"
+CACHE_OWNER_LOCK_FILE_NAME = "cache-owner.lock"
+CACHE_REFRESH_REQUEST_FILE_NAME = "cache-refresh.request"
+CLIENTS_DIR_NAME = "clients"
+# Project list for the Raycast extension, kept current by `b daemon`.
+RAYCAST_SNAPSHOT_FILE_NAME = "raycast.json"
+RAYCAST_SNAPSHOT_VERSION = 1
+RAYCAST_SNAPSHOT_MAX_AGE_S = 60.0
 CACHE_DB_FILE_NAME = "cache.sqlite3"
 BENCHMARK_REPORT_FILE_NAME = "benchmark.yaml"
 TEST_REPORT_FILE_NAME = "test.yaml"
@@ -52,6 +61,11 @@ TMUX_BIN_CANDIDATES = (
     "/usr/bin/tmux",
 )
 TMUX_SHELL_COMMANDS = {"sh", "bash", "zsh", "fish", "nu", "nushell", "tmux"}
+
+# herdr (terminal workspace manager) socket API. herdr exports
+# HERDR_SOCKET_PATH into its panes; outside herdr the default socket is used.
+HERDR_DEFAULT_SOCKET = "~/.config/herdr/herdr.sock"
+HERDR_CALL_TIMEOUT_S = 2.0
 
 # macOS terminal-window focus backend used by `b open` (outside tmux) and
 # the `b setup` Debug focus tool. The `.homebase/config.yaml` key
@@ -408,6 +422,8 @@ def reserved_hotkeys() -> dict[str, str]:
 
 ENV_BASE_DIR = "BASE_DIR"
 ENV_TMUX_SESSION = "HOMEBASE_TMUX_SESSION"
+# `b --open-mode <profile>`: open profile for this run, over open_mode.profile in config.
+ENV_OPEN_MODE = "HOMEBASE_OPEN_MODE"
 ENV_DEBUG_TIMERS = "HOMEBASE_DEBUG_TIMERS"
 WIDGET_PROJECTS = "#projects"
 BUSY_LABEL_IDLE = "idle"
@@ -525,6 +541,39 @@ OPEN_MODE_PROFILES: list[dict[str, object]] = [
         "goto_loaded": True,
         "fallback_cd": True,
     },
+    {
+        "id": "herdr_tab",
+        "name": "Open in new herdr tab",
+        "note": "herdr new-tab",
+        "backend": "herdr",
+        "herdr_new": "tab",
+        "use_tmux": False,
+        "run_load": False,
+        "goto_loaded": False,
+        "fallback_cd": True,
+    },
+    {
+        "id": "herdr_tab_goto",
+        "name": "Goto existing herdr pane, else open new tab",
+        "note": "goto-or-tab",
+        "backend": "herdr",
+        "herdr_new": "tab",
+        "use_tmux": False,
+        "run_load": False,
+        "goto_loaded": True,
+        "fallback_cd": True,
+    },
+    {
+        "id": "herdr_workspace",
+        "name": "Goto existing herdr pane, else open new workspace",
+        "note": "goto-or-workspace",
+        "backend": "herdr",
+        "herdr_new": "workspace",
+        "use_tmux": False,
+        "run_load": False,
+        "goto_loaded": True,
+        "fallback_cd": True,
+    },
 ]
 BASE_META_ALLOWED_KEYS: set[str] = {
     "tags",
@@ -552,6 +601,15 @@ HOOK_SLOW_WARN_DEFAULT_S: float = 30.0
 CACHE_SCHEMA_VERSION = 6
 CACHE_MAX_AGE_S = 120
 CACHE_BG_REFRESH_S = 30
+# One process per base owns background cache work (full rescans, reconcile,
+# git and worktree-health sweeps): `b daemon` while it runs, else the first
+# TUI that takes the owner lock. Other TUIs only read the cache and write rows
+# for the user's own actions.
+DAEMON_TICK_S = 2.0
+DAEMON_SIGNATURE_CHECK_S = 10.0
+DAEMON_STATUS_LOG_S = 300.0
+DAEMON_STALE_S = 15.0
+UI_TICK_CACHE_OWNER_POLL_S = 1.0
 SIZE_REFRESH_EVERY_N = 10
 
 UI_TICK_BUSY_S = 0.12

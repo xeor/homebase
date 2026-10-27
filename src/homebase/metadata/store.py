@@ -8,6 +8,8 @@ from typing import Callable
 
 import yaml
 
+from ..core.yaml_io import yaml_safe_load
+
 _BASE_DATA_CACHE: dict[Path, tuple[int, dict[str, object]]] = {}
 _BASE_DATA_CACHE_MAX = 8192
 
@@ -31,7 +33,7 @@ def load_base_data(
     if cached is not None and cached[0] == st_mtime_ns:
         return copy.deepcopy(cached[1])
     try:
-        raw = yaml.safe_load(meta_file.read_text())
+        raw = yaml_safe_load(meta_file.read_text())
     except (OSError, yaml.YAMLError):
         _BASE_DATA_CACHE.pop(meta_file, None)
         return {}
@@ -118,7 +120,7 @@ def repair_base_metadata(
     raw: dict[str, object] = {}
     if meta_file.is_file():
         try:
-            loaded = yaml.safe_load(meta_file.read_text())
+            loaded = yaml_safe_load(meta_file.read_text())
             if isinstance(loaded, dict):
                 raw = loaded
         except (OSError, yaml.YAMLError):
@@ -142,7 +144,7 @@ def normalize_base_metadata(
     if not meta_file.is_file():
         return False, f"missing {base_marker_file}"
     try:
-        raw = yaml.safe_load(meta_file.read_text())
+        raw = yaml_safe_load(meta_file.read_text())
     except (OSError, yaml.YAMLError) as exc:
         return False, f"invalid yaml: {exc}"
     if raw is None:

@@ -35,3 +35,8 @@ run = "npm run check"
 description = "Run the Raycast CLI (args after --)"
 depends = ["setup"]
 run = "npm run ray --"
+
+[tasks.install]
+description = "Production build straight into Raycast (replaces a dev install)"
+depends = ["setup"]
+run = "npx ray build -e dist -o ~/.config/raycast/extensions/homebase-raycast"

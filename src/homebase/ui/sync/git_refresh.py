@@ -133,7 +133,8 @@ def on_git_refresh_done(app: Any, updated: list[tuple[Path, str, str, int]]) -> 
         row.last_cached_ts = now_ts
         refresh_row_caches(row)
         touched.append(row)
-    if touched:
+    # Shown either way; only the cache owner writes background results.
+    if touched and app._is_cache_owner():
         app._touch_rows_cache(touched)
     try:
         app._refresh_table()

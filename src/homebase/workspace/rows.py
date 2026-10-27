@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+import sqlite3
 from pathlib import Path
 from typing import Any
 
 from ..archive import ops as archive_ops
 from ..cache import queue as queue_utils
-from ..cache.api import cache_load_opened_map
+from ..cache.api import (
+    cache_load_opened_map,
+    cache_load_packed_meta,
+    cache_save_packed_meta,
+)
 from ..core import utils as core_utils
 from ..core.constants import (
     ARCHIVE_DIR_NAME,
@@ -16,6 +21,7 @@ from ..core.constants import (
     SORT_MODE_SPECS,
 )
 from ..core.models import ProjectRow
+from ..core.packed_meta import packed_meta_seed, packed_meta_take_new
 from . import discovery as discovery_utils
 from . import discovery_helpers, filter_compile
 from .projects import classify_name, project_row, refresh_row_caches
@@ -81,12 +87,36 @@ def _discovery_should_skip_active_walk_path(
     return discovery_helpers.discovery_should_skip_active_walk_path(base_dir, archive_root, cur)
 
 
+_PACKED_MEMO_SEEDED: set[Path] = set()
+
+
+def _seed_packed_meta(base_dir: Path) -> None:
+    if base_dir in _PACKED_MEMO_SEEDED:
+        return
+    _PACKED_MEMO_SEEDED.add(base_dir)
+    try:
+        packed_meta_seed(cache_load_packed_meta(base_dir))
+    except (OSError, sqlite3.Error):
+        return
+
+
+def _persist_packed_meta(base_dir: Path) -> None:
+    entries = packed_meta_take_new()
+    if not entries:
+        return
+    try:
+        cache_save_packed_meta(base_dir, entries)
+    except (OSError, sqlite3.Error):
+        return
+
+
 def collect_workspace_rows(
     base_dir: Path,
     include_git_dirty: bool = True,
     include_nested: bool | None = None,
     size_cache: dict[Path, tuple[int, int]] | None = None,
 ) -> tuple[list[ProjectRow], list[ProjectRow]]:
+    _seed_packed_meta(base_dir)
     opened_ts_map = cache_load_opened_map(base_dir)
     nested = _resolve_include_nested(base_dir, include_nested)
     active = collect_projects(
@@ -103,6 +133,7 @@ def collect_workspace_rows(
         size_cache=size_cache,
         opened_ts_map=opened_ts_map,
     )
+    _persist_packed_meta(base_dir)
     return active, archived
 
 

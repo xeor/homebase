@@ -65,9 +65,19 @@ def log_row_health_issues(
     rows: list[Any],
     *,
     base_meta_health: Callable[[Any], tuple[str, str]],
+    base_meta_signature: Callable[[Any], tuple[object, ...]] | None = None,
 ) -> None:
     for row in rows:
-        level, detail = base_meta_health(row.path)
+        if base_meta_signature is None:
+            level, detail = base_meta_health(row.path)
+        else:
+            key = base_meta_signature(row.path)
+            memo = app._health_memo.get(row.path)
+            if memo is not None and memo[0] == key:
+                level, detail = memo[1]
+            else:
+                level, detail = base_meta_health(row.path)
+                app._health_memo[row.path] = (key, (level, detail))
         if level == "ok":
             app._health_issue_seen.pop(row.path, None)
             continue

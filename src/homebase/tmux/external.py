@@ -10,6 +10,7 @@ from ..config.prefs import load_open_mode_config
 from ..core import debug_timers
 from ..core import utils as core_utils
 from ..core.constants import (
+    ENV_OPEN_MODE,
     ENV_TMUX_SESSION,
     OPEN_MODE_CONFIG,
     OPEN_MODE_PROFILES,
@@ -422,6 +423,9 @@ def _context_open_mode_loader(
     context: dict[str, object] | None,
 ) -> Callable[[Path], dict[str, str]]:
     open_profile = str(context.get("open_profile", "")).strip() if context else ""
+    if os.environ.get(ENV_OPEN_MODE, "").strip():
+        # `b --open-mode` beats the profile registered by other running TUIs.
+        open_profile = ""
 
     def load_context_open_mode(base_dir: Path) -> dict[str, str]:
         if open_profile:

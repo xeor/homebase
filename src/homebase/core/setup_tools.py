@@ -33,6 +33,7 @@ from .setup_render import (
     render_summary,
 )
 from .version import get_commit, get_version
+from .yaml_io import yaml_safe_load
 
 # macOS fast-focus optional backend. ``FAST_FOCUS_EXTRA`` is the
 # pyproject optional-dependency group; ``FAST_FOCUS_PACKAGE`` is the
@@ -611,7 +612,7 @@ def _gather_context(
     config_valid = True
     if config_exists:
         try:
-            loaded = yaml.safe_load(config_path.read_text())
+            loaded = yaml_safe_load(config_path.read_text())
             config_valid = loaded is None or isinstance(loaded, dict)
         except (OSError, yaml.YAMLError):
             config_valid = False

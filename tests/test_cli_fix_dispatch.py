@@ -20,6 +20,7 @@ def _stub_kwargs(**overrides):
         cmd_help=lambda _ns: 0,
         cmd_setup=lambda _a, _b, _c: 0,
         cmd_cache_warm=lambda: 0,
+        cmd_daemon=lambda *a, **k: 0,
         cmd_tags_sync=lambda _a, _b, _c: 0,
         cmd_tags_ls=lambda _a: 0,
         cmd_hooks_refresh=lambda _bd, **_kw: 0,

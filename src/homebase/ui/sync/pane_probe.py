@@ -4,10 +4,14 @@ import functools
 import subprocess
 import threading
 import time
+from dataclasses import replace
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from ...core.models import PaneRef
+from ...herdr.client import HerdrError, is_inside_herdr
+from ...herdr.client import socket_path as herdr_socket_path
+from ...herdr.panes import list_panes as herdr_list_panes
 from ...tmux.external import (
     external_tmux_command_prefix_and_session,
     is_inside_current_tmux_pane,
@@ -51,29 +55,92 @@ def _rows_to_probe(app: Any, scan_limit: int) -> list[Any]:
     return rows
 
 
+_TMUX_PANE_FORMAT = (
+    "#{pane_id}\t#{session_name}:#{window_index}.#{pane_index}\t#{window_name}"
+    "\t#{pane_current_command}\t#{pane_current_path}\t#{?pane_active,1,0}"
+)
+
+
+def _tmux_target(app: Any) -> tuple[list[str], str] | None:
+    """tmux command prefix + session to probe, or None when tmux is not usable."""
+    if is_inside_current_tmux_pane():
+        return ["tmux"], ""
+    base_dir = getattr(app, "base_dir", None)
+    if base_dir is None:
+        return None
+    return external_tmux_command_prefix_and_session(base_dir, quiet=True)
+
+
+def _tmux_panes(tmux_prefix: list[str], session_target: str) -> list[PaneRef]:
+    scope = ["-s", "-t", session_target] if session_target else ["-a"]
+    proc = subprocess.run(
+        [*tmux_prefix, "list-panes", *scope, "-F", _TMUX_PANE_FORMAT],
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        capture_output=True,
+        check=False,
+    )
+    if proc.returncode != 0:
+        detail = (proc.stderr or "").strip() or f"exit {proc.returncode}"
+        raise RuntimeError(f"tmux pane probe failed: {detail}")
+    out: list[PaneRef] = []
+    for line in proc.stdout.splitlines():
+        parts = line.split("\t", 5)
+        if len(parts) != 6 or not parts[4].strip():
+            continue
+        pane_id, target, window_name, cmd, cwd_raw, active_raw = parts
+        out.append(
+            PaneRef(
+                pane_id=pane_id.strip(),
+                target=target.strip(),
+                window_name=window_name.strip(),
+                command=cmd.strip(),
+                cwd=Path(cwd_raw.strip()),
+                active=(active_raw.strip() == "1"),
+            )
+        )
+    return out
+
+
+def _herdr_panes() -> list[PaneRef]:
+    try:
+        return herdr_list_panes()
+    except HerdrError as exc:
+        raise RuntimeError(f"herdr pane probe failed: {exc}") from exc
+
+
+def _map_panes(
+    panes: list[PaneRef],
+    project_roots: set[Path],
+    root_to_row_path: dict[Path, Path],
+    mapping: dict[Path, list[PaneRef]],
+) -> None:
+    for pane in panes:
+        cwd = _resolve_cached(pane.cwd)
+        if cwd is None:
+            continue
+        project_root = project_for_path(cwd, project_roots)
+        if project_root is None:
+            continue
+        project = root_to_row_path[project_root]
+        mapping.setdefault(project, []).append(replace(pane, cwd=cwd))
+
+
 def start_probe_open_panes(app: Any) -> None:
     if app.fast_exit_requested or app.pane_probe_running:
         return
-    tmux_prefix = ["tmux"]
-    tmux_session_target = ""
-    if not is_inside_current_tmux_pane():
-        base_dir = getattr(app, "base_dir", None)
-        resolved = (
-            None
-            if base_dir is None
-            else external_tmux_command_prefix_and_session(base_dir, quiet=True)
-        )
-        if resolved is not None:
-            tmux_prefix, tmux_session_target = resolved
-        else:
-            if app.open_panes_by_project:
-                changed_paths = list(app.open_panes_by_project.keys())
-                app.open_panes_by_project = {}
-                app.open_pane_count_by_project = {}
-                app.open_pane_overflow_projects = set()
-                app._queue_dynamic_property_refresh(changed_paths)
-            app.pane_probe_next_due_at = time.time() + app._pane_probe_desired_interval_s()
-            return
+    tmux_target = _tmux_target(app)
+    use_herdr = herdr_socket_path() is not None
+    if tmux_target is None and not use_herdr:
+        if app.open_panes_by_project:
+            changed_paths = list(app.open_panes_by_project.keys())
+            app.open_panes_by_project = {}
+            app.open_pane_count_by_project = {}
+            app.open_pane_overflow_projects = set()
+            app._queue_dynamic_property_refresh(changed_paths)
+        app.pane_probe_next_due_at = time.time() + app._pane_probe_desired_interval_s()
+        return
     app.pane_probe_running = True
 
     def worker() -> None:
@@ -90,64 +157,24 @@ def start_probe_open_panes(app: Any) -> None:
                 app.call_from_thread(app._on_probe_open_panes_done, mapping)
                 return
             project_roots = set(project_root_to_row_path)
-
-            proc = subprocess.run(
-                [
-                    *tmux_prefix,
-                    "list-panes",
-                    *(
-                        ["-s", "-t", tmux_session_target]
-                        if tmux_session_target
-                        else ["-a"]
-                    ),
-                    "-F",
-                    "#{pane_id}\t#{session_name}:#{window_index}.#{pane_index}\t#{window_name}\t#{pane_current_command}\t#{pane_current_path}\t#{?pane_active,1,0}",
-                ],
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                capture_output=True,
-                check=False,
-            )
-            if proc.returncode != 0:
-                detail = (proc.stderr or "").strip() or f"exit {proc.returncode}"
-                app.call_from_thread(
-                    on_probe_open_panes_failed,
-                    app,
-                    f"tmux pane probe failed: {detail}",
-                )
-                return
-
-            for line in proc.stdout.splitlines():
-                parts = line.split("\t", 5)
-                if len(parts) != 6:
+            sources: list[Callable[[], list[PaneRef]]] = []
+            if tmux_target is not None:
+                sources.append(lambda: _tmux_panes(*tmux_target))
+            if use_herdr:
+                sources.append(_herdr_panes)
+            errors: list[str] = []
+            for source in sources:
+                try:
+                    panes = source()
+                except (subprocess.SubprocessError, OSError, RuntimeError) as exc:
+                    errors.append(str(exc))
                     continue
-                pane_id, target, window_name, cmd, cwd_raw, active_raw = parts
-                cwd_raw = cwd_raw.strip()
-                if not cwd_raw:
-                    continue
-                cwd = _resolve_cached(Path(cwd_raw))
-                if cwd is None:
-                    continue
-                project_root = project_for_path(cwd, project_roots)
-                if project_root is None:
-                    continue
-                project = project_root_to_row_path[project_root]
-                pref = PaneRef(
-                    pane_id=pane_id.strip(),
-                    target=target.strip(),
-                    window_name=window_name.strip(),
-                    command=cmd.strip(),
-                    cwd=cwd,
-                    active=(active_raw.strip() == "1"),
-                )
-                mapping.setdefault(project, []).append(pref)
+                _map_panes(panes, project_roots, project_root_to_row_path, mapping)
         except (subprocess.SubprocessError, OSError, ValueError) as exc:
-            app.call_from_thread(
-                on_probe_open_panes_failed,
-                app,
-                f"tmux pane probe failed: {exc}",
-            )
+            app.call_from_thread(on_probe_open_panes_failed, app, f"pane probe failed: {exc}")
+            return
+        if errors and len(errors) == len(sources):
+            app.call_from_thread(on_probe_open_panes_failed, app, "; ".join(errors))
             return
         app.call_from_thread(app._on_probe_open_panes_done, mapping)
 
@@ -159,7 +186,7 @@ def _log_probe_result(app: Any, mapping: dict[Path, list[PaneRef]]) -> None:
     if not callable(log):
         return
     pane_total = sum(len(panes) for panes in mapping.values())
-    log(f"tmux pane probe: projects={len(mapping)} panes={pane_total}", "info")
+    log(f"pane probe: projects={len(mapping)} panes={pane_total}", "info")
 
 
 def _changed_pane_count_paths(
@@ -224,7 +251,7 @@ def on_probe_open_panes_done(app: Any, mapping: dict[Path, list[PaneRef]]) -> No
 
 
 def pane_probe_desired_interval_s(app: Any) -> float:
-    if not is_inside_current_tmux_pane():
+    if not (is_inside_current_tmux_pane() or is_inside_herdr()):
         return app._pane_probe_profile_slow_interval_s()
     fast_interval_s = app._pane_probe_profile_fast_interval_s()
     slow_interval_s = app._pane_probe_profile_slow_interval_s()

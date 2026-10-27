@@ -253,7 +253,7 @@ def cmd_cd(base_dir: Path, name: str) -> int:
 
 def cmd_open(base_dir: Path, name: str) -> int:
     from ..core.constants import ARCHIVE_DIR_NAME
-    from ..tmux.flow import open_with_mode
+    from .open_target import open_with_mode
 
     return commands_basic.cmd_open(
         base_dir,

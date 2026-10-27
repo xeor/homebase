@@ -75,8 +75,9 @@ properties:
     # Cache this property for 8 seconds.
     cache_ttl_s: 8
     queries:
-      # Detector: check tmux pane commands.
-      - type: tmux_editor_commands
+      # Detector: check tmux/herdr pane commands
+      # (tmux_editor_commands / herdr_editor_commands for one of them).
+      - type: editor_commands
         commands: [code, code-insiders, codium, cursor, zed, nvim, vim]
 
   RECENT:
@@ -344,6 +345,9 @@ open_mode:
   #   tmux_tab                  open new tmux window
   #   tmux_tab_load             goto matching tmux pane, else new tmux window
   #   tmux_tab_load_or_goto     goto matching tmux pane, else load .tmuxp.yaml/new window
+  #   herdr_tab                 open new herdr tab in the current workspace
+  #   herdr_tab_goto            goto matching herdr pane, else new herdr tab
+  #   herdr_workspace           goto matching herdr pane, else new herdr workspace
   profile: shell_cd
   # Optional tmux session name/id used when b runs outside tmux.
   # If omitted, one discoverable tmux session is used automatically.

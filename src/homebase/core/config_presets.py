@@ -347,9 +347,9 @@ def build_presets(env: ConfigEnv) -> list[ConfigPreset]:
         ConfigPreset(
             id="open_mode",
             title="Default open behavior",
-            description="What UI open actions do (shell cd vs tmux tab/load).",
+            description="What UI open actions do (shell cd, tmux tab/load, herdr tab/workspace).",
             category="Behavior",
-            tags=("open", "tmux"),
+            tags=("open", "tmux", "herdr"),
             fields=(
                 ConfigField(
                     key="profile",
@@ -358,7 +358,7 @@ def build_presets(env: ConfigEnv) -> list[ConfigPreset]:
                     kind="choice",
                     default="shell_cd",
                     choices=tuple(str(p["id"]) for p in OPEN_MODE_PROFILES),
-                    help="shell_cd / tmux_tab / tmux_tab_load / tmux_tab_load_or_goto.",
+                    help="shell_cd / tmux_tab / tmux_tab_load / tmux_tab_load_or_goto / herdr_tab / herdr_tab_goto / herdr_workspace.",
                 ),
             ),
         ),
@@ -628,16 +628,16 @@ def build_presets(env: ConfigEnv) -> list[ConfigPreset]:
         ConfigPreset(
             id="property_badges_activity",
             title="Activity property badges",
-            description="Live badges: active tmux pane and editor running.",
+            description="Live badges: open tmux/herdr pane and editor running.",
             category="Properties",
-            tags=("badges", "tmux"),
+            tags=("badges", "tmux", "herdr"),
             fragment={
                 "properties": {
                     "TMX": _badge(
-                        "Active tmux",
+                        "Open pane",
                         "#ffb86c",
                         cache_ttl_s=3,
-                        queries=[{"type": "tmux_open_panes"}],
+                        queries=[{"type": "open_panes"}],
                     ),
                     "EDT": _badge(
                         "Editor active",
@@ -645,7 +645,7 @@ def build_presets(env: ConfigEnv) -> list[ConfigPreset]:
                         cache_ttl_s=8,
                         queries=[
                             {
-                                "type": "tmux_editor_commands",
+                                "type": "editor_commands",
                                 "commands": [
                                     "code",
                                     "code-insiders",

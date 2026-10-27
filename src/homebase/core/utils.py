@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import re
+import sqlite3
 import subprocess
 import time
 from datetime import datetime, tzinfo
 from pathlib import Path
 from typing import Callable
+
+import yaml
 
 # Defensive catch for textual widget property writes that can fail
 # transiently during teardown / re-mount.
@@ -17,6 +20,15 @@ HOOK_RUN_ERRORS = (
     RuntimeError,
     KeyError,
     AttributeError,
+)
+# Full workspace scan + cache write (TUI cache refresh, `b daemon`).
+CACHE_REFRESH_ERRORS = (
+    OSError,
+    ValueError,
+    TypeError,
+    sqlite3.Error,
+    yaml.YAMLError,
+    subprocess.SubprocessError,
 )
 
 
@@ -200,6 +212,21 @@ def fmt_age_short(ts: int, now_ts: int | None = None) -> str:
         parts.append(f"{hours}h")
     parts.append(f"{minutes}m")
     return "-" + "".join(parts)
+
+
+def fmt_duration(seconds: float) -> str:
+    """Compact duration: 42s, 3m05s, 2h04m, 3d02h."""
+    total = max(0, int(seconds))
+    days, rem = divmod(total, 86400)
+    hours, rem = divmod(rem, 3600)
+    minutes, secs = divmod(rem, 60)
+    if days:
+        return f"{days}d{hours:02d}h"
+    if hours:
+        return f"{hours}h{minutes:02d}m"
+    if minutes:
+        return f"{minutes}m{secs:02d}s"
+    return f"{secs}s"
 
 
 def fmt_size_human(n: int) -> str:

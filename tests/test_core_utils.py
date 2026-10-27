@@ -109,3 +109,13 @@ def test_normalize_restore_target_rejects_outside_base(tmp_path: Path) -> None:
     outside.mkdir()
     with pytest.raises(ValueError, match="outside base"):
         core_utils.normalize_restore_target(base_dir, outside)
+
+
+def test_fmt_duration() -> None:
+    from homebase.core.utils import fmt_duration
+
+    assert fmt_duration(-3) == "0s"
+    assert fmt_duration(42.9) == "42s"
+    assert fmt_duration(185) == "3m05s"
+    assert fmt_duration(7440) == "2h04m"
+    assert fmt_duration(268000) == "3d02h"

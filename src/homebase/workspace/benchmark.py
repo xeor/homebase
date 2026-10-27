@@ -37,6 +37,7 @@ from ..core.constants import (
     PACKED_ARCHIVE_SUFFIX,
     TEST_REPORT_FILE_NAME,
 )
+from ..core.yaml_io import yaml_safe_load
 from ..metadata.api import save_base_tags
 from . import benchmark_report
 from .projects import git_info, project_row
@@ -308,7 +309,7 @@ def _benchmark_write_report(report_path: Path, run_data: dict[str, object]) -> N
     existing: dict[str, object] = {}
     if report_path.is_file():
         try:
-            loaded = yaml.safe_load(report_path.read_text())
+            loaded = yaml_safe_load(report_path.read_text())
             if isinstance(loaded, dict):
                 existing = loaded
         except (OSError, yaml.YAMLError, json.JSONDecodeError, TypeError, ValueError):

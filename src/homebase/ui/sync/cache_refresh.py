@@ -1,20 +1,20 @@
 from __future__ import annotations
 
 import sqlite3
-import subprocess
 import threading
 import time
 import traceback
 from pathlib import Path
 from typing import Any
 
-import yaml
 from textual.css.query import NoMatches
 
-from ...cache.api import cache_store_rows
+from ...cache.api import cache_store_rows_merged
+from ...cache.owner import request_cache_refresh
 from ...core.models import CacheRefreshOutcome, OperationResult, ProjectRow
-from ...core.utils import WIDGET_API_ERRORS
+from ...core.utils import CACHE_REFRESH_ERRORS, WIDGET_API_ERRORS
 from ...workspace.rows import collect_workspace_rows
+from .cache_owner import is_cache_owner
 
 
 def start_cache_refresh(
@@ -33,6 +33,10 @@ def start_cache_refresh(
         app.cache_refresh_pending_reason = reason
         return
     if not force and int(time.time()) - app.cache_last_refresh_ts <= cache_max_age_s:
+        return
+    if not is_cache_owner(app, base_dir=base_dir):
+        request_cache_refresh(base_dir, reason)
+        app._worker_debug(f"cache refresh requested from cache owner ({reason})")
         return
     app.cache_worker_running = True
     app.cache_worker_note = reason
@@ -62,14 +66,7 @@ def start_cache_refresh(
                     include_git_dirty=False,
                     size_cache=size_cache_seed,
                 )
-            except (
-                OSError,
-                ValueError,
-                TypeError,
-                sqlite3.Error,
-                yaml.YAMLError,
-                subprocess.SubprocessError,
-            ) as exc:
+            except CACHE_REFRESH_ERRORS as exc:
                 result = OperationResult.failure(f"{exc.__class__.__name__}: {exc}")
         except BaseException as exc:
             tb = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
@@ -92,6 +89,7 @@ def start_cache_refresh(
 def on_cache_refresh_done(app: Any, *, base_dir: Path, outcome: CacheRefreshOutcome) -> None:
     if app.fast_exit_requested:
         return
+    scan_started_ts = int(app.cache_worker_started_ts)
     app.cache_worker_running = False
     app.cache_worker_note = ""
     app.cache_worker_last_done_ts = time.time()
@@ -115,11 +113,14 @@ def on_cache_refresh_done(app: Any, *, base_dir: Path, outcome: CacheRefreshOutc
         and outcome.fresh_archived is not None
     ):
         try:
-            app.cache_last_refresh_ts = cache_store_rows(
+            stored_ts = cache_store_rows_merged(
                 base_dir,
                 outcome.fresh_active,
                 outcome.fresh_archived,
+                scan_started_ts=scan_started_ts,
             )
+            app.cache_last_refresh_ts = stored_ts
+            app.full_scan_seen_ts = stored_ts
         except (OSError, sqlite3.Error) as exc:
             app._log_error_counted(
                 "cache_store",

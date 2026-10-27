@@ -37,8 +37,12 @@ class _App:
         self.rows = [_Row(i) for i in range(20)]
         self.started: list[Path] = []
         self.touched: list[_Row] = []
+        self.cache_owner = True
         self.refresh_table_calls = 0
         self.refresh_side_calls = 0
+
+    def _is_cache_owner(self) -> bool:
+        return self.cache_owner
 
     def _critical_job_active(self) -> bool:
         return False
@@ -278,6 +282,16 @@ def test_on_git_refresh_done_applies_updates_and_touches_cache(monkeypatch) -> N
     assert target.last_cached_ts == 200
     # Cache touch was called with the updated row.
     assert app.touched == [target]
+
+
+def test_on_git_refresh_done_non_owner_shows_but_does_not_write(monkeypatch) -> None:
+    app = _App()
+    app.cache_owner = False
+    target = app.rows[0]
+    monkeypatch.setattr(git_refresh.time, "time", lambda: 200.0)
+    git_refresh.on_git_refresh_done(app, [(target.path, "main", "*", 12345)])
+    assert target.dirty == "*"
+    assert app.touched == []
 
 
 def test_on_git_refresh_done_fs_when_no_git_ts(monkeypatch) -> None:

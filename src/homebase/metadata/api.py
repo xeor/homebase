@@ -24,6 +24,7 @@ from ..core.constants import (
     PROPERTY_DEFS,
 )
 from ..core.models import PropertyDef
+from ..core.yaml_io import yaml_safe_load
 from . import property as property_utils
 from . import store as metadata_store
 from . import utils as metadata_utils
@@ -86,12 +87,32 @@ def base_meta_issues(path: Path) -> list[tuple[str, str, str]]:
                 ]
             return [("warning", "missing_meta", f"missing {BASE_MARKER_FILE}")]
         try:
-            raw = yaml.safe_load(meta_file.read_text())
+            raw = yaml_safe_load(meta_file.read_text())
         except (OSError, yaml.YAMLError) as exc:
             return [("warning", "invalid_yaml", f"invalid yaml: {exc}")]
     return metadata_utils.base_meta_schema_issues(
         raw,
         allowed_keys=BASE_META_ALLOWED_KEYS,
+    )
+
+
+def _stat_key(path: Path) -> tuple[int, int] | None:
+    try:
+        st = path.stat()
+    except OSError:
+        return None
+    return st.st_mtime_ns, st.st_size
+
+
+def base_meta_signature(path: Path) -> tuple[object, ...]:
+    """Cheap stat key over every file `base_meta_issues` reads; equal keys
+    mean an unchanged health result (packed archives are slow to read)."""
+    if _is_packed_archive_path(path):
+        return ("packed", _stat_key(path))
+    return (
+        "dir",
+        _stat_key(path / BASE_MARKER_FILE),
+        _stat_key(path / LEGACY_BASE_MARKER_FILE),
     )
 
 

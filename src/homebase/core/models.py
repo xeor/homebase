@@ -145,6 +145,7 @@ class PaneRef:
     command: str
     cwd: Path
     active: bool
+    source: str = "tmux"  # "tmux" or "herdr"
 
 
 @dataclass(frozen=True)

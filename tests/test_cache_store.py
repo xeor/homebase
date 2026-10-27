@@ -129,3 +129,62 @@ def test_cache_opened_ts_roundtrip_and_move(tmp_path: Path) -> None:
     )
     loaded = cache_store.cache_load_opened_map(tmp_path, cache_schema_version=6)
     assert dst not in loaded
+
+
+def _payload(path: Path, cached_at: int, name: str) -> tuple[object, ...]:
+    return (
+        str(path), 0, 0, None, name, "main", "", "-", "src", "created", "[]", "[]", "",
+        0, 0, 0, 0, 0, 0, None, 0, 0, None, 0, 0, cached_at, cached_at, "", "",
+    )
+
+
+def _names(base: Path) -> dict[str, str]:
+    conn = cache_store.cache_connect(base)
+    try:
+        return {r["path"]: r["name"] for r in conn.execute("SELECT path, name FROM project_cache")}
+    finally:
+        conn.close()
+
+
+def test_cache_store_rows_merged_keeps_rows_written_during_scan(tmp_path: Path) -> None:
+    a, b, gone = tmp_path / "a", tmp_path / "b", tmp_path / "gone"
+    cache_store.cache_store_rows(
+        tmp_path,
+        cache_schema_version=6,
+        payload_rows=[_payload(a, 100, "a-old"), _payload(b, 100, "b-old"), _payload(gone, 100, "gone")],
+    )
+    # Another process updates "b" after the scan started at ts=200.
+    cache_store.cache_upsert_rows(
+        tmp_path, cache_schema_version=6, payload_rows=[_payload(b, 250, "b-client")], touch_refresh_ts=False
+    )
+    ts = cache_store.cache_store_rows_merged(
+        tmp_path,
+        cache_schema_version=6,
+        payload_rows=[_payload(a, 300, "a-scan"), _payload(b, 300, "b-scan")],
+        scan_started_ts=200,
+    )
+    assert _names(tmp_path) == {str(a): "a-scan", str(b): "b-client"}
+    assert cache_store.cache_read_meta_int(tmp_path, "full_scan_ts") == ts
+    assert cache_store.cache_read_meta_int(tmp_path, "last_refresh_ts") == ts
+
+
+def test_cache_read_meta_int_without_db(tmp_path: Path) -> None:
+    assert cache_store.cache_read_meta_int(tmp_path, "last_refresh_ts") == 0
+
+
+def test_packed_meta_round_trip_and_replace(tmp_path: Path) -> None:
+    assert cache_store.cache_load_packed_meta(tmp_path, cache_schema_version=6) == []
+    entries = [
+        ("/a.tgz", 1, 10, ".base.yaml", "tags: [x]\n"),
+        ("/b.tgz", 2, 20, None, None),
+    ]
+    cache_store.cache_save_packed_meta(tmp_path, cache_schema_version=6, entries=entries)
+    cache_store.cache_save_packed_meta(tmp_path, cache_schema_version=6, entries=[])
+    assert sorted(cache_store.cache_load_packed_meta(tmp_path, cache_schema_version=6)) == entries
+    # Same path, new stat key: replaced, not duplicated.
+    cache_store.cache_save_packed_meta(
+        tmp_path, cache_schema_version=6, entries=[("/a.tgz", 3, 11, "x/.base.yaml", "tags: []\n")]
+    )
+    loaded = dict((e[0], e) for e in cache_store.cache_load_packed_meta(tmp_path, cache_schema_version=6))
+    assert loaded["/a.tgz"] == ("/a.tgz", 3, 11, "x/.base.yaml", "tags: []\n")
+    assert len(loaded) == 2

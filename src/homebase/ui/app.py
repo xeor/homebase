@@ -10,7 +10,7 @@ import sys
 import threading
 import time
 from pathlib import Path
-from typing import Callable, Iterable
+from typing import IO, Callable, Iterable
 
 from textual.app import App, ComposeResult, SystemCommand
 from textual.binding import Binding
@@ -29,12 +29,15 @@ from textual.widgets import (
 )
 
 from ..cache.api import (
+    cache_full_scan_ts,
     cache_load_reconcile_usage,
     cache_load_rows,
     cache_move_opened_ts,
     cache_save_reconcile_usage,
     cache_set_opened_ts,
 )
+from ..cache.clients import ClientInfo, register_client, unregister_client
+from ..cache.owner import release_cache_owner
 from ..commands.archive import (
     _policy_reason_archived_dir,
     _policy_reason_archived_entry,
@@ -104,6 +107,7 @@ from ..core.constants import (
     TABLE_COLUMN_VIEWS,
     TABLE_SIDE_WIDTH_PRESETS,
     UI_TICK_BUSY_S,
+    UI_TICK_CACHE_OWNER_POLL_S,
     UI_TICK_FOCUS_WARM_S,
     UI_TICK_GIT_REFRESH_S,
     UI_TICK_HOOK_REFRESH_S,
@@ -128,11 +132,15 @@ from ..core.models import (
     RestoreTargetExistsError,
 )
 from ..core.utils import WIDGET_API_ERRORS, fmt_ymd
+from ..herdr import panes as herdr_panes
+from ..herdr.client import HerdrError
+from ..herdr.client import socket_path as herdr_socket_path
 from ..hooks.runtime import HookRunRecord
 from ..metadata.api import (
     all_property_defs,
     base_meta_health,
     base_meta_issues,
+    base_meta_signature,
     load_base_meta,
     normalize_property_keys,
     open_meta_for_review,
@@ -170,6 +178,7 @@ from ..workspace.rows import (
     normalize_filter_expression,
     query_uses_filter_syntax,
 )
+from ..workspace.signature import workspace_quick_signature
 from . import runtime_feedback as textual_ui_runtime_feedback
 from .actions import action_items as textual_ui_action_items
 from .actions import archive_worker as textual_ui_archive_worker
@@ -222,6 +231,7 @@ from .side import panel as textual_ui_side_panel
 from .side import settings as textual_ui_settings_panel
 from .side import tabs as textual_ui_side_tabs
 from .sync import cache_concurrency as textual_ui_cache_concurrency
+from .sync import cache_owner as textual_ui_cache_owner
 from .sync import cache_refresh as textual_ui_cache_refresh
 from .sync import cache_state as textual_ui_cache_state
 from .sync import dynamic_props as textual_ui_dynamic_props
@@ -434,6 +444,8 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
         self.view_config = _VIEW_CONFIG_DEFAULT
 
     def _init_rows_state(self, initial_filter: str, persisted: dict[str, object]) -> None:
+        # Read before the rows: an owner rescan landing in between is reloaded.
+        self.full_scan_seen_ts = cache_full_scan_ts(self.base_dir)
         cached_active, cached_archived, cache_refreshed = cache_load_rows(
             self.base_dir,
             CACHE_MAX_AGE_S,
@@ -453,7 +465,8 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
         self.sort_mode = _normalize_sort_mode_for_view(
             self.view_mode, str(persisted.get("sort", "last"))
         )
-        self.query = initial_filter or str(persisted.get("query", ""))  # type: ignore[method-assign,assignment]  # shadows App.query CSS selector method
+        saved_query = "" if self.ctx.clear_query else str(persisted.get("query", ""))
+        self.query = initial_filter or saved_query  # type: ignore[method-assign,assignment]  # shadows App.query CSS selector method
         self.query_cursor = len(self.query)  # type: ignore[arg-type]  # see self.query shadow above
         self.filter_expr = initial_filter
         self.cache_last_refresh_ts = cache_refreshed
@@ -551,6 +564,7 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
         self._wait_process_modal_pid: int | None = None
         self.messages: list[tuple[str, str, str]] = []
         self._health_issue_seen: dict[Path, str] = {}
+        self._health_memo: dict[Path, tuple[tuple[object, ...], tuple[str, str]]] = {}
         self.pending_restore_queue: list[Path] = []
         self.pending_restore_ok = 0
         self.pending_restore_failed = 0
@@ -569,6 +583,8 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
         self.runtime_status_until_ts = 0.0
 
     def _init_worker_state(self) -> None:
+        self.cache_owner_handle: IO[str] | None = None
+        self.cache_owner_checked_at = 0.0
         self.cache_worker_running = False
         self.cache_worker_note = ""
         self.cache_worker_started_ts = 0.0
@@ -728,6 +744,7 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
             self,
             rows,
             base_meta_health=base_meta_health,
+            base_meta_signature=base_meta_signature,
         )
 
     def _capture_table_position(self) -> bool:
@@ -979,13 +996,14 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
         finally:
             self._busy_stop()
         self.set_interval(CACHE_BG_REFRESH_S, self._maybe_refresh_cache)
+        self.set_interval(UI_TICK_CACHE_OWNER_POLL_S, self._poll_cache_owner)
         self.set_interval(2.0, self._check_cache_concurrency)
         self._check_cache_concurrency()
         if not self.active_rows and not self.archived_rows:
             self.call_after_refresh(
                 lambda: self._start_cache_refresh("cold start", force=True)
             )
-        elif int(time.time()) - self.cache_last_refresh_ts > CACHE_MAX_AGE_S:
+        elif int(time.time()) - self.full_scan_seen_ts > CACHE_MAX_AGE_S:
             self.call_after_refresh(
                 lambda: self._start_cache_refresh("stale cache", force=False)
             )
@@ -1374,7 +1392,7 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
         pdef = next((p for p in self.ctx.property_defs if str(p.key) == key), None)
         if pdef is None or not pdef.queries:
             return False
-        path_query_types = {"tmux_open_panes", "tmux_editor_commands", "sqlite_recent_paths"}
+        path_query_types = textual_ui_indicator_queries.PATH_QUERY_TYPES
         view = MODE_ARCHIVE if row.archived else MODE_ACTIVE
         ttl_s = pdef.cache_ttl_for_view(view)
         cached = self.dynamic_indicator_cache.get(key)
@@ -1591,8 +1609,14 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
     def _maybe_refresh_cache(self) -> None:
         textual_ui_sync.maybe_refresh_cache(self)
 
+    def _is_cache_owner(self) -> bool:
+        return textual_ui_cache_owner.is_cache_owner(self, base_dir=self.base_dir)
+
+    def _poll_cache_owner(self) -> None:
+        textual_ui_cache_owner.poll_cache_owner(self, base_dir=self.base_dir)
+
     def _workspace_quick_signature(self) -> str:
-        return textual_ui_sync.workspace_quick_signature(
+        return workspace_quick_signature(
             base_dir=self.base_dir,
             archive_dir_name=ARCHIVE_DIR_NAME,
             packed_archive_suffix=PACKED_ARCHIVE_SUFFIX,
@@ -1632,6 +1656,8 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
         textual_ui_reconcile.decay_row_usage(self)
 
     def _flush_reconcile_usage_if_due(self) -> None:
+        if not self._is_cache_owner():
+            return
         textual_ui_reconcile.flush_reconcile_usage_if_due(
             self,
             base_dir=self.base_dir,
@@ -1697,22 +1723,26 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
             is_under=core_utils.is_under,
         )
 
+    def _micro_reconcile_blocked_reason(self) -> str:
+        if self._critical_job_active():
+            return f"blocked by critical job ({self._critical_job_label()})"
+        if not self._is_cache_owner():
+            return "another process owns the cache"
+        if self.cache_worker_running:
+            return "blocked by cache refresh"
+        if self.reconcile_worker_running:
+            return "blocked by reconcile worker"
+        return ""
+
     def _maybe_run_micro_reconcile(self) -> None:
         if self.fast_exit_requested:
             self._set_reconcile_skip_reason("fast exit")
             return
         self._maybe_refresh_metadata_health()
         self._run_dynamic_property_refresh_tick()
-        if self._critical_job_active():
-            self._set_reconcile_skip_reason(
-                f"blocked by critical job ({self._critical_job_label()})"
-            )
-            return
-        if self.cache_worker_running or self.reconcile_worker_running:
-            if self.cache_worker_running:
-                self._set_reconcile_skip_reason("blocked by cache refresh")
-            else:
-                self._set_reconcile_skip_reason("blocked by reconcile worker")
+        blocked = self._micro_reconcile_blocked_reason()
+        if blocked:
+            self._set_reconcile_skip_reason(blocked)
             return
         self._decay_row_usage()
         now = time.time()
@@ -3156,6 +3186,62 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
         self._busy_start("restoring target items")
         self._process_next_restore()
 
+    def _jump_to_pane(self, pane: PaneRef) -> bool:
+        if pane.source == herdr_panes.HERDR_SOURCE:
+            return self._jump_to_herdr_pane(pane)
+        return self._jump_to_tmux_pane(pane)
+
+    def _jump_to_herdr_pane(self, pane: PaneRef) -> bool:
+        try:
+            herdr_panes.focus_pane(pane.pane_id)
+        except HerdrError as exc:
+            self._log(f"herdr pane jump failed: {exc}", "warn")
+            self._refresh_side()
+            return False
+        self._log(f"jumped to herdr pane {pane.pane_id} ({pane.window_name})", "info")
+        self._set_runtime_status(f"goto pane {pane.window_name}", "info", ttl_s=10.0)
+        self._refresh_side()
+        return True
+
+    def _offer_panes(self, row: ProjectRow, panes: list[PaneRef]) -> bool:
+        """Jump to the only pane, or ask which one. False when there is none."""
+        if len(panes) == 1:
+            self._jump_to_pane(panes[0])
+            return True
+        if len(panes) > 1:
+            self.pending_pane_choices = {pane.pane_id: pane for pane in panes}
+            self.push_screen(
+                PaneChoiceScreen(f"Open pane for {row.name}", panes),
+                self._on_pick_open_pane,
+            )
+            return True
+        return False
+
+    def _open_selected_in_herdr_mode(self, row: ProjectRow, spec: dict[str, object]) -> bool:
+        """Goto an existing herdr pane or open a new tab/workspace. False
+        when herdr is not running, so Enter falls back to exit + cd."""
+        if herdr_socket_path() is None:
+            return False
+        self.pane_probe_fast_until_ts = max(
+            self.pane_probe_fast_until_ts, time.time() + 20.0
+        )
+        kind = str(spec.get("herdr_new", "tab"))
+        try:
+            if bool(spec.get("goto_loaded", False)) and self._offer_panes(
+                row, herdr_panes.goto_candidates(row.path)
+            ):
+                return True
+            herdr_panes.open_new(row.path, kind)
+        except HerdrError as exc:
+            self._log(f"herdr open failed: {exc}", "error")
+            self._set_runtime_status("herdr open failed", "error", ttl_s=14.0)
+            self._refresh_side()
+            return True
+        self._log(f"opened in herdr: new {kind}", "info")
+        self._set_runtime_status(f"opened in herdr: new {kind}", "info", ttl_s=10.0)
+        self._refresh_side()
+        return True
+
     def _jump_to_tmux_pane(self, pane: PaneRef) -> bool:
         target_window = pane.target.rsplit(".", 1)[0]
         p1 = subprocess.run(
@@ -3225,6 +3311,8 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
 
     def _open_selected_in_tmux_mode(self, row: ProjectRow) -> bool:
         spec = self._open_profile_spec()
+        if spec.get("backend") == "herdr":
+            return self._open_selected_in_herdr_mode(row, spec)
         use_tmux = bool(spec.get("use_tmux", False))
         if not use_tmux:
             return False
@@ -3247,18 +3335,10 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
             self._refresh_side()
             return True
 
-        if bool(spec.get("goto_loaded", False)):
-            panes = tmux_find_panes_for_cwd(row.path)
-            if len(panes) == 1:
-                self._jump_to_tmux_pane(panes[0])
-                return True
-            if len(panes) > 1:
-                self.pending_pane_choices = {pane.pane_id: pane for pane in panes}
-                self.push_screen(
-                    PaneChoiceScreen(f"Open pane for {row.name}", panes),
-                    self._on_pick_open_pane,
-                )
-                return True
+        if bool(spec.get("goto_loaded", False)) and self._offer_panes(
+            row, tmux_find_panes_for_cwd(row.path)
+        ):
+            return True
 
         load_status: str | None = None
         if bool(spec.get("run_load", False)):
@@ -3296,7 +3376,7 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
             self._log("pane choice missing", "warn")
             self._refresh_side()
             return
-        self._jump_to_tmux_pane(pane)
+        self._jump_to_pane(pane)
 
     def action_open_selected(self) -> None:
         if self._table_is_active_focus() and self._hotbar_bar_visible():
@@ -3398,6 +3478,21 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
 
 
 
+def _register_client(base_dir: Path, cwd: Path) -> None:
+    """Listed by `b daemon` as a connected client while the TUI runs."""
+    try:
+        tty = os.ttyname(sys.stdin.fileno()) if sys.stdin.isatty() else ""
+    except (OSError, ValueError):
+        tty = ""
+    try:
+        register_client(
+            base_dir,
+            ClientInfo(pid=os.getpid(), started_ts=time.time(), tty=tty, cwd=str(cwd)),
+        )
+    except OSError:
+        pass
+
+
 def run_textual_ui(
     base_dir: Path,
     cwd: Path,
@@ -3413,9 +3508,12 @@ def run_textual_ui(
         start_new_mode=start_new,
         initial_filter=initial_filter_expr,
     )
+    _register_client(base_dir, cwd)
     try:
         result = app.run() or ("quit", None, [])
     finally:
+        release_cache_owner(app.cache_owner_handle)
+        unregister_client(base_dir, os.getpid())
         unregister_current_tmux_context(base_dir)
     # After the TUI returns the terminal is restored; flush any
     # deferred summary or error captured by the new-project flow so

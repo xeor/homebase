@@ -31,6 +31,7 @@ from .setup_model import (
     SetupDebugTool,
     SetupFix,
 )
+from .yaml_io import yaml_safe_load
 
 _STATUS_COLOR = {
     STATUS_PASS: "bright_green",
@@ -506,7 +507,7 @@ def run_setup_app(
     config_presets = build_presets(config_env)
     config_current: dict[str, object] = {}
     if ctx.config_path.exists():
-        loaded = yaml.safe_load(ctx.config_path.read_text(encoding="utf-8"))
+        loaded = yaml_safe_load(ctx.config_path.read_text(encoding="utf-8"))
         if isinstance(loaded, dict):
             config_current = loaded
 

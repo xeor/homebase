@@ -4,34 +4,35 @@
 <line x1="60" y1="270.0" x2="580" y2="270.0" stroke="#eee"/>
 <text x="54" y="274.0" text-anchor="end" fill="#555">0.0</text>
 <line x1="60" y1="210.5" x2="580" y2="210.5" stroke="#eee"/>
-<text x="54" y="214.5" text-anchor="end" fill="#555">17.1</text>
+<text x="54" y="214.5" text-anchor="end" fill="#555">17.3</text>
 <line x1="60" y1="151.0" x2="580" y2="151.0" stroke="#eee"/>
-<text x="54" y="155.0" text-anchor="end" fill="#555">34.2</text>
+<text x="54" y="155.0" text-anchor="end" fill="#555">34.6</text>
 <line x1="60" y1="91.5" x2="580" y2="91.5" stroke="#eee"/>
-<text x="54" y="95.5" text-anchor="end" fill="#555">51.4</text>
+<text x="54" y="95.5" text-anchor="end" fill="#555">51.9</text>
 <line x1="60" y1="32.0" x2="580" y2="32.0" stroke="#eee"/>
-<text x="54" y="36.0" text-anchor="end" fill="#555">68.5</text>
+<text x="54" y="36.0" text-anchor="end" fill="#555">69.2</text>
 <line x1="60" y1="32" x2="60" y2="270" stroke="#888"/>
 <line x1="60" y1="270" x2="580" y2="270" stroke="#888"/>
 <line x1="60.0" y1="270" x2="60.0" y2="274" stroke="#888"/>
 <text x="60.0" y="288" text-anchor="middle" fill="#555">2026-06-01</text>
-<line x1="320.0" y1="270" x2="320.0" y2="274" stroke="#888"/>
-<text x="320.0" y="288" text-anchor="middle" fill="#555">2026-06-06</text>
+<line x1="343.6" y1="270" x2="343.6" y2="274" stroke="#888"/>
+<text x="343.6" y="288" text-anchor="middle" fill="#555">2026-06-22</text>
 <line x1="580.0" y1="270" x2="580.0" y2="274" stroke="#888"/>
-<text x="580.0" y="288" text-anchor="middle" fill="#555">2026-07-02</text>
+<text x="580.0" y="288" text-anchor="middle" fill="#555">2026-10-25</text>
 <text x="14" y="151" text-anchor="middle" transform="rotate(-90 14 151)" fill="#555">%</text>
-<path d="M60.0,91.8 L112.0,54.9 L164.0,52.2 L216.0,48.3 L268.0,41.4 L320.0,41.7 L372.0,39.6 L424.0,39.3 L476.0,40.0 L528.0,39.6 L580.0,32.0" fill="none" stroke="#1f77b4" stroke-width="2"/>
-<circle cx="60.0" cy="91.8" r="3" fill="#1f77b4"/>
-<circle cx="112.0" cy="54.9" r="3" fill="#1f77b4"/>
-<circle cx="164.0" cy="52.2" r="3" fill="#1f77b4"/>
-<circle cx="216.0" cy="48.3" r="3" fill="#1f77b4"/>
-<circle cx="268.0" cy="41.4" r="3" fill="#1f77b4"/>
-<circle cx="320.0" cy="41.7" r="3" fill="#1f77b4"/>
-<circle cx="372.0" cy="39.6" r="3" fill="#1f77b4"/>
-<circle cx="424.0" cy="39.3" r="3" fill="#1f77b4"/>
-<circle cx="476.0" cy="40.0" r="3" fill="#1f77b4"/>
-<circle cx="528.0" cy="39.6" r="3" fill="#1f77b4"/>
+<path d="M60.0,93.6 L107.3,57.1 L154.5,54.4 L201.8,50.6 L249.1,43.7 L296.4,44.0 L343.6,42.0 L390.9,41.6 L438.2,42.3 L485.5,42.0 L532.7,34.4 L580.0,32.0" fill="none" stroke="#1f77b4" stroke-width="2"/>
+<circle cx="60.0" cy="93.6" r="3" fill="#1f77b4"/>
+<circle cx="107.3" cy="57.1" r="3" fill="#1f77b4"/>
+<circle cx="154.5" cy="54.4" r="3" fill="#1f77b4"/>
+<circle cx="201.8" cy="50.6" r="3" fill="#1f77b4"/>
+<circle cx="249.1" cy="43.7" r="3" fill="#1f77b4"/>
+<circle cx="296.4" cy="44.0" r="3" fill="#1f77b4"/>
+<circle cx="343.6" cy="42.0" r="3" fill="#1f77b4"/>
+<circle cx="390.9" cy="41.6" r="3" fill="#1f77b4"/>
+<circle cx="438.2" cy="42.3" r="3" fill="#1f77b4"/>
+<circle cx="485.5" cy="42.0" r="3" fill="#1f77b4"/>
+<circle cx="532.7" cy="34.4" r="3" fill="#1f77b4"/>
 <circle cx="580.0" cy="32.0" r="3" fill="#1f77b4"/>
 <rect x="588" y="42" width="12" height="12" fill="#1f77b4"/>
-<text x="604" y="52" fill="#222">pct: 68.5</text>
+<text x="604" y="52" fill="#222">pct: 69.2</text>
 </svg>

@@ -6,6 +6,7 @@ import re
 import shlex
 import subprocess
 import sys
+import time
 from datetime import datetime
 from pathlib import Path
 from string import Template
@@ -520,6 +521,8 @@ def _raycast_project_payload(
         )
     payload: dict[str, object] = {
         "project": str(getattr(row, "name", "")),
+        "path": str(getattr(row, "path", "")),
+        "tags": [str(tag) for tag in _list_attr(row, "tags") if str(tag)],
         "actions": _row_actions_payload(
             base_dir,
             row,
@@ -534,29 +537,22 @@ def _raycast_project_payload(
     return payload
 
 
-def cmd_projects(
+def projects_payload(
     base_dir: Path,
-    filter_expr: str,
     *,
     actions: dict[str, Action],
     load_rows: Callable[[Path], tuple[list[Any], list[Any], int]],
     notes_config: dict[str, object],
     raycast_config: dict[str, object] | None = None,
-    compile_filter_expr: Callable[[str], tuple[Callable[[Any], bool], str | None]],
-) -> int:
+    keep: Callable[[Any], bool] | None = None,
+) -> list[dict[str, object]]:
+    """Active projects as the Raycast list shows them, in configured order."""
     active, _archived, _ts = load_rows(base_dir)
-    rows = list(active)
-    expr = filter_expr.strip()
-    if expr:
-        pred, err = compile_filter_expr(expr)
-        if err:
-            print(f"raycast projects: invalid filter: {err}", file=sys.stderr)
-            return 2
-        rows = [row for row in rows if pred(row)]
+    rows = [row for row in active if keep is None or keep(row)]
     config = raycast_config if isinstance(raycast_config, dict) else {}
     rows = _sort_project_rows(rows, str(config.get("sort", "name")))
     now_ts = int(datetime.now().astimezone().timestamp())
-    payload = [
+    return [
         _raycast_project_payload(
             base_dir,
             row,
@@ -567,7 +563,52 @@ def cmd_projects(
         )
         for row in rows
     ]
+
+
+def cmd_projects(
+    base_dir: Path,
+    filter_expr: str,
+    *,
+    actions: dict[str, Action],
+    load_rows: Callable[[Path], tuple[list[Any], list[Any], int]],
+    notes_config: dict[str, object],
+    raycast_config: dict[str, object] | None = None,
+    compile_filter_expr: Callable[[str], tuple[Callable[[Any], bool], str | None]],
+) -> int:
+    keep = None
+    expr = filter_expr.strip()
+    if expr:
+        pred, err = compile_filter_expr(expr)
+        if err:
+            print(f"raycast projects: invalid filter: {err}", file=sys.stderr)
+            return 2
+        keep = pred
+    payload = projects_payload(
+        base_dir,
+        actions=actions,
+        load_rows=load_rows,
+        notes_config=notes_config,
+        raycast_config=raycast_config,
+        keep=keep,
+    )
     print(json.dumps(payload))
+    return 0
+
+
+def cmd_opened(
+    base_dir: Path,
+    project: str,
+    *,
+    load_rows: Callable[[Path], tuple[list[Any], list[Any], int]],
+    set_opened_ts: Callable[[Path, Path, int], None],
+) -> int:
+    """Record that ``project`` was just opened (Raycast opens it without b)."""
+    active, archived, _ts = load_rows(base_dir)
+    row = _find_row(base_dir, project, list(active) + list(archived))
+    if row is None:
+        print(f"raycast opened: project not found: {project}", file=sys.stderr)
+        return 2
+    set_opened_ts(base_dir, Path(str(getattr(row, "path", ""))), int(time.time()))
     return 0
 
 

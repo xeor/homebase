@@ -254,6 +254,14 @@ def test_save_and_load_open_mode_config(tmp_path: Path) -> None:
     assert "profile" in out
 
 
+def test_load_open_mode_config_env_override(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    prefs.save_open_mode_config(tmp_path, {"profile": "tmux_tab_load_or_goto"})
+    monkeypatch.setenv("HOMEBASE_OPEN_MODE", "shell_cd")
+    assert prefs.load_open_mode_config(tmp_path)["profile"] == "shell_cd"
+    monkeypatch.setenv("HOMEBASE_OPEN_MODE", "no-such-profile")
+    assert prefs.load_open_mode_config(tmp_path)["profile"] == "tmux_tab_load_or_goto"
+
+
 def test_load_suffixes_falls_back_to_defaults(tmp_path: Path) -> None:
     out = prefs.load_suffixes(tmp_path)
     assert "tmp" in out and "fork" in out

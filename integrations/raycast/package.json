@@ -28,7 +28,7 @@
     {
       "name": "projects",
       "title": "Projects",
-      "description": "Pick from b ls",
+      "description": "Open Homebase projects in herdr (or b open)",
       "mode": "view",
       "preferences": [
         {
@@ -38,6 +38,64 @@
           "type": "textfield",
           "required": false,
           "default": "/Users/xeor/.local/bin/b"
+        },
+        {
+          "name": "baseDir",
+          "title": "Base Folder",
+          "description": "Homebase base folder (b daemon writes .homebase/runtime/raycast.json there)",
+          "type": "textfield",
+          "required": false,
+          "default": "~/base"
+        },
+        {
+          "name": "openWith",
+          "title": "Open With",
+          "description": "herdr space: go to the project's herdr space or open a new one. b open: Homebase open mode.",
+          "type": "dropdown",
+          "required": false,
+          "default": "herdr",
+          "data": [
+            {
+              "title": "herdr space",
+              "value": "herdr"
+            },
+            {
+              "title": "b open",
+              "value": "b"
+            }
+          ]
+        },
+        {
+          "name": "newSpaceCommand",
+          "title": "New Space Command",
+          "description": "Typed into a new herdr space by the Find Space item",
+          "type": "textfield",
+          "required": false,
+          "default": "b --open-mode shell_cd"
+        },
+        {
+          "name": "newProjectCommand",
+          "title": "New Project Command",
+          "description": "Typed into a new herdr space by the New Project item",
+          "type": "textfield",
+          "required": false,
+          "default": "b new"
+        },
+        {
+          "name": "focusCommand",
+          "title": "Focus Command",
+          "description": "Shell command that brings the herdr terminal to the front; prints false or fails to fall back to activating the terminal app",
+          "type": "textfield",
+          "required": false,
+          "default": "pgrep -xq Hammerspoon && /opt/homebrew/bin/hs -q -c 'return pair.focusTerminal()' </dev/null"
+        },
+        {
+          "name": "terminalBundleId",
+          "title": "Terminal App",
+          "description": "Bundle id of the terminal that runs herdr",
+          "type": "textfield",
+          "required": false,
+          "default": "com.apple.Terminal"
         },
         {
           "name": "timeoutMs",

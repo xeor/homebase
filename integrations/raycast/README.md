@@ -66,19 +66,43 @@ to `www.raycast.com`.
 
 ## Homebase contract
 
-- Enter uses `b open <selection>`, so Homebase owns tmux/window behavior.
-- The project list and Cmd-K actions come from
-  `b integration raycast projects`.
-- The Raycast search box uses native Raycast filtering over the loaded
-  project list. It does not run Homebase filter syntax per keystroke.
+- The project list is read from `<base>/.homebase/runtime/raycast.json`,
+  which `b daemon` keeps current (rebuilt when the cache or config
+  changes, at least once a minute). No `b` process runs when Raycast
+  opens. Without a running daemon (file older than 3 minutes) the list
+  shows at once and `b integration raycast snapshot` refreshes it.
+- Enter with `Open With: herdr space` (default): goes to the herdr space
+  that already has the project open, else creates a space named after
+  the project in its folder. Then the herdr terminal gets focus (`Focus
+  Command`, default Hammerspoon `pair.focusTerminal()`, falling back to
+  activating `Terminal App`), and `b integration raycast opened` records
+  the open for `raycast.sort: opened`. Cmd-Enter opens a new space even
+  when one exists. Without herdr, or with `Open With: b open`, Enter runs
+  `b open <selection>` and Homebase owns tmux/window behavior.
+- herdr is driven through its CLI (`herdr pane list`, `tab focus`,
+  `workspace create`): its socket stalls ~100 ms for Node clients.
+- Open projects show small markers: a terminal icon with the herdr pane
+  count (tooltip: spaces) and a tag per coding agent, colored by state
+  (working yellow, blocked red, done green).
+- Two top items open a new herdr space in the base folder and focus the
+  terminal: `Find Space with b` runs `New Space Command`
+  (`b --open-mode shell_cd`, same as Cmd-N in herdr), `New Project with b`
+  runs `New Project Command` (`b new`, b's new-project popup, then cd into
+  the new project).
+- Cmd-K actions come from the same snapshot; they run through
+  `b integration raycast run <action> <selection>`.
+- The search box filters locally (no `b` per keystroke), with a subset of
+  b's QUERY syntax: `#tag` (exact), `#ta*` (glob), `-#tag` (exclude);
+  other words must all match the name, subtitle or tags (name matches
+  rank first). While typing `#…` the list narrows by prefix and a Tags
+  section suggests completions; Enter on one completes it.
 - Project list ordering is controlled by `<base>/.homebase/config.yaml`:
   `raycast.sort: name` (default) or `raycast.sort: opened`.
 - Optional `raycast.secondary_info` templates are shown as the Raycast
   subtitle and indexed as search keywords. They are rendered from cached
   row data.
-- `b integration raycast actions` remains available for single-purpose
-  action inspection/debugging.
-- Cmd-K action execution uses `b integration raycast run <action> <selection>`.
+- `b integration raycast projects` and `actions` remain available for
+  inspection/debugging.
 
 ```yaml
 raycast:
@@ -114,11 +138,20 @@ scope.
 
 ## Commands
 
-- `Projects`: loads Homebase projects once and filters locally in Raycast
-- `Enter`: `b open {selection}`
+- `Projects`: Homebase projects from the daemon snapshot, filtered locally
+  (`#tag`, `-#tag`, words)
+- `Enter`: go to / open the project's herdr space (or `b open`)
+- `Cmd-Enter`: new herdr space even if the project is open
 - `Cmd-K`: enabled Homebase Raycast actions
 
 ## Preferences
 
 - `b Path`: full path to `b`
+- `Base Folder`: Homebase base folder (default `~/base`)
+- `Open With`: `herdr space` or `b open`
+- `New Space Command`: typed into the space `Find Space with b` creates
+- `New Project Command`: typed into the space `New Project with b` creates
+- `Focus Command`: brings the herdr terminal to the front; printing
+  `false` or failing falls back to activating `Terminal App`
+- `Terminal App`: bundle id of the terminal running herdr
 - `Command Timeout`: milliseconds before a `b` command is killed

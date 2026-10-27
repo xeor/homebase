@@ -542,3 +542,14 @@ def test_open_with_mode_does_not_focus_when_external_open_fails(
     assert _run_external_open(tmp_path, tmp_path / "project") == 9
     assert focused == []
 
+
+
+def test_context_open_mode_loader_env_override_beats_registered_profile(
+    tmp_path: Path, monkeypatch
+) -> None:
+    loader = tmux_external._context_open_mode_loader({"open_profile": "tmux_tab"})
+    monkeypatch.delenv("HOMEBASE_OPEN_MODE", raising=False)
+    assert loader(tmp_path) == {"profile": "tmux_tab"}
+    monkeypatch.setenv("HOMEBASE_OPEN_MODE", "shell_cd")
+    loader = tmux_external._context_open_mode_loader({"open_profile": "tmux_tab"})
+    assert loader(tmp_path)["profile"] == "shell_cd"

@@ -36,13 +36,13 @@ def test_load_base_data_caches_until_mtime_changes(tmp_path: Path, monkeypatch) 
     )
 
     parses = {"count": 0}
-    real_safe_load = metadata_store.yaml.safe_load
+    real_safe_load = metadata_store.yaml_safe_load
 
     def counting_safe_load(text: str) -> object:
         parses["count"] += 1
         return real_safe_load(text)
 
-    monkeypatch.setattr(metadata_store.yaml, "safe_load", counting_safe_load)
+    monkeypatch.setattr(metadata_store, "yaml_safe_load", counting_safe_load)
 
     loaded_a = metadata_store.load_base_data(
         target,
