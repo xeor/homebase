@@ -17,12 +17,21 @@ export type HerdrPane = {
   focused?: boolean;
   agent?: string;
   agent_status?: string;
+  terminal_title_stripped?: string;
 };
 
 export type HerdrWorkspace = {
   workspace_id: string;
   label?: string;
   focused?: boolean;
+  number?: number;
+  pane_count?: number;
+  agent_status?: string;
+};
+
+export type HerdrState = {
+  panes: HerdrPane[];
+  workspaces: HerdrWorkspace[];
 };
 
 export type ProjectPane = HerdrPane & { label: string };
@@ -82,25 +91,46 @@ function isUnder(dir: string, root: string): boolean {
   return dir === root || dir.startsWith(root.endsWith("/") ? root : root + "/");
 }
 
-// Panes per project path (deepest matching project wins, like b's pane probe).
-export async function panesByProject(
-  herdr: Herdr,
-  projectPaths: string[],
-): Promise<Map<string, ProjectPanes>> {
+export async function loadState(herdr: Herdr): Promise<HerdrState> {
   const [paneList, workspaceList] = await Promise.all([
     herdr(["pane", "list"]),
     herdr(["workspace", "list"]),
   ]);
-  const panes = (paneList.panes ?? []) as HerdrPane[];
-  const workspaces = (workspaceList.workspaces ?? []) as HerdrWorkspace[];
+  return {
+    panes: (paneList.panes ?? []) as HerdrPane[],
+    workspaces: (workspaceList.workspaces ?? []) as HerdrWorkspace[],
+  };
+}
+
+export function workspaceLabel(workspace: HerdrWorkspace): string {
+  return workspace.label || workspace.workspace_id;
+}
+
+// Project paths, deepest first, for projectRoot().
+export function projectRoots(projectPaths: string[]): string[] {
+  return [...projectPaths].sort((a, b) => b.length - a.length);
+}
+
+// The project a pane belongs to (deepest matching project wins, like b's pane probe).
+export function projectRoot(
+  pane: HerdrPane,
+  roots: string[],
+): string | undefined {
+  const cwd = pane.foreground_cwd || pane.cwd;
+  return cwd ? roots.find((r) => isUnder(cwd, r)) : undefined;
+}
+
+// Panes per project path.
+export function panesByProject(
+  state: HerdrState,
+  roots: string[],
+): Map<string, ProjectPanes> {
   const labels = new Map(
-    workspaces.map((w) => [w.workspace_id, w.label || w.workspace_id]),
+    state.workspaces.map((w) => [w.workspace_id, workspaceLabel(w)]),
   );
-  const roots = [...projectPaths].sort((a, b) => b.length - a.length);
   const out = new Map<string, ProjectPanes>();
-  for (const pane of panes) {
-    const cwd = pane.foreground_cwd || pane.cwd;
-    const root = cwd ? roots.find((r) => isUnder(cwd, r)) : undefined;
+  for (const pane of state.panes) {
+    const root = projectRoot(pane, roots);
     if (!root) {
       continue;
     }
@@ -132,6 +162,13 @@ export function bestPane(
 // Focus the tab holding the pane (switches workspace too).
 export async function focusPane(herdr: Herdr, pane: HerdrPane): Promise<void> {
   await herdr(["tab", "focus", pane.tab_id]);
+}
+
+export async function focusWorkspace(
+  herdr: Herdr,
+  workspaceId: string,
+): Promise<void> {
+  await herdr(["workspace", "focus", workspaceId]);
 }
 
 export async function createSpace(

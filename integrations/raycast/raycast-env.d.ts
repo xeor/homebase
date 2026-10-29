@@ -7,14 +7,7 @@
 
 /* eslint-disable @typescript-eslint/ban-types */
 
-type ExtensionPreferences = {}
-
-/** Preferences accessible in all the extension's commands */
-declare type Preferences = ExtensionPreferences
-
-declare namespace Preferences {
-  /** Preferences accessible in the `projects` command */
-  export type Projects = ExtensionPreferences & {
+type ExtensionPreferences = {
   /** b Path - Path to the b executable */
   "bPath": string,
   /** Base Folder - Homebase base folder (b daemon writes .homebase/runtime/raycast.json there) */
@@ -32,6 +25,13 @@ declare namespace Preferences {
   /** Command Timeout - Timeout in milliseconds */
   "timeoutMs": string
 }
+
+/** Preferences accessible in all the extension's commands */
+declare type Preferences = ExtensionPreferences
+
+declare namespace Preferences {
+  /** Preferences accessible in the `projects` command */
+  export type Projects = ExtensionPreferences & {}
 }
 
 declare namespace Arguments {

@@ -81,9 +81,26 @@ to `www.raycast.com`.
   `b open <selection>` and Homebase owns tmux/window behavior.
 - herdr is driven through its CLI (`herdr pane list`, `tab focus`,
   `workspace create`): its socket stalls ~100 ms for Node clients.
-- Open projects show small markers: a terminal icon with the herdr pane
-  count (tooltip: spaces) and a tag per coding agent, colored by state
-  (working yellow, blocked red, done green).
+- Status is shown as small colored icons, not text: agent icon in the
+  most urgent agent's color (blocked red, working yellow, done green,
+  count when more than one), blue for general status (current space dot,
+  terminal icon with the pane count). Tooltips have the details.
+- Sections, herdr state refreshed every 2 s while open:
+  - `Agents`: one row per coding agent pane, titled by its project,
+    blocked/working first. Enter focuses its tab.
+  - `Open`: every herdr space in order, with the project it holds (named
+    like the space, else the one with most panes there): its subtitle,
+    tags and Cmd-K actions. Enter focuses the space.
+  - `Projects`: the new-space items and all projects. Under `All`,
+    projects already listed in `Open` are left out.
+- The search bar dropdown (⌘P, remembered) picks the section: `All`,
+  `Agents`, `Open` or `Projects`. `⌥1`-`⌥4` pick one, `⌥←`/`⌥→` step
+  through them, plain `←`/`→` too while the search box is empty. The search text is kept when switching;
+  words and `#tag` filter every section (agents carry their project's
+  tags).
+- Code: `src/components/HomebaseList.tsx` is the list; a command is
+  `<HomebaseList />` or `<HomebaseList scope="agents" />` (fixed, no
+  dropdown). Preferences are extension-wide, shared by all commands.
 - Two top items open a new herdr space in the base folder and focus the
   terminal: `Find Space with b` runs `New Space Command`
   (`b --open-mode shell_cd`, same as Cmd-N in herdr), `New Project with b`
