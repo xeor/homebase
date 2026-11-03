@@ -4,14 +4,14 @@ import os from "node:os";
 import path from "node:path";
 import { Herdr, herdrCli, herdrRunning } from "./herdr";
 
-const DEFAULT_B_PATH = "/Users/xeor/.local/bin/b";
+const DEFAULT_B_PATH = "~/.local/bin/b";
 const DEFAULT_BASE_DIR = "~/base";
 const DEFAULT_TIMEOUT_MS = 10_000;
 const DEFAULT_NEW_SPACE_COMMAND = "b --open-mode shell_cd";
 const DEFAULT_NEW_PROJECT_COMMAND = "b new";
 const DEFAULT_TERMINAL_BUNDLE = "com.apple.Terminal";
 const COMMAND_PATHS = [
-  "/Users/xeor/.local/bin",
+  path.join(os.homedir(), ".local", "bin"),
   "/opt/homebrew/bin",
   "/usr/local/bin",
   "/usr/bin",
@@ -51,8 +51,9 @@ function expandHome(value: string): string {
 
 export function getConfig(): Config {
   const preferences = getPreferenceValues<ExtensionPreferences>();
-  const bPath =
-    preferences.bPath?.trim() || process.env.B_BIN || DEFAULT_B_PATH;
+  const bPath = expandHome(
+    preferences.bPath?.trim() || process.env.B_BIN || DEFAULT_B_PATH,
+  );
   const configuredTimeout = Number(preferences.timeoutMs || DEFAULT_TIMEOUT_MS);
   const timeoutMs =
     Number.isFinite(configuredTimeout) && configuredTimeout > 0

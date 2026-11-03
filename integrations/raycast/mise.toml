@@ -37,6 +37,6 @@ depends = ["setup"]
 run = "npm run ray --"
 
 [tasks.install]
-description = "Production build straight into Raycast (replaces a dev install)"
+description = "Install into Raycast: register (ray develop until its first build), then a production build"
 depends = ["setup"]
-run = "npx ray build -e dist -o ~/.config/raycast/extensions/homebase-raycast"
+run = "bash scripts/install.sh"

@@ -31,7 +31,7 @@
       "description": "Path to the b executable",
       "type": "textfield",
       "required": false,
-      "default": "/Users/xeor/.local/bin/b"
+      "default": "~/.local/bin/b"
     },
     {
       "name": "baseDir",
@@ -81,7 +81,7 @@
       "description": "Shell command that brings the herdr terminal to the front; prints false or fails to fall back to activating the terminal app",
       "type": "textfield",
       "required": false,
-      "default": "pgrep -xq Hammerspoon && /opt/homebrew/bin/hs -q -c 'return pair.focusTerminal()' </dev/null"
+      "default": "pgrep -xq Hammerspoon && hs -q -c 'return pair.focusTerminal()' </dev/null"
     },
     {
       "name": "terminalBundleId",

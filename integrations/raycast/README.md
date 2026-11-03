@@ -8,13 +8,13 @@ Raycast extension for searching Homebase projects through `b`.
 - `mise` available on `PATH`.
 - Homebase installed so `b` works from a normal shell.
 - The extension preference `b Path` must point to a working `b`
-  executable. Default: `/Users/xeor/.local/bin/b`.
+  executable. Default: `~/.local/bin/b`.
 
 Check Homebase first:
 
 ```sh
 b ls
-/Users/xeor/.local/bin/b ls
+~/.local/bin/b ls
 ```
 
 ## First setup
@@ -27,6 +27,12 @@ mise run setup
 
 `mise run setup` runs `npm install` in this directory. Dependencies
 stay local to this integration.
+
+Install (new machine, or after changes): `mise run install`. It runs
+`ray develop` until the first build (Raycast only loads an extension
+`ray develop` announced once), stops it, then builds for production
+into `~/.config/raycast/extensions/homebase-raycast`. Raycast must be
+installed; the command hotkey is set in Raycast.
 
 ## Development loop
 
