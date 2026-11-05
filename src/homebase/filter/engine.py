@@ -13,7 +13,6 @@ StructuredTermBuilder = Callable[[str, str], tuple[str | None, Callable[[Any], b
 STRUCTURED_TERM_RE = re.compile(
     r"^:([a-z][a-z0-9-]*)(!=|<=|>=|=|<|>|~)(.+)$"
 )
-STRUCTURED_OPS = frozenset({"=", "!=", "<", "<=", ">", ">=", "~"})
 
 _DURATION_MULT = {
     "s": 1,

@@ -10,12 +10,14 @@ from ..config.prefs import load_open_mode_config
 from ..core import debug_timers
 from ..core import utils as core_utils
 from ..core.constants import (
+    ENV_OPEN_MODE,
     ENV_TMUX_SESSION,
     OPEN_MODE_CONFIG,
     OPEN_MODE_PROFILES,
     TMUX_BIN_CANDIDATES,
 )
 from ..core.models import PaneRef
+from . import client_focus
 from . import commands as tmux_commands
 from . import core as tmux_core
 from .client_focus import focus_tmux_client_app
@@ -110,6 +112,28 @@ def resolve_external_tmux_target(
     Used by the setup Debug tab so the focus diagnostic targets the
     exact session/socket a real ``b open`` would act on."""
     return _external_tmux_target(base_dir, quiet=quiet)
+
+
+def prewarm_focus(base_dir: Path) -> tuple[bool, str]:
+    """Warm the macOS System Events focus backend for the terminal that a
+    `b open` outside tmux would target: resolve its app name, precompile
+    the focus script, and keep System Events alive. Best-effort — never
+    raises. Returns the warm-up ``(ok, detail)``."""
+    if sys.platform != "darwin":
+        return False, "not darwin"
+    app_name: str | None = None
+    resolved = resolve_external_tmux_target(base_dir, quiet=True)
+    if resolved is not None:
+        _context, _prefix, tmux_fn, _session = resolved
+        try:
+            client_pid = int(tmux_fn("display-message", "-p", "#{client_pid}").strip())
+        except (subprocess.SubprocessError, OSError, RuntimeError, ValueError):
+            client_pid = None
+        if client_pid is not None:
+            app = client_focus.macos_app_for_client_pid(client_pid)
+            if app is not None:
+                app_name = app[1].stem
+    return client_focus.warm_up_focus_backend(app_name)
 
 
 def _external_tmux_target(
@@ -399,6 +423,9 @@ def _context_open_mode_loader(
     context: dict[str, object] | None,
 ) -> Callable[[Path], dict[str, str]]:
     open_profile = str(context.get("open_profile", "")).strip() if context else ""
+    if os.environ.get(ENV_OPEN_MODE, "").strip():
+        # `b --open-mode` beats the profile registered by other running TUIs.
+        open_profile = ""
 
     def load_context_open_mode(base_dir: Path) -> dict[str, str]:
         if open_profile:

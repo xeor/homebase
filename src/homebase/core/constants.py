@@ -6,10 +6,8 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from .models import BuiltinActionMeta, BuiltinHotkey, PropertyDef
 
-TS_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:Z|[+-]\d{2}:?\d{2})$")
 DATE_PREFIX_RE = re.compile(r"^\d{4}-\d{2}-\d{2}_")
 ARCHIVE_YEAR_DIR_RE = re.compile(r"^\d{4}$")
-ARCHIVE_YEAR_PREFIX_RE = re.compile(r"^\d{4}")
 
 DEFAULT_ARCHIVE_TZ_NAME = "Europe/Oslo"
 ARCHIVE_TZ_NAME = DEFAULT_ARCHIVE_TZ_NAME
@@ -40,6 +38,15 @@ HOMEBASE_DIR_NAME = ".homebase"
 GLOBAL_CONFIG_FILE_NAME = "config.yaml"
 RUNTIME_DIR_NAME = "runtime"
 TMUX_CONTEXTS_FILE_NAME = "tmux-contexts.json"
+DAEMON_STATUS_FILE_NAME = "daemon.json"
+DAEMON_LOCK_FILE_NAME = "daemon.lock"
+CACHE_OWNER_LOCK_FILE_NAME = "cache-owner.lock"
+CACHE_REFRESH_REQUEST_FILE_NAME = "cache-refresh.request"
+CLIENTS_DIR_NAME = "clients"
+# Project list for the Raycast extension, kept current by `b daemon`.
+RAYCAST_SNAPSHOT_FILE_NAME = "raycast.json"
+RAYCAST_SNAPSHOT_VERSION = 1
+RAYCAST_SNAPSHOT_MAX_AGE_S = 60.0
 CACHE_DB_FILE_NAME = "cache.sqlite3"
 BENCHMARK_REPORT_FILE_NAME = "benchmark.yaml"
 TEST_REPORT_FILE_NAME = "test.yaml"
@@ -55,6 +62,22 @@ TMUX_BIN_CANDIDATES = (
 )
 TMUX_SHELL_COMMANDS = {"sh", "bash", "zsh", "fish", "nu", "nushell", "tmux"}
 
+# herdr (terminal workspace manager) socket API. herdr exports
+# HERDR_SOCKET_PATH into its panes; outside herdr the default socket is used.
+HERDR_DEFAULT_SOCKET = "~/.config/herdr/herdr.sock"
+HERDR_CALL_TIMEOUT_S = 2.0
+
+# macOS terminal-window focus backend used by `b open` (outside tmux) and
+# the `b setup` Debug focus tool. The `.homebase/config.yaml` key
+# `tmux_focus.method` overrides backend selection. `auto` keeps the
+# built-in waterfall (appkit -> osascript activate -> system_events);
+# the others force a single backend (the case where the OS silently
+# ignores Cocoa activation and only the System Events / Accessibility
+# path works).
+TMUX_FOCUS_METHOD_AUTO = "auto"
+TMUX_FOCUS_METHODS = ("auto", "appkit", "osascript", "system_events")
+TMUX_FOCUS_METHOD_DEFAULT = TMUX_FOCUS_METHOD_AUTO
+
 COLOR_ERROR_HEX = "#FF6B6B"
 COLOR_WARN_HEX = "#FFD166"
 COLOR_INFO_HEX = "#7FB8FF"
@@ -63,7 +86,6 @@ COLOR_SUCCESS_HEX = "#7DFF9B"
 COLOR_AGE_UNIT_HEX = "#7CFC7C"
 COLOR_NAV_HEX = "#4DA3FF"
 COLOR_INTERACTIVE_HEX = "#3BC9B5"
-COLOR_MUTED_HEX = "#8A94A6"
 COLOR_ARCHIVE_HEX = "#8D84C6"
 COLOR_DYNAMIC_ENV_HEX = "#FFB347"
 COLOR_DYNAMIC_FILE_HEX = "#4DA3FF"
@@ -294,8 +316,16 @@ BUILTIN_ACTIONS: dict[str, BuiltinActionMeta] = {
     ),
     "edit_global_config": BuiltinActionMeta(
         id="edit_global_config",
-        default_label="Edit global config in $EDITOR",
+        default_label="Open config file in $EDITOR",
         help_text="Open global config in editor and reload",
+        scope="workspace",
+        view_scope=("active", "archive"),
+        default_confirm_prompt=None,
+    ),
+    "open_config_editor": BuiltinActionMeta(
+        id="open_config_editor",
+        default_label="Open config editor",
+        help_text="Open the interactive config editor modal",
         scope="workspace",
         view_scope=("active", "archive"),
         default_confirm_prompt=None,
@@ -392,6 +422,8 @@ def reserved_hotkeys() -> dict[str, str]:
 
 ENV_BASE_DIR = "BASE_DIR"
 ENV_TMUX_SESSION = "HOMEBASE_TMUX_SESSION"
+# `b --open-mode <profile>`: open profile for this run, over open_mode.profile in config.
+ENV_OPEN_MODE = "HOMEBASE_OPEN_MODE"
 ENV_DEBUG_TIMERS = "HOMEBASE_DEBUG_TIMERS"
 WIDGET_PROJECTS = "#projects"
 BUSY_LABEL_IDLE = "idle"
@@ -427,8 +459,6 @@ NAMED_FILTERS: dict[str, str] = {}
 SAVED_FILTER_QUERIES: list[str] = []
 SUFFIXES: list[str] = ["tmp", "fork"]
 FILE_VIEW_EXCLUDE_PATTERNS: list[str] = []
-CUSTOM_ACTIONS: list[dict[str, str]] = []
-CUSTOM_HOTKEYS: list[dict[str, str]] = []
 OPEN_MODE_CONFIG: dict[str, str] = {
     "profile": "shell_cd",
 }
@@ -450,7 +480,6 @@ NOTES_CONFIG: dict[str, object] = {
         "command": "mv {{ OLD_NOTE_PATH_Q }} {{ NEW_NOTE_PATH_Q }}",
     },
 }
-VALID_NOTE_COMMANDS: frozenset[str] = frozenset({"add_log"})
 TABLE_BEHAVIOR_CONFIG: dict[str, object] = {
     "pin_wip_top": False,
     "side_width_pct": 33,
@@ -474,13 +503,6 @@ TABLE_DATE_COLOR_COLUMNS: tuple[str, ...] = (
     "archived_at",
 )
 TABLE_SIDE_WIDTH_PRESETS = [20, 25, 30, 33, 35, 40, 45, 50]
-NEW_PROJECT_DEFAULTS: dict[str, object] = {
-    "name_options": [],
-    "template": None,
-    "post_commands": [],
-    "tags": [],
-    "after_create": "open",
-}
 RECONCILE_USAGE_CACHE_LIMIT = 4000
 OPEN_MODE_PROFILES: list[dict[str, object]] = [
     {
@@ -519,6 +541,39 @@ OPEN_MODE_PROFILES: list[dict[str, object]] = [
         "goto_loaded": True,
         "fallback_cd": True,
     },
+    {
+        "id": "herdr_tab",
+        "name": "Open in new herdr tab",
+        "note": "herdr new-tab",
+        "backend": "herdr",
+        "herdr_new": "tab",
+        "use_tmux": False,
+        "run_load": False,
+        "goto_loaded": False,
+        "fallback_cd": True,
+    },
+    {
+        "id": "herdr_tab_goto",
+        "name": "Goto existing herdr pane, else open new tab",
+        "note": "goto-or-tab",
+        "backend": "herdr",
+        "herdr_new": "tab",
+        "use_tmux": False,
+        "run_load": False,
+        "goto_loaded": True,
+        "fallback_cd": True,
+    },
+    {
+        "id": "herdr_workspace",
+        "name": "Goto existing herdr pane, else open new workspace",
+        "note": "goto-or-workspace",
+        "backend": "herdr",
+        "herdr_new": "workspace",
+        "use_tmux": False,
+        "run_load": False,
+        "goto_loaded": True,
+        "fallback_cd": True,
+    },
 ]
 BASE_META_ALLOWED_KEYS: set[str] = {
     "tags",
@@ -546,6 +601,15 @@ HOOK_SLOW_WARN_DEFAULT_S: float = 30.0
 CACHE_SCHEMA_VERSION = 6
 CACHE_MAX_AGE_S = 120
 CACHE_BG_REFRESH_S = 30
+# One process per base owns background cache work (full rescans, reconcile,
+# git and worktree-health sweeps): `b daemon` while it runs, else the first
+# TUI that takes the owner lock. Other TUIs only read the cache and write rows
+# for the user's own actions.
+DAEMON_TICK_S = 2.0
+DAEMON_SIGNATURE_CHECK_S = 10.0
+DAEMON_STATUS_LOG_S = 300.0
+DAEMON_STALE_S = 15.0
+UI_TICK_CACHE_OWNER_POLL_S = 1.0
 SIZE_REFRESH_EVERY_N = 10
 
 UI_TICK_BUSY_S = 0.12
@@ -558,6 +622,9 @@ UI_TICK_MICRO_RECONCILE_S = 0.25
 UI_TICK_HOOK_REFRESH_S = 2.0
 UI_TICK_WORKTREE_HEALTH_S = 60.0
 UI_TICK_TMUX_CONTEXT_S = 5.0
+# How often the TUI re-warms the macOS focus backend in the background
+# (keeps System Events running so the first `b open` is not cold).
+UI_TICK_FOCUS_WARM_S = 120.0
 BENCHMARK_SUITE_VERSION = 1
 BENCHMARK_SCORE_MODEL = "pow(day/elapsed, k)"
 BENCHMARK_SCORE_REF_SECONDS = 30.0
@@ -685,10 +752,8 @@ SIDE_CHILD_TABS: dict[str, list[tuple[str, str]]] = {
         ("hooks", "Hooks"),
     ],
     "settings": [
+        ("general", "General"),
         ("table", "Table"),
-        ("table_config", "Config"),
-        ("open", "Open"),
-        ("global", "Config-file"),
     ],
 }
 

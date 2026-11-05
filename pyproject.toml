@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "homebase"
-version = "0.6.1"
+version = "0.9.0"
 description = "Homebase TUI and project workspace tooling"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -91,7 +91,7 @@ layers = [
   "homebase.commands",
   "homebase.workspace",
   "homebase.hooks",
-  "homebase.tmux | homebase.notes | homebase.filter | homebase.archive | homebase.metadata | homebase.cache",
+  "homebase.tmux | homebase.herdr | homebase.notes | homebase.filter | homebase.archive | homebase.metadata | homebase.cache",
   "homebase.config",
   "homebase.core",
 ]

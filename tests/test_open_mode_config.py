@@ -35,3 +35,11 @@ def test_save_open_mode_config_falls_back_to_default() -> None:
         known_profiles={"shell_cd", "tmux_tab"},
     )
     assert out["open_mode"] == {"profile": "shell_cd", "tmux_session": "main"}
+
+
+def test_apply_open_mode_override() -> None:
+    conf = {"profile": "tmux_tab_load_or_goto", "tmux_session": "main"}
+    out = open_mode_config.apply_open_mode_override(conf, "shell_cd")
+    assert out == {"profile": "shell_cd", "tmux_session": "main"}
+    assert conf["profile"] == "tmux_tab_load_or_goto"
+    assert open_mode_config.apply_open_mode_override(conf, "") == conf

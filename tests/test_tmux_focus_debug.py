@@ -29,6 +29,7 @@ def test_focus_switch_has_method_options(tmp_path: Path) -> None:
         "appkit",
         "osascript",
         "system_events",
+        "system_events_osascript",
     ]
 
 
@@ -50,9 +51,47 @@ def test_focus_detail_reports_auto_method(tmp_path: Path, monkeypatch) -> None:
     # pyobjc available -> auto resolves to appkit
     monkeypatch.setattr(focus_debug, "_pyobjc_status", lambda: (True, "available"))
     detail = focus_debug._focus_detail(tmp_path)
-    assert "auto-detect will use:" in detail
+    assert "auto-detect would use:" in detail
+    assert "config tmux_focus.method:" in detail
     assert "AppKit" in detail
     assert "target session: work" in detail
+
+
+def test_focus_detail_shows_enforced_method(tmp_path: Path, monkeypatch) -> None:
+    from homebase.config import store as config_store
+
+    config_store.save_global_config_dict(
+        tmp_path, {"tmux_focus": {"method": "system_events"}}
+    )
+    monkeypatch.setattr(focus_debug, "resolve_external_tmux_target", lambda *_a, **_k: None)
+    detail = focus_debug._focus_detail(tmp_path)
+    assert "enforced" in detail
+    assert "system_events" in detail
+
+
+def test_enforce_hint_for_unconfigured_backend(tmp_path: Path) -> None:
+    lines = focus_debug._enforce_hint(tmp_path, "system_events")
+    text = "\n".join(lines)
+    assert "tmux_focus:" in text
+    assert "method: system_events" in text
+
+
+def test_enforce_hint_debug_only_backend(tmp_path: Path) -> None:
+    lines = focus_debug._enforce_hint(tmp_path, "system_events_osascript")
+    text = "\n".join(lines)
+    assert "debug-only" in text
+    assert "tmux_focus:" not in text
+
+
+def test_enforce_hint_when_already_configured(tmp_path: Path) -> None:
+    from homebase.config import store as config_store
+
+    config_store.save_global_config_dict(
+        tmp_path, {"tmux_focus": {"method": "appkit"}}
+    )
+    lines = focus_debug._enforce_hint(tmp_path, "appkit")
+    text = "\n".join(lines)
+    assert "already the configured default" in text
 
 
 def test_focus_detail_no_target(tmp_path: Path, monkeypatch) -> None:

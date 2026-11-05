@@ -85,3 +85,24 @@ def test_clear_base_worktree_removes_block(tmp_path: Path) -> None:
     save_base_worktree(tmp_path, of="foo", branch="x")
     clear_base_worktree(tmp_path)
     assert load_base_worktree(tmp_path) is None
+
+
+def test_base_meta_signature_tracks_marker_files(tmp_path: Path) -> None:
+    project = tmp_path / "p"
+    project.mkdir()
+    empty = metadata_api.base_meta_signature(project)
+    (project / ".base.yaml").write_text("tags: []\n")
+    with_meta = metadata_api.base_meta_signature(project)
+    assert with_meta != empty
+    assert metadata_api.base_meta_signature(project) == with_meta
+    (project / ".base.yaml").write_text("tags: [x]\n")
+    assert metadata_api.base_meta_signature(project) != with_meta
+
+
+def test_base_meta_signature_for_packed_archive(tmp_path: Path) -> None:
+    packed = tmp_path / "2026-01-01_p.tgz"
+    packed.write_bytes(b"x")
+    sig = metadata_api.base_meta_signature(packed)
+    assert sig[0] == "packed"
+    packed.write_bytes(b"xy")
+    assert metadata_api.base_meta_signature(packed) != sig

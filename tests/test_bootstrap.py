@@ -137,3 +137,14 @@ def test_resolve_base_dir_uses_env_when_no_arg(tmp_path: Path, monkeypatch) -> N
     entry = importlib.import_module("homebase.cli.entry")
     monkeypatch.setenv("BASE_FOLDER", str(tmp_path))
     assert entry.resolve_base_dir(None) == tmp_path.resolve()
+
+
+def test_package_version_is_lazy_and_unknown_attrs_raise() -> None:
+    import pytest
+
+    import homebase
+    from homebase.core.version import get_version
+
+    assert homebase.__version__ == get_version()
+    with pytest.raises(AttributeError):
+        _ = homebase.no_such_attribute  # type: ignore[attr-defined]

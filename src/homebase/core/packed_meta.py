@@ -8,16 +8,61 @@ import io
 import os
 import tarfile
 import tempfile
+import threading
 import time
 from pathlib import Path
 
 import yaml
+
+from .yaml_io import yaml_safe_load
 
 _PACKED_META_MEMBER_CACHE: dict[tuple[str, int, int], str | None] = {}
 _PACKED_META_MEMBER_CACHE_ORDER: list[tuple[str, int, int]] = []
 _PACKED_BASE_DATA_CACHE: dict[tuple[str, int, int], dict[str, object]] = {}
 _PACKED_BASE_DATA_CACHE_ORDER: list[tuple[str, int, int]] = []
 _PACKED_CACHE_LIMIT = 1024
+
+# Persistent memo (stored by the cache layer, seeded per process): finding
+# the metadata member means reading most of the archive, which for a few
+# hundred archives costs many seconds per new process.
+PackedMetaEntry = tuple[str, int, int, str | None, str | None]
+_PACKED_SEED: dict[tuple[str, int, int], tuple[str | None, str | None]] = {}
+_PACKED_NEW: dict[tuple[str, int, int], tuple[str | None, str | None]] = {}
+_PACKED_MEMO_LOCK = threading.Lock()
+
+
+def packed_meta_seed(entries: list[PackedMetaEntry]) -> None:
+    """Load (path, mtime_ns, size, member, raw yaml) entries read earlier."""
+    with _PACKED_MEMO_LOCK:
+        for path, mtime_ns, size, member, raw in entries:
+            _PACKED_SEED[(str(path), int(mtime_ns), int(size))] = (member, raw)
+
+
+def packed_meta_take_new() -> list[PackedMetaEntry]:
+    """Entries read from archives since the last call, for persisting."""
+    with _PACKED_MEMO_LOCK:
+        out = [(k[0], k[1], k[2], m, r) for k, (m, r) in _PACKED_NEW.items()]
+        _PACKED_NEW.clear()
+    return out
+
+
+def _packed_memo_record(
+    key: tuple[str, int, int] | None, member: str | None, raw: str | None
+) -> None:
+    if key is None:
+        return
+    with _PACKED_MEMO_LOCK:
+        _PACKED_NEW[key] = (member, raw)
+
+
+def _parse_packed_raw(raw: str | None) -> dict[str, object]:
+    if raw is None:
+        return {}
+    try:
+        data = yaml_safe_load(raw)
+    except yaml.YAMLError:
+        return {}
+    return data if isinstance(data, dict) else {}
 
 
 def _packed_cache_key(path: Path) -> tuple[str, int, int] | None:
@@ -30,6 +75,9 @@ def _packed_cache_key(path: Path) -> tuple[str, int, int] | None:
 
 def invalidate_packed_cache_path(path: Path) -> None:
     target = str(path.resolve())
+    with _PACKED_MEMO_LOCK:
+        for key in [k for k in _PACKED_SEED if k[0] == target]:
+            _PACKED_SEED.pop(key, None)
     for key in list(_PACKED_META_MEMBER_CACHE.keys()):
         if key[0] == target:
             _PACKED_META_MEMBER_CACHE.pop(key, None)
@@ -82,15 +130,33 @@ def _packed_member_for_meta(path: Path, *, base_marker_file: str) -> str | None:
     return found
 
 
+def _remember_empty(key: tuple[str, int, int] | None) -> None:
+    if key is not None:
+        _packed_cache_put_data(key, {})
+        _packed_memo_record(key, None, None)
+
+
+def _seeded_base_data(key: tuple[str, int, int] | None) -> dict[str, object] | None:
+    seeded = _PACKED_SEED.get(key) if key is not None else None
+    if key is None or seeded is None:
+        return None
+    _packed_cache_put_member(key, seeded[0])
+    data = _parse_packed_raw(seeded[1])
+    _packed_cache_put_data(key, data)
+    return dict(data)
+
+
 def packed_read_base_data(path: Path, *, base_marker_file: str) -> dict[str, object]:
     key = _packed_cache_key(path)
     if key is not None and key in _PACKED_BASE_DATA_CACHE:
         return dict(_PACKED_BASE_DATA_CACHE[key])
+    seeded_data = _seeded_base_data(key)
+    if seeded_data is not None:
+        return seeded_data
 
     member = _packed_member_for_meta(path, base_marker_file=base_marker_file)
     if not member:
-        if key is not None:
-            _packed_cache_put_data(key, {})
+        _remember_empty(key)
         return {}
     try:
         with tarfile.open(path, "r:gz") as tf:
@@ -100,10 +166,11 @@ def packed_read_base_data(path: Path, *, base_marker_file: str) -> dict[str, obj
                     _packed_cache_put_data(key, {})
                 return {}
             raw = file_obj.read().decode("utf-8", errors="replace")
-            data = yaml.safe_load(raw)
+            data = yaml_safe_load(raw)
             out = data if isinstance(data, dict) else {}
             if key is not None:
                 _packed_cache_put_data(key, out)
+                _packed_memo_record(key, member, raw)
             return dict(out)
     except (OSError, tarfile.TarError, UnicodeDecodeError, yaml.YAMLError):
         if key is not None:

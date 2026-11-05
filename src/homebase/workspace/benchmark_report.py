@@ -6,6 +6,8 @@ from typing import Sequence
 
 import yaml
 
+from ..core.yaml_io import yaml_safe_load
+
 
 def metric_groups() -> dict[str, list[str]]:
     return {
@@ -177,7 +179,7 @@ def load_runs(report_path: Path) -> list[dict[str, object]]:
     if not report_path.is_file():
         return []
     try:
-        raw = yaml.safe_load(report_path.read_text())
+        raw = yaml_safe_load(report_path.read_text())
     except (OSError, yaml.YAMLError):
         return []
     if not isinstance(raw, dict):

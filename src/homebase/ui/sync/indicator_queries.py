@@ -64,11 +64,31 @@ def _sqlite_recent_paths(query: dict[str, object], *, base_dir: Path) -> list[Pa
     return out
 
 
+# Pane query type -> pane source it matches ("" = tmux and herdr).
+OPEN_PANES_QUERIES = {"open_panes": "", "tmux_open_panes": "tmux", "herdr_open_panes": "herdr"}
+EDITOR_QUERIES = {
+    "editor_commands": "",
+    "tmux_editor_commands": "tmux",
+    "herdr_editor_commands": "herdr",
+}
+PANE_QUERY_TYPES = frozenset({*OPEN_PANES_QUERIES, *EDITOR_QUERIES})
+PATH_QUERY_TYPES = frozenset({*PANE_QUERY_TYPES, "sqlite_recent_paths"})
+
+
+def _panes_from(app: Any, source: str) -> dict[Path, list[Any]]:
+    out: dict[Path, list[Any]] = {}
+    for path, panes in app.open_panes_by_project.items():
+        kept = [p for p in panes if not source or getattr(p, "source", "tmux") == source]
+        if kept:
+            out[path] = kept
+    return out
+
+
 def evaluate_query_paths(app: Any, query: dict[str, object]) -> set[Path]:
     qtype = str(query.get("type", "")).strip()
-    if qtype == "tmux_open_panes":
-        return {p for p, n in app.open_pane_count_by_project.items() if int(n) > 0}
-    if qtype == "tmux_editor_commands":
+    if qtype in OPEN_PANES_QUERIES:
+        return set(_panes_from(app, OPEN_PANES_QUERIES[qtype]))
+    if qtype in EDITOR_QUERIES:
         raw_commands = query.get("commands", [])
         commands_iter = raw_commands if isinstance(raw_commands, (list, tuple, set)) else ()
         commands = {
@@ -77,7 +97,7 @@ def evaluate_query_paths(app: Any, query: dict[str, object]) -> set[Path]:
             if str(cmd).strip()
         }
         out: set[Path] = set()
-        for path, panes in app.open_panes_by_project.items():
+        for path, panes in _panes_from(app, EDITOR_QUERIES[qtype]).items():
             for pane in panes:
                 cmd = str(getattr(pane, "command", "")).strip().lower()
                 if cmd in commands:
@@ -118,7 +138,7 @@ def evaluate_query_match(app: Any, row: Any, query: dict[str, object]) -> bool:
             return False
         health_level = str(cached[0]).strip().lower()
         return health_level == level
-    if qtype in {"tmux_open_panes", "tmux_editor_commands", "sqlite_recent_paths"}:
+    if qtype in PATH_QUERY_TYPES:
         return row.path in evaluate_query_paths(app, query)
     return False
 

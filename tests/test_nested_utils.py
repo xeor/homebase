@@ -18,22 +18,6 @@ def _touch_marker(path: Path) -> None:
     (path / BASE_MARKER_FILE).write_text("\n")
 
 
-def _skip_never(_base: Path, _archive: Path, _cur: Path) -> bool:
-    return False
-
-
-def _prune_noop(_dirnames: list[str]) -> None:
-    return None
-
-
-def _skip_archive_root(base: Path, archive: Path, cur: Path) -> bool:
-    return cur == archive
-
-
-def _prune_dotdirs(dirnames: list[str]) -> None:
-    dirnames[:] = [d for d in dirnames if not d.startswith(".")]
-
-
 def _zone_depth_simple(base: Path, path: Path) -> tuple[str, int]:
     rel = path.resolve().relative_to(base.resolve())
     if rel.parts and rel.parts[0] == "_archive":
@@ -96,46 +80,6 @@ def test_cmd_utils_known_subcommand_delegates(tmp_path: Path) -> None:
     )
     assert rc == 7
     assert seen["base"] == tmp_path
-
-
-def test_scan_nested_project_paths_finds_nested_markers(tmp_path: Path) -> None:
-    base = tmp_path / "base"
-    base.mkdir()
-    _touch_marker(base)
-    _touch_marker(base / "grp" / "sub")
-    _touch_marker(base / "grp" / "sub" / "leaf")
-    _touch_marker(base / "_archive")
-
-    found = nested_utils.scan_nested_project_paths(
-        base,
-        archive_dir_name="_archive",
-        base_marker_file=BASE_MARKER_FILE,
-        discovery_should_skip_active_walk_path=_skip_archive_root,
-        discovery_prune_walk_dirnames=_prune_dotdirs,
-    )
-    names = {p.name for p in found}
-    assert "sub" in names
-    # walking stops at the first nested marker found in each branch
-    assert "leaf" not in names
-    assert base not in found
-    # archive root pruned by skip callback
-    assert (base / "_archive").resolve() not in found
-
-
-def test_scan_nested_project_paths_skips_top_level_markers(tmp_path: Path) -> None:
-    base = tmp_path / "base"
-    base.mkdir()
-    _touch_marker(base / "topA")
-    _touch_marker(base / "topB")
-    found = nested_utils.scan_nested_project_paths(
-        base,
-        archive_dir_name="_archive",
-        base_marker_file=BASE_MARKER_FILE,
-        discovery_should_skip_active_walk_path=_skip_never,
-        discovery_prune_walk_dirnames=_prune_noop,
-    )
-    # depth==1 entries are not "nested"
-    assert found == []
 
 
 def test_scan_nested_markers_all_categorises_entries(tmp_path: Path) -> None:

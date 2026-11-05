@@ -22,7 +22,7 @@ def build_dev_debug_tools(base_dir: Path) -> list[SetupDebugTool]:
             id="env_report",
             label="Environment report",
             description=(
-                "Python, platform, homebase version, tmux, pyobjc and "
+                "Python, platform, homebase version, tmux, herdr, pyobjc and "
                 "source-checkout detection. Cheap and always safe to run."
             ),
             run=lambda: _env_report(base_dir),
@@ -132,6 +132,19 @@ def _env_report(base_dir: Path) -> str:
         lines.append(f"tmux:             {_esc(out.strip()) if rc == 0 else '<version probe failed>'} ({_esc(tmux_bin)})")
     else:
         lines.append("tmux:             [bright_yellow]not on PATH[/]")
+
+    herdr_bin = shutil.which("herdr")
+    if herdr_bin:
+        rc, out = _run([herdr_bin, "--version"], base_dir, timeout=5.0)
+        version = _esc(out.strip()) if rc == 0 else "<version probe failed>"
+        from ..herdr.client import is_inside_herdr, socket_path
+
+        sock = socket_path()
+        server = f"server at {_esc(sock)}" if sock else "[bright_yellow]no server socket[/]"
+        inside = ", inside herdr" if is_inside_herdr() else ""
+        lines.append(f"herdr:            {version} ({_esc(herdr_bin)}), {server}{inside}")
+    else:
+        lines.append("herdr:            [dim]not on PATH[/]")
 
     try:
         from AppKit import NSRunningApplication  # noqa: F401

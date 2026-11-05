@@ -96,21 +96,14 @@ def _info_tab_lines(app: Any, color_accent_hex: str) -> list[str]:
     return _info_messages_lines(app, color_accent_hex)
 
 
-def _settings_tab_lines(
-    app: Any,
-    *,
-    global_info: Static,
-    global_reload_btn: Button,
-    global_edit_btn: Button,
-) -> list[str]:
-    if app.side_settings_tab not in {"table", "table_config", "open", "global"}:
-        return ["[dim]no settings view[/]"]
-    app._refresh_settings_table()
-    if app.side_settings_tab == "global":
-        global_info.update(app._global_config_status_text())
-        global_reload_btn.display = True
-        global_edit_btn.display = True
-    return [f"[dim]{app.side_settings_tab} settings active[/]"]
+def _settings_tab_lines(app: Any, *, general_info: Static) -> list[str]:
+    if app.side_settings_tab == "general":
+        general_info.update(app._settings_general_info_text())
+        return ["[dim]general settings active[/]"]
+    if app.side_settings_tab == "table":
+        app._refresh_settings_table()
+        return ["[dim]table settings active[/]"]
+    return ["[dim]no settings view[/]"]
 
 
 def _refresh_readme_tab(
@@ -319,16 +312,11 @@ def refresh_side(app: Any, *, base_dir: Path, color_accent_hex: str, level_warn:
     readme_edit_btn = app.query_one("#side_readme_edit", Button)
     notes_create_btn = app.query_one("#side_notes_create", Button)
     notes_open_btn = app.query_one("#side_notes_open", Button)
-    global_reload_btn = app.query_one("#side_global_config_reload", Button)
-    global_edit_btn = app.query_one("#side_global_config_edit", Button)
-    global_info = app.query_one("#side_global_info", Static)
     _hide_all_side_buttons(
         readme_create_btn,
         readme_edit_btn,
         notes_create_btn,
         notes_open_btn,
-        global_reload_btn,
-        global_edit_btn,
     )
     selected = app._selected_row()
     app._update_readme_tab_state()
@@ -336,12 +324,8 @@ def refresh_side(app: Any, *, base_dir: Path, color_accent_hex: str, level_warn:
     if app.side_main_tab == "info":
         lines = _info_tab_lines(app, color_accent_hex)
     elif app.side_main_tab == "settings":
-        lines = _settings_tab_lines(
-            app,
-            global_info=global_info,
-            global_reload_btn=global_reload_btn,
-            global_edit_btn=global_edit_btn,
-        )
+        general_info = app.query_one("#side_settings_general_info", Static)
+        lines = _settings_tab_lines(app, general_info=general_info)
     elif not selected:
         lines = ["[dim]no focused project[/]"]
     else:
@@ -478,14 +462,14 @@ def on_button_pressed(app: Any, event: Any) -> None:
         "side_readme_edit",
         "side_notes_create",
         "side_notes_open",
-        "side_global_config_reload",
-        "side_global_config_edit",
+        "side_config_editor_open",
+        "side_config_file_open",
     }:
         return
-    if button_id == "side_global_config_reload":
-        app._reload_global_config()
+    if button_id == "side_config_editor_open":
+        app._open_config_editor_modal()
         return
-    if button_id == "side_global_config_edit":
+    if button_id == "side_config_file_open":
         app._edit_global_config_and_reload()
         return
     if button_id in {"side_notes_create", "side_notes_open"}:

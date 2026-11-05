@@ -1,8 +1,10 @@
 """Tests for ``ui/sync/pane_probe`` helpers — the pure decision
 functions and the on-done state update. The threaded tmux probe
-itself is not exercised here (it'd require tmux on the test host)."""
+itself is not exercised here (it'd require tmux on the test host); the
+herdr source is, with the pane listing swapped for a fixed list."""
 from __future__ import annotations
 
+import threading
 from pathlib import Path
 
 from homebase.core.models import PaneRef
@@ -362,4 +364,83 @@ def test_start_probe_no_clear_when_no_tmux_and_already_empty(monkeypatch) -> Non
     app = _StartApp()
     pp.start_probe_open_panes(app)
     assert app.queued == []
+    assert app.pane_probe_next_due_at == 1060.0
+
+
+# ---- start_probe_open_panes (herdr source) --------------------------
+
+
+class _Row:
+    def __init__(self, path: Path) -> None:
+        self.path = path
+
+
+class _HerdrApp(_StartApp):
+    def __init__(self, rows: list[Path]) -> None:
+        super().__init__()
+        self.active_rows = [_Row(p) for p in rows]
+        self.archived_rows: list[_Row] = []
+        self.done: list[dict[Path, list[PaneRef]]] = []
+        self.failed = threading.Event()
+        self.finished = threading.Event()
+
+    def _current_rows(self) -> list[_Row]:
+        return list(self.active_rows)
+
+    def _pane_probe_project_scan_limit(self) -> int:
+        return 100
+
+    def call_from_thread(self, fn, *args) -> None:
+        fn(*args)
+
+    def _on_probe_open_panes_done(self, mapping: dict[Path, list[PaneRef]]) -> None:
+        self.done.append(mapping)
+        self.finished.set()
+
+    def _log(self, _msg: str, _level: str) -> None:
+        self.failed.set()
+        self.finished.set()
+
+
+def _herdr_pane(cwd: Path, pane_id: str = "w1:p1") -> PaneRef:
+    return PaneRef(
+        pane_id=pane_id, target="w1:1.1", window_name="ws", command="nvim",
+        cwd=cwd, active=False, source="herdr",
+    )
+
+
+def test_start_probe_maps_herdr_panes_without_tmux(monkeypatch, tmp_path: Path) -> None:
+    proj = tmp_path / "proj"
+    (proj / "sub").mkdir(parents=True)
+    other = tmp_path / "other"
+    other.mkdir()
+    monkeypatch.setattr(pp, "_tmux_target", lambda app: None)
+    monkeypatch.setattr(pp, "herdr_socket_path", lambda: tmp_path / "sock")
+    monkeypatch.setattr(
+        pp, "herdr_list_panes",
+        lambda: [_herdr_pane(proj / "sub"), _herdr_pane(other, "w1:p2")],
+    )
+    app = _HerdrApp([proj])
+    pp.start_probe_open_panes(app)
+    assert app.finished.wait(5)
+    [mapping] = app.done
+    [pane] = mapping[proj]
+    assert (pane.source, pane.cwd) == ("herdr", (proj / "sub").resolve())
+
+
+def test_start_probe_fails_when_every_source_fails(monkeypatch, tmp_path: Path) -> None:
+    proj = tmp_path / "proj"
+    proj.mkdir()
+
+    def broken() -> list[PaneRef]:
+        raise pp.HerdrError("down")
+
+    monkeypatch.setattr(pp, "_tmux_target", lambda app: None)
+    monkeypatch.setattr(pp, "herdr_socket_path", lambda: tmp_path / "sock")
+    monkeypatch.setattr(pp, "herdr_list_panes", broken)
+    monkeypatch.setattr(pp.time, "time", lambda: 1000.0)
+    app = _HerdrApp([proj])
+    pp.start_probe_open_panes(app)
+    assert app.finished.wait(5)
+    assert app.failed.is_set() and app.done == []
     assert app.pane_probe_next_due_at == 1060.0

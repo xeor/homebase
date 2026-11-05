@@ -9,7 +9,7 @@ from textual.containers import Vertical
 from textual.events import Key, Resize
 from textual.widgets import Static, Tab, Tabs
 
-from ...core.constants import ACTION_ACCEPT, ACTION_CANCEL
+from ...core.constants import ACTION_ACCEPT, ACTION_CANCEL, COLOR_ERROR_HEX
 from .base import LargeModalScreen
 from .listwin import compute_window, overflow_hint
 
@@ -206,7 +206,13 @@ class ActionPickerScreen(LargeModalScreen[str | None]):
             absolute_i = offset + i
             cursor = ">" if absolute_i == self.index else " "
             if self.active_tab == "favorites" and key in self._pending_remove:
-                label = f"[strike]{label}[/]"
+                # Strikethrough (SGR 9) is rendered subtly or not at all by
+                # many terminals, so pair it with an always-visible suffix
+                # so the pending-removal state is unmistakable.
+                label = (
+                    f"[strike dim]{label}[/]"
+                    f" [{COLOR_ERROR_HEX} bold](pending removal)[/]"
+                )
             lines.append(f"{cursor} {label}")
         hint = overflow_hint(len(visible), offset, len(window))
         if hint is not None:

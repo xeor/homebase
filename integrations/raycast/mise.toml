@@ -35,3 +35,8 @@ run = "npm run check"
 description = "Run the Raycast CLI (args after --)"
 depends = ["setup"]
 run = "npm run ray --"
+
+[tasks.install]
+description = "Install into Raycast: register (ray develop until its first build), then a production build"
+depends = ["setup"]
+run = "bash scripts/install.sh"

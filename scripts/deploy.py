@@ -31,6 +31,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 PYPROJECT = REPO_ROOT / "pyproject.toml"
 CHANGELOG = REPO_ROOT / "CHANGELOG.md"
 VERSION_RE = re.compile(r'(?m)^version = "(\d+)\.(\d+)\.(\d+)"$')
+BULLET_RE = re.compile(r"^\s*[-*] +\S")
 
 
 def run_lazygit() -> None:
@@ -101,10 +102,19 @@ def commit_log_since(tag: str) -> str:
     return result.stdout.strip()
 
 
+def extract_bullets(raw: str) -> str | None:
+    """Keep only markdown bullet lines, dropping any conversational
+    preamble/commentary the model adds (e.g. "Here's the entry body:").
+    Returns the bullets joined by newlines, or None if there are none."""
+    bullets = [line.rstrip() for line in raw.splitlines() if BULLET_RE.match(line)]
+    return "\n".join(bullets) if bullets else None
+
+
 def generate_changelog_body(new_version: str, commits: str) -> str | None:
     """Bullet-point body only — the `## version - date` heading is always
     built in ``write_changelog_entry`` so the format can't drift. Drafted
-    from the commits since the previous version tag; never em/en-dashes."""
+    from the commits since the previous version tag; never em/en-dashes.
+    Any non-bullet commentary the model emits is stripped."""
     if shutil.which("claude") is None:
         print("claude not found in PATH, skipping changelog body", file=sys.stderr)
         return None
@@ -112,12 +122,17 @@ def generate_changelog_body(new_version: str, commits: str) -> str | None:
         print("no commits since previous version, skipping changelog body", file=sys.stderr)
         return None
     prompt = (
-        f"Write the body of a terse CHANGELOG.md entry for homebase version {new_version}, "
-        "single-user personal tool, no marketing language. Summarize the commits "
-        "below into a few bullet points grouped by what changed (skip trivial/"
-        "internal commits). Output ONLY markdown bullet points (no heading, "
-        "no version/date line, nothing else). Use ASCII '-' only, never em-dash "
-        f"or en-dash.\n\nCommits:\n{commits}"
+        f"Summarize these git commits into the body of a terse CHANGELOG.md entry "
+        f"for homebase version {new_version} (single-user personal tool, no marketing "
+        "language). Group related commits into a few bullet points and skip trivial/"
+        "internal ones.\n\n"
+        "STRICT OUTPUT RULES:\n"
+        "- Output ONLY markdown bullet lines, each starting with '- '.\n"
+        "- No heading, no version/date line, no intro, no summary, no commentary.\n"
+        "- Do NOT describe what you found in the commits or how many there are.\n"
+        "- The first character of your output must be '-'.\n"
+        "- Use ASCII '-' only, never em-dash or en-dash.\n\n"
+        f"Commits:\n{commits}"
     )
     result = subprocess.run(
         ["claude", "-p", prompt],
@@ -129,7 +144,10 @@ def generate_changelog_body(new_version: str, commits: str) -> str | None:
     if result.returncode != 0 or not result.stdout.strip():
         print(f"claude changelog generation failed: {result.stderr.strip()}", file=sys.stderr)
         return None
-    return ascii_dashes(result.stdout.strip())
+    body = extract_bullets(ascii_dashes(result.stdout))
+    if body is None:
+        print("claude produced no bullet points, skipping changelog body", file=sys.stderr)
+    return body
 
 
 def write_changelog_entry(version: str, body: str | None) -> None:

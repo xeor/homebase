@@ -96,13 +96,6 @@ class PropertyDef:
         return False
 
 
-@dataclass(frozen=True)
-class PostCommandOption:
-    key: str
-    label: str
-    command: str
-
-
 @dataclass
 class ProjectRow:
     path: Path
@@ -152,6 +145,7 @@ class PaneRef:
     command: str
     cwd: Path
     active: bool
+    source: str = "tmux"  # "tmux" or "herdr"
 
 
 @dataclass(frozen=True)

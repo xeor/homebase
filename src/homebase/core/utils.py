@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import re
+import sqlite3
 import subprocess
 import time
 from datetime import datetime, tzinfo
 from pathlib import Path
 from typing import Callable
+
+import yaml
 
 # Defensive catch for textual widget property writes that can fail
 # transiently during teardown / re-mount.
@@ -17,6 +20,15 @@ HOOK_RUN_ERRORS = (
     RuntimeError,
     KeyError,
     AttributeError,
+)
+# Full workspace scan + cache write (TUI cache refresh, `b daemon`).
+CACHE_REFRESH_ERRORS = (
+    OSError,
+    ValueError,
+    TypeError,
+    sqlite3.Error,
+    yaml.YAMLError,
+    subprocess.SubprocessError,
 )
 
 
@@ -202,6 +214,21 @@ def fmt_age_short(ts: int, now_ts: int | None = None) -> str:
     return "-" + "".join(parts)
 
 
+def fmt_duration(seconds: float) -> str:
+    """Compact duration: 42s, 3m05s, 2h04m, 3d02h."""
+    total = max(0, int(seconds))
+    days, rem = divmod(total, 86400)
+    hours, rem = divmod(rem, 3600)
+    minutes, secs = divmod(rem, 60)
+    if days:
+        return f"{days}d{hours:02d}h"
+    if hours:
+        return f"{hours}h{minutes:02d}m"
+    if minutes:
+        return f"{minutes}m{secs:02d}s"
+    return f"{secs}s"
+
+
 def fmt_size_human(n: int) -> str:
     value = float(max(0, int(n)))
     units = ["B", "KB", "MB", "GB", "TB"]
@@ -259,12 +286,6 @@ def parse_archive_timestamp(value: str, archive_tz: tzinfo) -> int:
     return 0
 
 
-def archive_year_from_name(name: str) -> str | None:
-    if len(name) >= 4 and name[:4].isdigit():
-        return name[:4]
-    return None
-
-
 # Match a leading YYYY-MM-DD followed by one or more separators
 # (``_``, whitespace, ``-``, ``.``). The rest is optional so a bare
 # date with no stem still matches. Mirrors ``date_detect._DATE_PREFIX_RE``
@@ -272,19 +293,6 @@ def archive_year_from_name(name: str) -> str | None:
 _DATE_PREFIX_PATTERN = re.compile(
     r"^(\d{4})-(\d{2})-(\d{2})(?:[_\s\-.]+(.*))?$", re.DOTALL,
 )
-
-
-def normalize_date_prefix(name: str) -> str:
-    m = _DATE_PREFIX_PATTERN.match(name)
-    if not m:
-        return name
-    year, month, day, rest = m.groups()
-    if month == "00":
-        month = "01"
-    if day == "00":
-        day = "01"
-    suffix = f"_{rest}" if rest else ""
-    return f"{year}-{month}-{day}{suffix}"
 
 
 def split_archive_name(name: str, parse_timestamp: Callable[[str], int]) -> tuple[str, int]:

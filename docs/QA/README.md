@@ -25,22 +25,22 @@ docs/QA/
 
 ## Status snapshot
 
-Last run: `2026-06-24` · source: 225 files / 53k LOC · tests: 187 files / ~38k LOC
+Last run: `2026-10-26` · source: 248 files / 58k LOC · tests: 213 files / ~41k LOC
 
 | Tool          | Metric                          | Baseline     | Target        | Status   |
 |---------------|---------------------------------|--------------|---------------|----------|
-| pytest        | tests passing                   | 2243/2243    | all           | green    |
+| pytest        | tests passing                   | 2454/2454    | all           | green    |
 | ruff          | lint findings                   | 0            | 0             | green    |
 | mypy          | errors / files affected         | 0 / 0        | 0 / 0         | green    |
-| pytest-cov    | branch coverage                 | 66.4 %       | 75 %          | baseline |
+| pytest-cov    | branch coverage                 | 69.2 %       | 75 %          | baseline |
 | import-linter | contract violations             | 0            | 0             | green    |
 | vulture       | findings (min-confidence 80)    | 0            | 0             | green    |
-| vulture       | findings (min-confidence 60)    | ~291 lns     | review        | baseline |
+| vulture       | findings (min-confidence 60)    | ~280 lns     | review        | baseline |
 | bandit        | High / Medium / Low             | 0 / 0 / 0    | 0 / 0 / < 20  | green    |
-| radon (cc)    | avg complexity                  | C (14.48)    | B (≤ 10)      | baseline |
-| radon (cc)    | functions ranked C or worse     | 180          | 0             | baseline |
-| radon (mi)    | files at maintainability ≤ C    | 15           | 0             | baseline |
-| benchmark     | latest score / warm / cold      | 168.7 / 170.8 / 163.7 | ↑ over time | tracked  |
+| radon (cc)    | avg complexity                  | C (14.43)    | B (≤ 10)      | baseline |
+| radon (cc)    | functions ranked C or worse     | 175          | 0             | baseline |
+| radon (mi)    | files at maintainability ≤ C    | 14           | 0             | baseline |
+| benchmark     | latest score / warm / cold      | 210.7 / 209.1 / 214.4 | ↑ over time | tracked  |
 
 Tracked-over-time tools (graphs below): `mypy`, `coverage`,
 `import-linter`, `bandit`, `radon-cc`, `benchmark`.

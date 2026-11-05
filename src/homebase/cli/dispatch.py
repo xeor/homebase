@@ -139,6 +139,8 @@ def _raycast_dispatch_args(ns: Any) -> tuple[str, str, str] | None:
             str(getattr(obj, "project", "") or ""),
             str(getattr(obj, "action_id", "") or ""),
         ),
+        "opened": lambda obj: ("opened", str(getattr(obj, "project", "") or ""), ""),
+        "snapshot": lambda obj: ("snapshot", "", ""),
     }
     builder = builders.get(subcommand)
     return None if builder is None else builder(ns)
@@ -321,6 +323,11 @@ def _build_dispatch_table(
         "recent": lambda: handlers["cmd_recent"](base_dir),
         "setup": lambda: _dispatch_setup(ns, base_dir, bin_dir, handlers["cmd_setup"]),
         "cache": lambda: _dispatch_cache(ns, handlers["cmd_cache_warm"]),
+        "daemon": lambda: handlers["cmd_daemon"](
+            base_dir,
+            once=bool(getattr(ns, "once", False)),
+            plain=bool(getattr(ns, "plain", False)),
+        ),
         "tags": lambda: _dispatch_tags(
             ns, base_dir, handlers["cmd_tags_sync"], handlers["cmd_tags_ls"]
         ),
@@ -378,6 +385,7 @@ def dispatch_command(
     cmd_help: Callable[[Any], int],
     cmd_setup: Callable[..., int],
     cmd_cache_warm: Callable[[], int],
+    cmd_daemon: Callable[..., int],
     cmd_tags_sync: Callable[[Path, bool, bool], int],
     cmd_tags_ls: Callable[[Path], int],
     cmd_hooks_refresh: Callable[..., int],
@@ -414,6 +422,7 @@ def dispatch_command(
         "cmd_help": cmd_help,
         "cmd_setup": cmd_setup,
         "cmd_cache_warm": cmd_cache_warm,
+        "cmd_daemon": cmd_daemon,
         "cmd_tags_sync": cmd_tags_sync,
         "cmd_tags_ls": cmd_tags_ls,
         "cmd_hooks_refresh": cmd_hooks_refresh,

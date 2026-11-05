@@ -12,79 +12,6 @@ from ...core.models import ProjectRow
 
 _VAR_RE = re.compile(r"\{\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}\}")
 
-PER_ROW_VARS: set[str] = {
-    "path",
-    "path_q",
-    "rel_path",
-    "rel_path_q",
-    "name",
-    "name_q",
-    "parent_path",
-    "parent_path_q",
-    "branch",
-    "branch_q",
-    "dirty",
-    "description",
-    "description_q",
-    "tags",
-    "tags_space",
-    "tags_space_q",
-    "properties",
-    "suffix",
-    "wip",
-    "archived",
-    "packed",
-    "created",
-    "created_iso",
-    "created_ts",
-    "modified",
-    "modified_iso",
-    "modified_ts",
-    "active",
-    "active_iso",
-    "active_ts",
-    "archived_at",
-    "archived_at_iso",
-    "archived_at_ts",
-    "size_bytes",
-    "size_human",
-    "note_path",
-    "note_path_q",
-}
-
-LIST_VARS: set[str] = {
-    "paths",
-    "paths_q",
-    "rel_paths",
-    "rel_paths_q",
-    "names",
-    "names_q",
-}
-
-FILEPICKER_VARS: set[str] = {"selection", "selection_q"}
-
-ALWAYS_VARS: set[str] = {
-    "base_dir",
-    "base_dir_q",
-    "base_name",
-    "archive_dir",
-    "archive_dir_q",
-    "active_count",
-    "archive_count",
-    "wip_count",
-    "count",
-    "view",
-    "filter",
-    "filter_q",
-    "now",
-    "now_iso",
-    "now_ts",
-    "today",
-    "user",
-    "home",
-    "home_q",
-}
-
 
 def _quote(value: str) -> str:
     return shlex.quote(str(value))
@@ -256,13 +183,3 @@ def render_template(text: str, *contexts: dict[str, str]) -> str:
         merged.update({key: str(value) for key, value in ctx.items()})
     converted = _VAR_RE.sub(lambda m: "${" + m.group(1) + "}", text)
     return Template(converted).safe_substitute(merged)
-
-
-def validate_template(text: str, allowed: set[str]) -> list[str]:
-    messages: list[str] = []
-    for var in _VAR_RE.findall(str(text)):
-        if var not in allowed:
-            messages.append(f"unknown template variable: {var}")
-        elif not var.endswith("_q"):
-            messages.append(f"warning: unquoted template variable in command: {var}")
-    return messages

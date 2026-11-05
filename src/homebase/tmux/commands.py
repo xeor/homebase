@@ -10,6 +10,8 @@ from typing import Any, Callable
 
 import yaml
 
+from ..core.yaml_io import yaml_safe_load
+
 
 def list_window_ids(*, tmux: Callable[..., str]) -> set[str]:
     out = tmux("list-windows", "-F", "#{window_id}")
@@ -273,7 +275,7 @@ def cmd_tmux_load(
     if not os.getenv("TMUX"):
         print("not inside a tmux session", file=sys.stderr)
         return 1
-    data = yaml.safe_load(profile.read_text())
+    data = yaml_safe_load(profile.read_text())
     windows = data.get("windows", []) if isinstance(data, dict) else []
     if len(windows) != 1:
         print(".tmuxp.yaml must contain exactly one window", file=sys.stderr)

@@ -28,6 +28,7 @@ def test_builtin_actions_include_all_legacy_ids() -> None:
         "full_reconcile",
         "reconcile_all_cache",
         "edit_global_config",
+        "open_config_editor",
         "reload_global_config",
         "hooks_refresh",
         "hooks_refresh_view",

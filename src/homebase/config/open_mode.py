@@ -52,3 +52,12 @@ def save_open_mode_config(
         serialized["tmux_session"] = tmux_session
     out["open_mode"] = serialized
     return out
+
+
+def apply_open_mode_override(conf: dict[str, str], override: str) -> dict[str, str]:
+    """`b --open-mode <profile>`: this run uses ``override`` instead of the
+    configured profile; the config itself is unchanged."""
+    out = dict(conf)
+    if override:
+        out["profile"] = override
+    return out

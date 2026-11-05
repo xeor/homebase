@@ -6,6 +6,7 @@ from re import Pattern
 import yaml
 
 from ..core.constants import GLOBAL_CONFIG_FILE_NAME, HOMEBASE_DIR_NAME
+from ..core.yaml_io import yaml_safe_load
 
 _GLOBAL_CONFIG_BASE: Path | None = None
 _GLOBAL_CONFIG_DATA: dict[str, object] | None = None
@@ -41,7 +42,7 @@ def load_global_config_dict(base_dir: Path) -> dict[str, object]:
         return {}
 
     try:
-        raw = yaml.safe_load(config.read_text())
+        raw = yaml_safe_load(config.read_text())
     except (OSError, yaml.YAMLError, TypeError, ValueError):
         _GLOBAL_CONFIG_BASE = base_res
         _GLOBAL_CONFIG_DATA = {}

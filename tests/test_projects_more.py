@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import subprocess
 from pathlib import Path
 
 import pytest
@@ -14,7 +13,6 @@ from homebase.workspace.projects import (
     _resolve_git_dirs,
     _resolve_head_ref_text,
     _resolve_repo_path,
-    create_project,
 )
 
 
@@ -159,104 +157,3 @@ def test_porcelain_dirty_returns_question_on_oserror(
 
     monkeypatch.setattr(projects_mod.core_utils, "run_out", boom)
     assert _porcelain_dirty(tmp_path) == "?"
-
-
-def test_create_project_runs_plain_scaffold(tmp_path: Path) -> None:
-    base = tmp_path / "base"
-    base.mkdir()
-    template = base / ".copier" / "tpl"
-    template.mkdir(parents=True)
-    (template / "hello.txt").write_text("hi")
-    target = create_project(
-        base,
-        "demo",
-        add_date_prefix=False,
-        add_tmp_suffix=False,
-        copier_template="tpl",
-    )
-    assert target.is_dir()
-    assert (target / "hello.txt").read_text() == "hi"
-    assert (target / ".base.yaml").is_file()
-
-
-def test_create_project_missing_template_raises_and_cleans_up(tmp_path: Path) -> None:
-    base = tmp_path / "base"
-    base.mkdir()
-    with pytest.raises(ValueError, match="template not found"):
-        create_project(
-            base,
-            "demo",
-            add_date_prefix=False,
-            add_tmp_suffix=False,
-            copier_template="nope",
-        )
-    assert not (base / "demo").exists()
-
-
-def test_create_project_copier_missing_binary_raises_and_cleans_up(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    base = tmp_path / "base"
-    base.mkdir()
-    template = base / ".copier" / "tpl"
-    template.mkdir(parents=True)
-    (template / "copier.yml").write_text("_subdirectory: .\n")
-    monkeypatch.setattr(projects_mod.shutil, "which", lambda _n: None)
-    with pytest.raises(ValueError, match="copier is not installed"):
-        create_project(
-            base,
-            "demo",
-            add_date_prefix=False,
-            add_tmp_suffix=False,
-            copier_template="tpl",
-        )
-    assert not (base / "demo").exists()
-
-
-def test_create_project_copier_failure_raises_and_cleans_up(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    base = tmp_path / "base"
-    base.mkdir()
-    template = base / ".copier" / "tpl"
-    template.mkdir(parents=True)
-    (template / "copier.yaml").write_text("_subdirectory: .\n")
-    monkeypatch.setattr(projects_mod.shutil, "which", lambda _n: "/usr/local/bin/copier")
-
-    def fake_run(cmd, **_kw):
-        raise subprocess.CalledProcessError(returncode=2, cmd=cmd)
-
-    monkeypatch.setattr(projects_mod.subprocess, "run", fake_run)
-    with pytest.raises(ValueError, match="copier failed"):
-        create_project(
-            base,
-            "demo",
-            add_date_prefix=False,
-            add_tmp_suffix=False,
-            copier_template="tpl",
-        )
-    assert not (base / "demo").exists()
-
-
-def test_create_project_plain_scaffold_failure_cleans_up(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    base = tmp_path / "base"
-    base.mkdir()
-    template = base / ".copier" / "tpl"
-    template.mkdir(parents=True)
-    (template / "hello.txt").write_text("hi")
-
-    def fake_scaffold(_src: Path, _dst: Path) -> None:
-        raise OSError("disk full")
-
-    monkeypatch.setattr(projects_mod, "scaffold_template_directory", fake_scaffold)
-    with pytest.raises(OSError, match="disk full"):
-        create_project(
-            base,
-            "demo",
-            add_date_prefix=False,
-            add_tmp_suffix=False,
-            copier_template="tpl",
-        )
-    assert not (base / "demo").exists()

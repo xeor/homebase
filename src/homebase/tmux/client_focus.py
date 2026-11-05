@@ -2,11 +2,19 @@ from __future__ import annotations
 
 import subprocess
 import sys
+import threading
 from pathlib import Path
-from typing import Callable
+from typing import Any, Callable
 
 from ..core import debug_timers
+from ..core.constants import TMUX_FOCUS_METHOD_AUTO
 from ..core.debug_timers import timed_step
+
+
+def _configured_focus_method(base_dir: Path) -> str:
+    from ..config import prefs
+
+    return prefs.load_tmux_focus_method(base_dir)
 
 
 def focus_tmux_client_app(tmux: Callable[..., str], base_dir: Path) -> None:
@@ -27,12 +35,22 @@ def focus_tmux_client_app(tmux: Callable[..., str], base_dir: Path) -> None:
         info["chain"] = [command for _pid, command in ancestry]
 
     app = _macos_app_for_ancestry(ancestry)
+    method = _configured_focus_method(base_dir)
+    if method == TMUX_FOCUS_METHOD_AUTO:
+        _focus_auto(base_dir, app, ancestry)
+    else:
+        _focus_forced(base_dir, method, app, ancestry)
 
+
+def _focus_auto(
+    base_dir: Path,
+    app: tuple[int, Path] | None,
+    ancestry: list[tuple[int, str]],
+) -> None:
+    """Built-in waterfall: AppKit (fastest, optional pyobjc) -> osascript
+    activate -> System Events. The first that reports success wins."""
     if app is not None:
         app_pid, app_bundle = app
-        # AppKit activation (pyobjc) has no subprocess/AppleScript-compile
-        # overhead and is the fastest working path, but it's an optional
-        # dependency — falls through to osascript when unavailable.
         with timed_step(base_dir, "tmux_focus.activate_via_appkit", pid=app_pid) as info:
             activated = _activate_via_appkit(app_pid)
             info["ok"] = activated
@@ -54,10 +72,43 @@ def focus_tmux_client_app(tmux: Callable[..., str], base_dir: Path) -> None:
                     info["ok"] = _wait_until_frontmost(app_pid)
             return
 
+    app_name = app[1].stem if app is not None else None
     with timed_step(base_dir, "tmux_focus.activate_via_system_events") as info:
-        info["ok"] = _focus_macos_app_processes(
-            [candidate_pid for candidate_pid, _ in ancestry]
+        ok, method, _detail = system_events_set_frontmost(
+            app_name, [candidate_pid for candidate_pid, _ in ancestry]
         )
+        info["ok"] = ok
+        info["method"] = method
+
+
+def _focus_forced(
+    base_dir: Path,
+    method: str,
+    app: tuple[int, Path] | None,
+    ancestry: list[tuple[int, str]],
+) -> None:
+    """Run only the backend the user pinned via `tmux_focus.method`. No
+    fallback: enforcing a backend means failures stay visible (in debug
+    timers) rather than being masked by a different path."""
+    app_pid = app[0] if app is not None else None
+    app_bundle = app[1] if app is not None else None
+    app_name = app[1].stem if app is not None else None
+    pids = [candidate_pid for candidate_pid, _ in ancestry]
+    if method == "appkit":
+        with timed_step(base_dir, "tmux_focus.activate_via_appkit", forced=True) as info:
+            info["ok"] = _activate_via_appkit(app_pid) if app_pid is not None else False
+    elif method == "osascript":
+        with timed_step(
+            base_dir, "tmux_focus.activate_by_bundle", forced=True
+        ) as info:
+            info["ok"] = _open_macos_app(app_bundle) if app_bundle is not None else False
+    elif method == "system_events":
+        with timed_step(
+            base_dir, "tmux_focus.activate_via_system_events", forced=True
+        ) as info:
+            ok, used, _detail = system_events_set_frontmost(app_name, pids)
+            info["ok"] = ok
+            info["method"] = used
 
 
 def process_ancestry(pid: int) -> list[tuple[int, str]]:
@@ -191,11 +242,90 @@ def _wait_until_frontmost(pid: int, timeout: float = 3.0) -> bool:
     return proc.returncode == 0 and proc.stdout.strip().lower() == "true"
 
 
-def _focus_macos_app_processes(pids: list[int]) -> bool:
-    if not pids:
+# Compiled NSAppleScript objects keyed by source. Compiling (~130ms) and
+# the first OSA execute ever in the process (~0.5-1s, incl. launching
+# System Events) are the expensive parts; `b open` targets the same
+# terminal repeatedly, so the cache turns every later call into a pure
+# ~25ms execute. `warm_up_focus_backend` pays both costs ahead of time.
+_COMPILED_APPLESCRIPTS: dict[str, object] = {}
+
+# Serializes all NSAppleScript access. NSAppleScript objects are not
+# thread-safe; the background warm-up (worker thread) and the live focus
+# call (TUI main thread) can otherwise race on the shared cache and the
+# process-wide Open Scripting subsystem.
+_OSA_LOCK = threading.RLock()
+
+# No-op System Events ping run by the warm-up: a trivial property fetch
+# that initializes Open Scripting and resets System Events' idle timer so
+# the daemon stays running, without enumerating the process/AX tree (that
+# would cost ~150ms; this is sub-millisecond once warm).
+_WARMUP_SCRIPT = 'tell application "System Events" to return (name is not "")'
+
+
+def _foundation_available() -> bool:
+    try:
+        import Foundation  # noqa: F401
+    except ImportError:
         return False
+    return True
+
+
+def _get_or_compile_locked(source: str) -> Any:
+    """Return the cached compiled script for ``source``, compiling (the
+    ~130ms parse step, no execute) on first use. Caller must hold
+    ``_OSA_LOCK``."""
+    from Foundation import NSAppleScript
+
+    script = _COMPILED_APPLESCRIPTS.get(source)
+    if script is None:
+        script = NSAppleScript.alloc().initWithSource_(source)
+        script.compileAndReturnError_(None)
+        _COMPILED_APPLESCRIPTS[source] = script
+    return script
+
+
+def precompile_focus_scripts(app_name: str | None) -> None:
+    """Compile and cache the script the live focus call will execute, so
+    that call only pays the execute. No-op without an app name (the
+    unix-id fallback varies per attach and is compiled lazily)."""
+    if not app_name:
+        return
+    with _OSA_LOCK:
+        _get_or_compile_locked(_frontmost_by_name_script(app_name))
+
+
+def warm_up_focus_backend(app_name: str | None = None) -> tuple[bool, str]:
+    """Prepare the System Events backend off the hot path: precompile the
+    by-name script and run a no-op query so Open Scripting is initialized
+    and System Events is already running. The first real focus otherwise
+    pays ~0.5-1s for this. Idempotent, cheap once warm, and safe to call
+    from a background thread."""
+    if sys.platform != "darwin":
+        return False, "not darwin"
+    if not _foundation_available():
+        return False, "pyobjc Foundation unavailable"
+    precompile_focus_scripts(app_name)
+    return _run_applescript_in_process(_WARMUP_SCRIPT)
+
+
+def _applescript_escape(text: str) -> str:
+    return text.replace("\\", "\\\\").replace('"', '\\"')
+
+
+def _frontmost_by_name_script(name: str) -> str:
+    """Target the app by process name — a single lookup, versus the
+    full-process AX scan that ``whose unix id is`` forces System Events
+    to do."""
+    return (
+        'tell application "System Events" to set frontmost of '
+        f'(first process whose name is "{_applescript_escape(name)}") to true\n'
+        "return true"
+    )
+
+
+def _frontmost_by_unix_id_script(pids: list[int]) -> str:
     pid_list = ", ".join(str(pid) for pid in pids)
-    script = (
+    return (
         f"set candidatePids to {{{pid_list}}}\n"
         'tell application "System Events"\n'
         "  repeat with candidatePid in candidatePids\n"
@@ -209,9 +339,31 @@ def _focus_macos_app_processes(pids: list[int]) -> bool:
         "end tell\n"
         "return false"
     )
+
+
+def _run_applescript_in_process(source: str) -> tuple[bool, str]:
+    """Execute AppleScript via a cached, precompiled ``NSAppleScript`` —
+    no subprocess, compiled once per distinct source. Serialized by
+    ``_OSA_LOCK`` so the live call and the background warm-up never race.
+    Both focus scripts return a boolean, so ``(ok, detail)`` reflects the
+    script result, not merely "did it run"."""
+    with _OSA_LOCK:
+        script = _get_or_compile_locked(source)
+        result, error = script.executeAndReturnError_(None)
+    if result is None:
+        if error is None:
+            return False, "AppleScript failed (no result, no error info)"
+        message = error.objectForKey_("NSAppleScriptErrorMessage")
+        return False, str(message) if message else str(error)
+    return bool(result.booleanValue()), ""
+
+
+def _osascript_unix_id_focus(pids: list[int]) -> tuple[bool, str]:
+    if not pids:
+        return False, "no candidate pids"
     try:
         proc = subprocess.run(
-            ["osascript", "-e", script],
+            ["osascript", "-e", _frontmost_by_unix_id_script(pids)],
             text=True,
             encoding="utf-8",
             errors="replace",
@@ -219,6 +371,34 @@ def _focus_macos_app_processes(pids: list[int]) -> bool:
             check=False,
             timeout=1.0,
         )
-    except (OSError, subprocess.TimeoutExpired):
-        return False
-    return proc.returncode == 0 and proc.stdout.strip().lower() == "true"
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return False, f"{type(exc).__name__}: {exc}"
+    ok = proc.returncode == 0 and proc.stdout.strip().lower() == "true"
+    return ok, proc.stderr.strip()
+
+
+def system_events_set_frontmost(
+    app_name: str | None, pids: list[int]
+) -> tuple[bool, str, str]:
+    """Bring the target terminal frontmost via System Events — the
+    Accessibility proxy that is exempt from focus-stealing prevention,
+    which is why this works where Cocoa/`activate` are silently ignored.
+
+    Returns ``(ok, method, detail)``. Order, fastest first: in-process
+    ``NSAppleScript`` targeting the app by process name, then in-process
+    unix-id matching, then an ``osascript`` subprocess when pyobjc is
+    unavailable. The in-process paths must run on the main thread."""
+    if not _foundation_available():
+        ok, detail = _osascript_unix_id_focus(pids)
+        return ok, "osascript:unix_id", detail
+
+    detail = "no target: neither app name nor candidate pids"
+    if app_name:
+        ok, detail = _run_applescript_in_process(_frontmost_by_name_script(app_name))
+        if ok:
+            return True, "nsapplescript:name", detail
+    if pids:
+        ok, detail = _run_applescript_in_process(_frontmost_by_unix_id_script(pids))
+        if ok:
+            return True, "nsapplescript:unix_id", detail
+    return False, "nsapplescript", detail

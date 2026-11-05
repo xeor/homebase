@@ -27,14 +27,6 @@ def cache_db_path(base_dir: Path) -> Path:
     return cache_store.cache_db_path(base_dir)
 
 
-def _cache_connect(base_dir: Path) -> sqlite3.Connection:
-    return cache_store.cache_connect(base_dir)
-
-
-def _cache_init(conn: sqlite3.Connection) -> None:
-    cache_store.cache_init(conn, cache_schema_version=CACHE_SCHEMA_VERSION)
-
-
 def cache_load_rows(
     base_dir: Path,
     max_age_s: int = CACHE_MAX_AGE_S,
@@ -146,6 +138,47 @@ def cache_store_rows(
         cache_schema_version=CACHE_SCHEMA_VERSION,
         payload_rows=payload_rows,
     )
+
+
+def cache_store_rows_merged(
+    base_dir: Path,
+    active_rows: list[ProjectRow],
+    archived_rows: list[ProjectRow],
+    *,
+    scan_started_ts: int,
+) -> int:
+    now_ts = int(time.time())
+    payload_rows = [_cache_row_payload(row, now_ts) for row in (active_rows + archived_rows)]
+    return cache_store.cache_store_rows_merged(
+        base_dir,
+        cache_schema_version=CACHE_SCHEMA_VERSION,
+        payload_rows=payload_rows,
+        scan_started_ts=scan_started_ts,
+    )
+
+
+def cache_full_scan_ts(base_dir: Path) -> int:
+    """Set only by the cache owner's full rescans (cache_store_rows_merged).
+    Unlike last_refresh_ts it is not touched by single-row writes."""
+    return cache_store.cache_read_meta_int(base_dir, "full_scan_ts")
+
+
+def cache_load_packed_meta(base_dir: Path) -> list[cache_store.PackedMetaEntry]:
+    return cache_store.cache_load_packed_meta(
+        base_dir, cache_schema_version=CACHE_SCHEMA_VERSION
+    )
+
+
+def cache_save_packed_meta(
+    base_dir: Path, entries: list[cache_store.PackedMetaEntry]
+) -> None:
+    cache_store.cache_save_packed_meta(
+        base_dir, cache_schema_version=CACHE_SCHEMA_VERSION, entries=entries
+    )
+
+
+def cache_last_refresh_ts(base_dir: Path) -> int:
+    return cache_store.cache_read_meta_int(base_dir, "last_refresh_ts")
 
 
 def _cache_row_payload(row: ProjectRow, cached_at: int) -> tuple[object, ...]:

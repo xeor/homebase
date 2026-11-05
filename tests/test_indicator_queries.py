@@ -18,8 +18,9 @@ class _Row:
 
 
 class _Pane:
-    def __init__(self, command: str) -> None:
+    def __init__(self, command: str, source: str = "tmux") -> None:
         self.command = command
+        self.source = source
 
 
 class _App:
@@ -35,14 +36,30 @@ class _App:
 # ---- evaluate_query_paths -------------------------------------------
 
 
-def test_evaluate_query_paths_tmux_open_panes_filters_zero_counts(tmp_path: Path) -> None:
+def test_evaluate_query_paths_open_panes_by_source(tmp_path: Path) -> None:
     app = _App(base_dir=tmp_path)
     a = tmp_path / "a"
     b = tmp_path / "b"
     c = tmp_path / "c"
-    app.open_pane_count_by_project = {a: 2, b: 0, c: 1}
-    out = iq.evaluate_query_paths(app, {"type": "tmux_open_panes"})
-    assert out == {a, c}
+    app.open_panes_by_project = {
+        a: [_Pane("zsh"), _Pane("fish", "herdr")],
+        b: [],
+        c: [_Pane("fish", "herdr")],
+    }
+    assert iq.evaluate_query_paths(app, {"type": "open_panes"}) == {a, c}
+    assert iq.evaluate_query_paths(app, {"type": "tmux_open_panes"}) == {a}
+    assert iq.evaluate_query_paths(app, {"type": "herdr_open_panes"}) == {a, c}
+
+
+def test_evaluate_query_paths_editor_commands_by_source(tmp_path: Path) -> None:
+    app = _App(base_dir=tmp_path)
+    a = tmp_path / "a"
+    b = tmp_path / "b"
+    app.open_panes_by_project = {a: [_Pane("nvim")], b: [_Pane("nvim", "herdr")]}
+    query = {"commands": ["nvim"]}
+    assert iq.evaluate_query_paths(app, {**query, "type": "editor_commands"}) == {a, b}
+    assert iq.evaluate_query_paths(app, {**query, "type": "tmux_editor_commands"}) == {a}
+    assert iq.evaluate_query_paths(app, {**query, "type": "herdr_editor_commands"}) == {b}
 
 
 def test_evaluate_query_paths_tmux_open_panes_empty_when_no_panes(tmp_path: Path) -> None:
@@ -305,17 +322,18 @@ def test_evaluate_query_match_unknown_type(tmp_path: Path) -> None:
 
 
 def test_evaluate_query_match_delegates_path_types(tmp_path: Path) -> None:
-    """``tmux_open_panes`` / ``tmux_editor_commands`` /
+    """Pane query types and
     ``sqlite_recent_paths`` all reuse ``evaluate_query_paths`` —
     a row matches iff its path is in the returned set."""
     app = _App(base_dir=tmp_path)
     p = tmp_path / "p"
-    app.open_pane_count_by_project = {p: 1}
+    app.open_panes_by_project = {p: [_Pane("zsh")]}
     row_in = _Row(p)
     row_out = _Row(tmp_path / "other")
-    q = {"type": "tmux_open_panes"}
-    assert iq.evaluate_query_match(app, row_in, q) is True
-    assert iq.evaluate_query_match(app, row_out, q) is False
+    for qtype in ("tmux_open_panes", "open_panes"):
+        q = {"type": qtype}
+        assert iq.evaluate_query_match(app, row_in, q) is True
+        assert iq.evaluate_query_match(app, row_out, q) is False
 
 
 # ---- cache_due ------------------------------------------------------

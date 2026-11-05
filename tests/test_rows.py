@@ -67,3 +67,25 @@ def test_archived_restore_target_strips_prefix_with_zero_segments() -> None:
     archived_entry = base_dir / ARCHIVE_DIR_NAME / "2003" / "2003-00-00_ghost"
     target = rows.archived_restore_target(base_dir, archived_entry)
     assert target == base_dir / "ghost"
+
+
+def test_packed_meta_memo_persists_and_seeds_once(tmp_path: Path) -> None:
+    from homebase.cache.api import cache_load_packed_meta, cache_save_packed_meta
+    from homebase.core import packed_meta
+    from homebase.workspace import rows as rows_mod
+
+    packed_meta._PACKED_NEW.clear()
+    packed_meta._PACKED_SEED.clear()
+    rows_mod._PACKED_MEMO_SEEDED.discard(tmp_path)
+    packed_meta._packed_memo_record(("/x.tgz", 1, 2), "x/.base.yaml", "tags: []\n")
+    rows_mod._persist_packed_meta(tmp_path)
+    assert cache_load_packed_meta(tmp_path) == [("/x.tgz", 1, 2, "x/.base.yaml", "tags: []\n")]
+    rows_mod._persist_packed_meta(tmp_path)  # nothing new: no-op
+
+    rows_mod._seed_packed_meta(tmp_path)
+    assert packed_meta._PACKED_SEED == {("/x.tgz", 1, 2): ("x/.base.yaml", "tags: []\n")}
+    # Seeded once per process.
+    cache_save_packed_meta(tmp_path, [("/y.tgz", 1, 2, None, None)])
+    rows_mod._seed_packed_meta(tmp_path)
+    assert ("/y.tgz", 1, 2) not in packed_meta._PACKED_SEED
+    packed_meta._PACKED_SEED.clear()

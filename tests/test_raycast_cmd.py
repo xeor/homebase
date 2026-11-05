@@ -157,7 +157,12 @@ def test_cmd_projects_filters_and_includes_actions(tmp_path: Path, capsys) -> No
 
     assert rc == 0
     assert json.loads(capsys.readouterr().out) == [
-        {"project": "alpha", "actions": [{"id": "open_gui", "title": "Open GUI"}]},
+        {
+            "project": "alpha",
+            "path": str(tmp_path / "alpha"),
+            "tags": ["work"],
+            "actions": [{"id": "open_gui", "title": "Open GUI"}],
+        },
     ]
 
 
@@ -210,6 +215,8 @@ def test_cmd_projects_includes_configured_secondary_info(
     assert payload == [
         {
             "project": "alpha",
+            "path": str(tmp_path / "alpha"),
+            "tags": ["work", "api"],
             "actions": [],
             "subtitle": "2 hours ago | work api",
             "keywords": ["2 hours ago", "work api", "work", "api"],
@@ -421,3 +428,26 @@ def test_cmd_run_rejects_disabled_action(tmp_path: Path, capsys) -> None:
 
     assert rc == 2
     assert "unsupported or disabled action" in capsys.readouterr().err
+
+
+def test_cmd_opened_records_opened_ts(tmp_path: Path, capsys) -> None:
+    seen: list[tuple[Path, Path, int]] = []
+    before = int(time.time())
+    rc = raycast.cmd_opened(
+        tmp_path,
+        "alpha",
+        load_rows=_load_rows(_row(tmp_path)),
+        set_opened_ts=lambda base, path, ts: seen.append((base, path, ts)),
+    )
+    assert rc == 0
+    [(base, path, ts)] = seen
+    assert (base, path) == (tmp_path, tmp_path / "alpha")
+    assert ts >= before
+    rc = raycast.cmd_opened(
+        tmp_path,
+        "nope",
+        load_rows=_load_rows(_row(tmp_path)),
+        set_opened_ts=lambda *_args: None,
+    )
+    assert rc == 2
+    assert "not found" in capsys.readouterr().err

@@ -167,3 +167,80 @@ async def test_picker_empty_tabs_returns_none() -> None:
         await pilot.press("enter")
         await pilot.pause()
         assert app.result is None
+
+
+_FAV_TABS = [
+    (
+        "favorites",
+        "Favorites",
+        [("action:build", "build"), ("tab:foo", "foo")],
+    ),
+    ("target", "Target", [("archive", "archive")]),
+]
+
+
+class _FavHarness(App[None]):
+    def __init__(self, screen_factory: Any) -> None:
+        super().__init__()
+        self._screen_factory = screen_factory
+        self.result: Any = "__unset__"
+        self.toggle_calls: list[str] = []
+
+    def compose(self) -> ComposeResult:
+        yield Static("harness")
+
+    async def on_mount(self) -> None:
+        def _on_dismiss(value: Any) -> None:
+            self.result = value
+
+        self.push_screen(self._screen_factory(), _on_dismiss)
+
+    def _toggle_favorite_target(self, target: str) -> bool:
+        self.toggle_calls.append(target)
+        return True
+
+
+async def test_favorites_tab_toggle_is_soft_delete_with_visible_marker() -> None:
+    """Tab in the favorites tab flags pending removal without touching
+    storage, and the entry stays visible with a clear marker."""
+    app = _FavHarness(
+        lambda: ActionPickerScreen(_FAV_TABS, default_tab="favorites")
+    )
+    async with app.run_test() as pilot:
+        scr = app.screen
+        assert isinstance(scr, ActionPickerScreen)
+        await pilot.press("tab")
+        await pilot.pause()
+        # Pending, not committed: storage callback untouched, entry kept.
+        assert scr._pending_remove == {"action:build"}
+        assert app.toggle_calls == []
+        body = scr.query_one("#action_picker_body", Static)
+        rendered = body.render()
+        assert "build" in rendered.plain
+        assert "(pending removal)" in rendered.plain
+
+
+async def test_favorites_tab_toggle_twice_restores_entry() -> None:
+    app = _FavHarness(
+        lambda: ActionPickerScreen(_FAV_TABS, default_tab="favorites")
+    )
+    async with app.run_test() as pilot:
+        scr = app.screen
+        assert isinstance(scr, ActionPickerScreen)
+        await pilot.press("tab", "tab")
+        await pilot.pause()
+        assert scr._pending_remove == set()
+        body = scr.query_one("#action_picker_body", Static)
+        assert "(pending removal)" not in body.render().plain
+
+
+async def test_favorites_tab_commits_pending_removes_on_dismiss() -> None:
+    app = _FavHarness(
+        lambda: ActionPickerScreen(_FAV_TABS, default_tab="favorites")
+    )
+    async with app.run_test() as pilot:
+        await pilot.press("tab")
+        await pilot.pause()
+        await pilot.press("escape")
+        await pilot.pause()
+        assert app.toggle_calls == ["action:build"]

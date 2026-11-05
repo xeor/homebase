@@ -37,6 +37,7 @@ from ..core.constants import (
     PACKED_ARCHIVE_SUFFIX,
     TEST_REPORT_FILE_NAME,
 )
+from ..core.yaml_io import yaml_safe_load
 from ..metadata.api import save_base_tags
 from . import benchmark_report
 from .projects import git_info, project_row
@@ -308,7 +309,7 @@ def _benchmark_write_report(report_path: Path, run_data: dict[str, object]) -> N
     existing: dict[str, object] = {}
     if report_path.is_file():
         try:
-            loaded = yaml.safe_load(report_path.read_text())
+            loaded = yaml_safe_load(report_path.read_text())
             if isinstance(loaded, dict):
                 existing = loaded
         except (OSError, yaml.YAMLError, json.JSONDecodeError, TypeError, ValueError):
@@ -677,18 +678,6 @@ def _benchmark_run_suite(
     return dataset, metrics, notes, seed_elapsed_s, suite_elapsed_s
 
 
-def _benchmark_metric_names() -> list[str]:
-    # Core score set kept stable across versions so history stays comparable.
-    return [
-        "collect_projects",
-        "collect_archived",
-        "cache_store_rows_full",
-        "cache_load_rows_warm",
-        "query_plain_name_scan",
-        "query_expr_scan_1",
-    ]
-
-
 def _benchmark_metric_map(run: dict[str, object]) -> dict[str, float]:
     return benchmark_report.metric_map(run)
 
@@ -812,12 +801,6 @@ def _benchmark_results_compat_warnings(
     runs: list[dict[str, object]],
 ) -> list[str]:
     return benchmark_report.results_compat_warnings(runs)
-
-
-def _run_filtered_metric_total(
-    run: dict[str, object], ignore_featuresets: set[str]
-) -> float | None:
-    return benchmark_report.run_filtered_metric_total(run, ignore_featuresets)
 
 
 def _run_filtered_metric_counts(

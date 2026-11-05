@@ -7,65 +7,6 @@ from types import SimpleNamespace
 from homebase.core.models import Action
 from homebase.ui.actions import favorites
 
-# ---- parse_style_rule(s) --------------------------------------------
-
-
-def test_parse_style_rule_returns_none_for_non_dict() -> None:
-    assert favorites.parse_style_rule("nope") is None
-    assert favorites.parse_style_rule(None) is None
-
-
-def test_parse_style_rule_requires_when() -> None:
-    assert favorites.parse_style_rule({"bg_color": "#fff"}) is None
-
-
-def test_parse_style_rule_requires_visible_change() -> None:
-    """A rule with only ``when`` set must drop — there's nothing for it
-    to style."""
-    assert favorites.parse_style_rule({"when": "tag:wip"}) is None
-
-
-def test_parse_style_rule_keeps_colors_and_flags() -> None:
-    rule = favorites.parse_style_rule(
-        {
-            "when": "tag:wip",
-            "bg_color": "#101010",
-            "fg_color": "#fafafa",
-            "bold": True,
-            "italic": True,
-            "underline": False,
-        }
-    )
-    assert rule == {
-        "when": "tag:wip",
-        "bg_color": "#101010",
-        "fg_color": "#fafafa",
-        "bold": True,
-        "italic": True,
-    }
-
-
-def test_parse_style_rule_accepts_flag_only_rule() -> None:
-    rule = favorites.parse_style_rule({"when": "x", "underline": True})
-    assert rule == {"when": "x", "underline": True}
-
-
-def test_parse_style_rules_skips_invalid_entries() -> None:
-    out = favorites.parse_style_rules(
-        [
-            "not-a-dict",
-            {"when": "x", "bg_color": "#fff"},
-            {"when": ""},  # dropped — no when
-        ]
-    )
-    assert out == [{"when": "x", "bg_color": "#fff"}]
-
-
-def test_parse_style_rules_empty_returns_empty() -> None:
-    assert favorites.parse_style_rules([]) == []
-    assert favorites.parse_style_rules("not-a-list") == []
-
-
 # ---- favorite_surface ----------------------------------------------
 
 

@@ -2,14 +2,17 @@ from __future__ import annotations
 
 import subprocess
 from functools import lru_cache
-from importlib import metadata
 from pathlib import Path
 
 _PACKAGE_NAME = "homebase"
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
+@lru_cache(maxsize=1)
 def get_version() -> str:
+    # importlib.metadata is slow to import; only load it when asked.
+    from importlib import metadata
+
     try:
         return metadata.version(_PACKAGE_NAME)
     except metadata.PackageNotFoundError:

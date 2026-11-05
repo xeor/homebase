@@ -21,6 +21,7 @@ def _make_sync_app(**overrides: object) -> SimpleNamespace:
         request_calls=[],
         cache_refresh_calls=[],
         thread_calls=[],
+        cache_owner=True,
     )
 
     def _request_tag_sync(reason: str) -> None:
@@ -32,6 +33,7 @@ def _make_sync_app(**overrides: object) -> SimpleNamespace:
     app._request_tag_sync = _request_tag_sync
     app._start_cache_refresh = _start_cache_refresh
     app._worker_debug = lambda msg: app.debug_msgs.append(msg)
+    app._is_cache_owner = lambda: app.cache_owner
     app._workspace_quick_signature = lambda: app.__dict__.get("_sig", "sig1")
     app._refresh_side = lambda: app.__dict__.__setitem__(
         "_side_refreshed", True
@@ -117,6 +119,13 @@ def test_maybe_refresh_cache_noop_when_worker_running() -> None:
     assert app.cache_refresh_calls == []
 
 
+def test_maybe_refresh_cache_noop_when_not_cache_owner() -> None:
+    app = _make_sync_app(cache_owner=False, workspace_sig_last="old")
+    ui_sync.maybe_refresh_cache(app)
+    assert app.cache_refresh_calls == []
+    assert app.workspace_sig_last == "old"
+
+
 def test_maybe_refresh_cache_initialises_signature_on_first_call() -> None:
     app = _make_sync_app()
     ui_sync.maybe_refresh_cache(app)
@@ -130,46 +139,6 @@ def test_maybe_refresh_cache_triggers_refresh_when_signature_changes() -> None:
     assert app.workspace_sig_last == "sig1"
     assert app.cache_refresh_calls == [("hard inconsistency", True)]
     assert app.debug_msgs
-
-
-def test_workspace_quick_signature_includes_active_and_archive(
-    tmp_path: Path,
-) -> None:
-    base = tmp_path / "base"
-    base.mkdir()
-    (base / "alpha").mkdir()
-    (base / "beta").mkdir()
-    (base / "_hidden").mkdir()  # excluded — leading underscore
-    (base / "_archive" / "2026").mkdir(parents=True)
-    (base / "_archive" / "2026-01-01_p.tgz").write_text("")
-
-    out = ui_sync.workspace_quick_signature(
-        base_dir=base,
-        archive_dir_name="_archive",
-        packed_archive_suffix=".tgz",
-    )
-    assert out.startswith("active:")
-    assert "archive:" in out
-
-
-def test_workspace_quick_signature_handles_missing_archive(tmp_path: Path) -> None:
-    base = tmp_path / "base"
-    base.mkdir()
-    out = ui_sync.workspace_quick_signature(
-        base_dir=base,
-        archive_dir_name="_archive",
-        packed_archive_suffix=".tgz",
-    )
-    assert "archive:0" in out
-
-
-def test_workspace_quick_signature_handles_missing_base(tmp_path: Path) -> None:
-    out = ui_sync.workspace_quick_signature(
-        base_dir=tmp_path / "nope",
-        archive_dir_name="_archive",
-        packed_archive_suffix=".tgz",
-    )
-    assert "active:err" in out
 
 
 def _make_cache_app(**overrides: object) -> SimpleNamespace:

@@ -10,7 +10,7 @@ import sys
 import threading
 import time
 from pathlib import Path
-from typing import Callable, Iterable
+from typing import IO, Callable, Iterable
 
 from textual.app import App, ComposeResult, SystemCommand
 from textual.binding import Binding
@@ -23,21 +23,21 @@ from textual.widgets import (
     DataTable,
     Footer,
     Input,
-    Label,
-    Select,
     Static,
-    Switch,
     Tab,
     Tabs,
 )
 
 from ..cache.api import (
+    cache_full_scan_ts,
     cache_load_reconcile_usage,
     cache_load_rows,
     cache_move_opened_ts,
     cache_save_reconcile_usage,
     cache_set_opened_ts,
 )
+from ..cache.clients import ClientInfo, register_client, unregister_client
+from ..cache.owner import release_cache_owner
 from ..commands.archive import (
     _policy_reason_archived_dir,
     _policy_reason_archived_entry,
@@ -57,6 +57,7 @@ from ..config.prefs import (
     load_table_behavior_config,
     load_table_columns_config,
     load_table_date_column_styles,
+    load_tmux_focus_method,
     load_ui_state,
     resolve_filter_expression,
     save_ui_state,
@@ -65,7 +66,6 @@ from ..core import utils as core_utils
 from ..core.constants import (
     ARCHIVE_DIR_NAME,
     ARCHIVE_TZ,
-    ARCHIVE_TZ_PRESETS,
     BASE_MARKER_FILE,
     BUILTIN_ACTIONS,
     BUILTIN_HOTKEYS,
@@ -107,6 +107,8 @@ from ..core.constants import (
     TABLE_COLUMN_VIEWS,
     TABLE_SIDE_WIDTH_PRESETS,
     UI_TICK_BUSY_S,
+    UI_TICK_CACHE_OWNER_POLL_S,
+    UI_TICK_FOCUS_WARM_S,
     UI_TICK_GIT_REFRESH_S,
     UI_TICK_HOOK_REFRESH_S,
     UI_TICK_MICRO_RECONCILE_S,
@@ -130,11 +132,15 @@ from ..core.models import (
     RestoreTargetExistsError,
 )
 from ..core.utils import WIDGET_API_ERRORS, fmt_ymd
+from ..herdr import panes as herdr_panes
+from ..herdr.client import HerdrError
+from ..herdr.client import socket_path as herdr_socket_path
 from ..hooks.runtime import HookRunRecord
 from ..metadata.api import (
     all_property_defs,
     base_meta_health,
     base_meta_issues,
+    base_meta_signature,
     load_base_meta,
     normalize_property_keys,
     open_meta_for_review,
@@ -143,7 +149,7 @@ from ..metadata.api import (
     save_base_tags,
     save_base_wip,
 )
-from ..tmux.external import is_inside_current_tmux_pane
+from ..tmux.external import is_inside_current_tmux_pane, prewarm_focus
 from ..tmux.flow import (
     _tmux_command_prefix,
     tmux_find_panes_for_cwd,
@@ -172,6 +178,7 @@ from ..workspace.rows import (
     normalize_filter_expression,
     query_uses_filter_syntax,
 )
+from ..workspace.signature import workspace_quick_signature
 from . import runtime_feedback as textual_ui_runtime_feedback
 from .actions import action_items as textual_ui_action_items
 from .actions import archive_worker as textual_ui_archive_worker
@@ -224,6 +231,7 @@ from .side import panel as textual_ui_side_panel
 from .side import settings as textual_ui_settings_panel
 from .side import tabs as textual_ui_side_tabs
 from .sync import cache_concurrency as textual_ui_cache_concurrency
+from .sync import cache_owner as textual_ui_cache_owner
 from .sync import cache_refresh as textual_ui_cache_refresh
 from .sync import cache_state as textual_ui_cache_state
 from .sync import dynamic_props as textual_ui_dynamic_props
@@ -373,13 +381,10 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
     #side_settings_tabs { height: 3; margin: 0 0 1 0; }
     #side_settings_table { height: 1fr; display: none; }
     #side_settings_notes { height: 15; display: none; color: $text-muted; }
-    #side_settings_config_panel { height: 1fr; display: none; padding: 0 1; }
-    #side_settings_config_panel .cfg-row { height: 3; align: left middle; }
-    #side_settings_config_panel .cfg-label { width: 1fr; padding: 1 1 0 0; }
-    #side_settings_config_panel Switch { width: auto; }
-    #side_settings_config_panel Select { width: 28; }
-    #side_settings_config_panel Input { width: 12; }
-    #side_settings_config_help { height: auto; color: $text-muted; padding: 1 1 0 1; }
+    #side_settings_general { height: auto; display: none; }
+    #side_settings_general_info { padding: 0 1; margin: 0 0 1 0; }
+    #side_config_editor_open { width: 1fr; margin: 1 1 0 1; }
+    #side_config_file_open { width: 1fr; margin: 1 1 0 1; }
     #side_scroll { height: 1fr; }
     #side_body { padding: 0 1; }
     #side_readme_panel { height: 1fr; display: none; }
@@ -390,10 +395,6 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
     #side_notes { height: 1fr; }
     #side_notes_create { width: 1fr; margin: 1 1 0 1; }
     #side_notes_open { width: 1fr; margin: 1 1 0 1; }
-    #side_global_panel { height: 1fr; display: none; }
-    #side_global_info { height: 1fr; }
-    #side_global_config_reload { width: 1fr; margin: 1 1 0 1; }
-    #side_global_config_edit { width: 1fr; margin: 1 1 0 1; }
     #wip_bar { height: 1; background: $surface-darken-1; color: $text; content-align: left middle; }
     #new_project_box { width: 100%; height: 100%; border: round $accent; background: $surface; padding: 1 2; }
     #new_body { height: 1fr; }
@@ -443,6 +444,8 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
         self.view_config = _VIEW_CONFIG_DEFAULT
 
     def _init_rows_state(self, initial_filter: str, persisted: dict[str, object]) -> None:
+        # Read before the rows: an owner rescan landing in between is reloaded.
+        self.full_scan_seen_ts = cache_full_scan_ts(self.base_dir)
         cached_active, cached_archived, cache_refreshed = cache_load_rows(
             self.base_dir,
             CACHE_MAX_AGE_S,
@@ -462,7 +465,8 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
         self.sort_mode = _normalize_sort_mode_for_view(
             self.view_mode, str(persisted.get("sort", "last"))
         )
-        self.query = initial_filter or str(persisted.get("query", ""))  # type: ignore[method-assign,assignment]  # shadows App.query CSS selector method
+        saved_query = "" if self.ctx.clear_query else str(persisted.get("query", ""))
+        self.query = initial_filter or saved_query  # type: ignore[method-assign,assignment]  # shadows App.query CSS selector method
         self.query_cursor = len(self.query)  # type: ignore[arg-type]  # see self.query shadow above
         self.filter_expr = initial_filter
         self.cache_last_refresh_ts = cache_refreshed
@@ -560,6 +564,7 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
         self._wait_process_modal_pid: int | None = None
         self.messages: list[tuple[str, str, str]] = []
         self._health_issue_seen: dict[Path, str] = {}
+        self._health_memo: dict[Path, tuple[tuple[object, ...], tuple[str, str]]] = {}
         self.pending_restore_queue: list[Path] = []
         self.pending_restore_ok = 0
         self.pending_restore_failed = 0
@@ -578,6 +583,8 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
         self.runtime_status_until_ts = 0.0
 
     def _init_worker_state(self) -> None:
+        self.cache_owner_handle: IO[str] | None = None
+        self.cache_owner_checked_at = 0.0
         self.cache_worker_running = False
         self.cache_worker_note = ""
         self.cache_worker_started_ts = 0.0
@@ -673,10 +680,8 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
         self.table_settings_index = 0
         self.table_behavior = load_table_behavior_config(self.base_dir)
         self.table_date_color_ranges = load_table_date_column_styles(self.base_dir)
-        self._settings_config_loading = True
         self.open_mode = dict(self.ctx.open_mode_config)
         self.notes_config = dict(self.ctx.notes_config)
-        self.open_settings_index = 0
 
     def _init_hooks_state(self) -> None:
         self.hook_recent: dict[tuple[str, str], list[HookRunRecord]] = {}
@@ -739,6 +744,7 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
             self,
             rows,
             base_meta_health=base_meta_health,
+            base_meta_signature=base_meta_signature,
         )
 
     def _capture_table_position(self) -> bool:
@@ -895,60 +901,24 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
                             compact=True,
                             flat=True,
                         )
-                    with Vertical(id="side_global_panel"):
-                        yield Static("", id="side_global_info")
-                        yield Button(
-                            "Reload global config",
-                            id="side_global_config_reload",
-                            variant="default",
-                            compact=True,
-                            flat=True,
-                        )
-                        yield Button(
-                            "Edit global config in $EDITOR",
-                            id="side_global_config_edit",
-                            variant="primary",
-                            compact=True,
-                            flat=True,
-                        )
+                with Vertical(id="side_settings_general"):
+                    yield Static("", id="side_settings_general_info")
+                    yield Button(
+                        "Open config editor",
+                        id="side_config_editor_open",
+                        variant="primary",
+                        compact=True,
+                        flat=True,
+                    )
+                    yield Button(
+                        "Open config file in $EDITOR",
+                        id="side_config_file_open",
+                        variant="default",
+                        compact=True,
+                        flat=True,
+                    )
                 yield Static("", id="side_settings_notes")
                 yield DataTable(id="side_settings_table", cursor_type="row")
-                with Vertical(id="side_settings_config_panel"):
-                    with Horizontal(classes="cfg-row"):
-                        yield Label("Pin WIP rows at top", classes="cfg-label")
-                        yield Switch(id="cfg_pin_wip", value=False)
-                    with Horizontal(classes="cfg-row"):
-                        yield Label("Info panel width", classes="cfg-label")
-                        yield Select(
-                            options=[(f"{p}%", p) for p in TABLE_SIDE_WIDTH_PRESETS],
-                            id="cfg_side_width",
-                            allow_blank=False,
-                            compact=True,
-                            type_to_search=True,
-                        )
-                    with Horizontal(classes="cfg-row"):
-                        yield Label("Preview files (overview)", classes="cfg-label")
-                        yield Input(
-                            id="cfg_preview_limit",
-                            value="8",
-                            type="integer",
-                            max_length=4,
-                            compact=True,
-                        )
-                    with Horizontal(classes="cfg-row"):
-                        yield Label("Archive timezone", classes="cfg-label")
-                        yield Select(
-                            options=[(tz, tz) for tz in ARCHIVE_TZ_PRESETS],
-                            id="cfg_archive_tz",
-                            allow_blank=False,
-                            compact=True,
-                            type_to_search=True,
-                        )
-                    yield Static(
-                        "[dim]tab: next field   space/enter: toggle/open   "
-                        "type to filter dropdowns   enter on number: commit[/]",
-                        id="side_settings_config_help",
-                    )
         yield Static("", id="wip_bar")
         yield Footer()
 
@@ -985,6 +955,9 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
             ),
         )
         self.call_after_refresh(self._initial_worktree_health_scan)
+        if sys.platform == "darwin":
+            self.set_interval(UI_TICK_FOCUS_WARM_S, self._maybe_warm_focus_backend)
+            self.call_after_refresh(self._maybe_warm_focus_backend)
         for wid in (
             self.query_one("#side", Vertical),
             self.query_one("#side_main_tabs", Tabs),
@@ -997,8 +970,8 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
             self.query_one("#side_readme", ReadmeMarkdownViewer),
             self.query_one("#side_notes_panel", Vertical),
             self.query_one("#side_notes", ReadmeMarkdownViewer),
-            self.query_one("#side_global_panel", Vertical),
-            self.query_one("#side_global_info", Static),
+            self.query_one("#side_settings_general", Vertical),
+            self.query_one("#side_settings_general_info", Static),
             self.query_one("#side_settings_table", DataTable),
             self.query_one("#side_settings_notes", Static),
             self.query_one("#wip_bar", Static),
@@ -1023,13 +996,14 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
         finally:
             self._busy_stop()
         self.set_interval(CACHE_BG_REFRESH_S, self._maybe_refresh_cache)
+        self.set_interval(UI_TICK_CACHE_OWNER_POLL_S, self._poll_cache_owner)
         self.set_interval(2.0, self._check_cache_concurrency)
         self._check_cache_concurrency()
         if not self.active_rows and not self.archived_rows:
             self.call_after_refresh(
                 lambda: self._start_cache_refresh("cold start", force=True)
             )
-        elif int(time.time()) - self.cache_last_refresh_ts > CACHE_MAX_AGE_S:
+        elif int(time.time()) - self.full_scan_seen_ts > CACHE_MAX_AGE_S:
             self.call_after_refresh(
                 lambda: self._start_cache_refresh("stale cache", force=False)
             )
@@ -1039,10 +1013,6 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
         self.call_after_refresh(self._start_probe_open_panes)
         self.set_timer(0.12, self._retry_pending_restore)
         self.set_timer(0.18, self._reflow_table_columns_after_layout)
-        self.call_after_refresh(self._settings_config_finish_boot)
-
-    def _settings_config_finish_boot(self) -> None:
-        self._settings_config_loading = False
 
     def _reflow_table_columns_after_layout(self) -> None:
         self._configure_table_columns()
@@ -1422,7 +1392,7 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
         pdef = next((p for p in self.ctx.property_defs if str(p.key) == key), None)
         if pdef is None or not pdef.queries:
             return False
-        path_query_types = {"tmux_open_panes", "tmux_editor_commands", "sqlite_recent_paths"}
+        path_query_types = textual_ui_indicator_queries.PATH_QUERY_TYPES
         view = MODE_ARCHIVE if row.archived else MODE_ACTIVE
         ttl_s = pdef.cache_ttl_for_view(view)
         cached = self.dynamic_indicator_cache.get(key)
@@ -1639,8 +1609,14 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
     def _maybe_refresh_cache(self) -> None:
         textual_ui_sync.maybe_refresh_cache(self)
 
+    def _is_cache_owner(self) -> bool:
+        return textual_ui_cache_owner.is_cache_owner(self, base_dir=self.base_dir)
+
+    def _poll_cache_owner(self) -> None:
+        textual_ui_cache_owner.poll_cache_owner(self, base_dir=self.base_dir)
+
     def _workspace_quick_signature(self) -> str:
-        return textual_ui_sync.workspace_quick_signature(
+        return workspace_quick_signature(
             base_dir=self.base_dir,
             archive_dir_name=ARCHIVE_DIR_NAME,
             packed_archive_suffix=PACKED_ARCHIVE_SUFFIX,
@@ -1680,6 +1656,8 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
         textual_ui_reconcile.decay_row_usage(self)
 
     def _flush_reconcile_usage_if_due(self) -> None:
+        if not self._is_cache_owner():
+            return
         textual_ui_reconcile.flush_reconcile_usage_if_due(
             self,
             base_dir=self.base_dir,
@@ -1745,22 +1723,26 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
             is_under=core_utils.is_under,
         )
 
+    def _micro_reconcile_blocked_reason(self) -> str:
+        if self._critical_job_active():
+            return f"blocked by critical job ({self._critical_job_label()})"
+        if not self._is_cache_owner():
+            return "another process owns the cache"
+        if self.cache_worker_running:
+            return "blocked by cache refresh"
+        if self.reconcile_worker_running:
+            return "blocked by reconcile worker"
+        return ""
+
     def _maybe_run_micro_reconcile(self) -> None:
         if self.fast_exit_requested:
             self._set_reconcile_skip_reason("fast exit")
             return
         self._maybe_refresh_metadata_health()
         self._run_dynamic_property_refresh_tick()
-        if self._critical_job_active():
-            self._set_reconcile_skip_reason(
-                f"blocked by critical job ({self._critical_job_label()})"
-            )
-            return
-        if self.cache_worker_running or self.reconcile_worker_running:
-            if self.cache_worker_running:
-                self._set_reconcile_skip_reason("blocked by cache refresh")
-            else:
-                self._set_reconcile_skip_reason("blocked by reconcile worker")
+        blocked = self._micro_reconcile_blocked_reason()
+        if blocked:
+            self._set_reconcile_skip_reason(blocked)
             return
         self._decay_row_usage()
         now = time.time()
@@ -2349,8 +2331,8 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
 
     def _global_config_button_actions(self) -> list[tuple[str, str]]:
         return [
-            ("reload_global_config", "[white]Reload global config[/]"),
-            ("edit_global_config", "[white]Edit global config in $EDITOR[/]"),
+            ("open_config_editor", "[white]Open config editor[/]"),
+            ("edit_global_config", "[white]Open config file in $EDITOR[/]"),
         ]
 
     def _visible_button_actions(self) -> list[tuple[str, str]]:
@@ -2366,9 +2348,7 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
                 return self._notes_button_actions()
             return []
         if self.side_main_tab == "settings":
-            if self.side_settings_tab == "global":
-                return self._global_config_button_actions()
-            return []
+            return self._global_config_button_actions()
         return []
 
     def _run_notes_command(
@@ -2415,10 +2395,10 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
     def _refresh_settings_table(self) -> None:
         textual_ui_settings_panel.refresh_settings_table(self)
 
-    def _update_open_settings_details(
-        self, rows: list[tuple[str, str, str]] | None = None
-    ) -> None:
-        textual_ui_settings_panel.update_open_settings_details(self, rows)
+    def _settings_general_info_text(self) -> str:
+        return textual_ui_settings_panel.settings_general_info_text(
+            self, base_dir=self.base_dir
+        )
 
     def _table_pin_wip_top_enabled(self) -> bool:
         return bool(self.table_behavior.get("pin_wip_top", False))
@@ -2427,9 +2407,6 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
         raw = _as_int(self.table_behavior.get("side_width_pct", 33), 33)
         presets = list(TABLE_SIDE_WIDTH_PRESETS) or [raw]
         return min(presets, key=lambda pct: abs(pct - raw))
-
-    def _table_config_save(self) -> None:
-        textual_ui_settings_panel.table_config_save(self, base_dir=self.base_dir)
 
     def _table_settings_save(self) -> None:
         textual_ui_settings_panel.table_settings_save(self, base_dir=self.base_dir)
@@ -2443,15 +2420,6 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
 
     def _table_settings_toggle_enabled(self) -> None:
         textual_ui_settings_panel.table_settings_toggle_enabled(self, base_dir=self.base_dir)
-
-    def _open_mode_save(self) -> None:
-        textual_ui_settings_panel.open_mode_save(self, base_dir=self.base_dir)
-
-    def _open_mode_rows(self) -> list[tuple[str, str, str]]:
-        return textual_ui_settings_panel.open_mode_rows()
-
-    def _open_mode_select_selected(self) -> None:
-        textual_ui_settings_panel.open_mode_select_selected(self, base_dir=self.base_dir)
 
     def _table_settings_reorder(self, delta: int) -> None:
         textual_ui_settings_panel.table_settings_reorder(
@@ -2467,14 +2435,14 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
             base_dir=self.base_dir,
         )
 
+    def _open_config_editor_modal(self) -> None:
+        textual_ui_settings_panel.open_config_editor_modal(self, base_dir=self.base_dir)
+
     def _edit_global_config_and_reload(self) -> None:
         textual_ui_settings_panel.edit_global_config_and_reload(self, base_dir=self.base_dir)
 
     def _reload_global_config(self) -> None:
         textual_ui_settings_panel.reload_global_config(self, base_dir=self.base_dir)
-
-    def _global_config_status_text(self) -> str:
-        return textual_ui_settings_panel.global_config_status_text(self, base_dir=self.base_dir)
 
     def _cache_info_lines(self) -> list[str]:
         return textual_ui_side_panel.cache_info_lines(
@@ -3218,6 +3186,62 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
         self._busy_start("restoring target items")
         self._process_next_restore()
 
+    def _jump_to_pane(self, pane: PaneRef) -> bool:
+        if pane.source == herdr_panes.HERDR_SOURCE:
+            return self._jump_to_herdr_pane(pane)
+        return self._jump_to_tmux_pane(pane)
+
+    def _jump_to_herdr_pane(self, pane: PaneRef) -> bool:
+        try:
+            herdr_panes.focus_pane(pane.pane_id)
+        except HerdrError as exc:
+            self._log(f"herdr pane jump failed: {exc}", "warn")
+            self._refresh_side()
+            return False
+        self._log(f"jumped to herdr pane {pane.pane_id} ({pane.window_name})", "info")
+        self._set_runtime_status(f"goto pane {pane.window_name}", "info", ttl_s=10.0)
+        self._refresh_side()
+        return True
+
+    def _offer_panes(self, row: ProjectRow, panes: list[PaneRef]) -> bool:
+        """Jump to the only pane, or ask which one. False when there is none."""
+        if len(panes) == 1:
+            self._jump_to_pane(panes[0])
+            return True
+        if len(panes) > 1:
+            self.pending_pane_choices = {pane.pane_id: pane for pane in panes}
+            self.push_screen(
+                PaneChoiceScreen(f"Open pane for {row.name}", panes),
+                self._on_pick_open_pane,
+            )
+            return True
+        return False
+
+    def _open_selected_in_herdr_mode(self, row: ProjectRow, spec: dict[str, object]) -> bool:
+        """Goto an existing herdr pane or open a new tab/workspace. False
+        when herdr is not running, so Enter falls back to exit + cd."""
+        if herdr_socket_path() is None:
+            return False
+        self.pane_probe_fast_until_ts = max(
+            self.pane_probe_fast_until_ts, time.time() + 20.0
+        )
+        kind = str(spec.get("herdr_new", "tab"))
+        try:
+            if bool(spec.get("goto_loaded", False)) and self._offer_panes(
+                row, herdr_panes.goto_candidates(row.path)
+            ):
+                return True
+            herdr_panes.open_new(row.path, kind)
+        except HerdrError as exc:
+            self._log(f"herdr open failed: {exc}", "error")
+            self._set_runtime_status("herdr open failed", "error", ttl_s=14.0)
+            self._refresh_side()
+            return True
+        self._log(f"opened in herdr: new {kind}", "info")
+        self._set_runtime_status(f"opened in herdr: new {kind}", "info", ttl_s=10.0)
+        self._refresh_side()
+        return True
+
     def _jump_to_tmux_pane(self, pane: PaneRef) -> bool:
         target_window = pane.target.rsplit(".", 1)[0]
         p1 = subprocess.run(
@@ -3257,8 +3281,38 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
         )
         return spec or OPEN_MODE_PROFILES[0]
 
+    def _maybe_warm_focus_backend(self) -> None:
+        """Keep the macOS System Events focus backend warm in the
+        background so the first `b open` is not cold (~0.5-1s). Only runs
+        when the open profile uses tmux and the focus method can use
+        System Events. Always off the UI thread."""
+        if sys.platform != "darwin":
+            return
+        if not bool(self._open_profile_spec().get("use_tmux", False)):
+            return
+        if load_tmux_focus_method(self.base_dir) not in ("auto", "system_events"):
+            return
+
+        def _warm() -> None:
+            ok, detail = prewarm_focus(self.base_dir)
+            if ok or detail in ("not darwin", "pyobjc Foundation unavailable"):
+                return
+            logged = getattr(self, "_focus_warm_logged", None)
+            if logged is None:
+                logged = set()
+                self._focus_warm_logged = logged
+            if detail not in logged:
+                logged.add(detail)
+                self.call_from_thread(
+                    lambda: self._log(f"focus warm-up failed: {detail}", "warn")
+                )
+
+        threading.Thread(target=_warm, daemon=True).start()
+
     def _open_selected_in_tmux_mode(self, row: ProjectRow) -> bool:
         spec = self._open_profile_spec()
+        if spec.get("backend") == "herdr":
+            return self._open_selected_in_herdr_mode(row, spec)
         use_tmux = bool(spec.get("use_tmux", False))
         if not use_tmux:
             return False
@@ -3281,18 +3335,10 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
             self._refresh_side()
             return True
 
-        if bool(spec.get("goto_loaded", False)):
-            panes = tmux_find_panes_for_cwd(row.path)
-            if len(panes) == 1:
-                self._jump_to_tmux_pane(panes[0])
-                return True
-            if len(panes) > 1:
-                self.pending_pane_choices = {pane.pane_id: pane for pane in panes}
-                self.push_screen(
-                    PaneChoiceScreen(f"Open pane for {row.name}", panes),
-                    self._on_pick_open_pane,
-                )
-                return True
+        if bool(spec.get("goto_loaded", False)) and self._offer_panes(
+            row, tmux_find_panes_for_cwd(row.path)
+        ):
+            return True
 
         load_status: str | None = None
         if bool(spec.get("run_load", False)):
@@ -3330,7 +3376,7 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
             self._log("pane choice missing", "warn")
             self._refresh_side()
             return
-        self._jump_to_tmux_pane(pane)
+        self._jump_to_pane(pane)
 
     def action_open_selected(self) -> None:
         if self._table_is_active_focus() and self._hotbar_bar_visible():
@@ -3432,6 +3478,21 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
 
 
 
+def _register_client(base_dir: Path, cwd: Path) -> None:
+    """Listed by `b daemon` as a connected client while the TUI runs."""
+    try:
+        tty = os.ttyname(sys.stdin.fileno()) if sys.stdin.isatty() else ""
+    except (OSError, ValueError):
+        tty = ""
+    try:
+        register_client(
+            base_dir,
+            ClientInfo(pid=os.getpid(), started_ts=time.time(), tty=tty, cwd=str(cwd)),
+        )
+    except OSError:
+        pass
+
+
 def run_textual_ui(
     base_dir: Path,
     cwd: Path,
@@ -3447,9 +3508,12 @@ def run_textual_ui(
         start_new_mode=start_new,
         initial_filter=initial_filter_expr,
     )
+    _register_client(base_dir, cwd)
     try:
         result = app.run() or ("quit", None, [])
     finally:
+        release_cache_owner(app.cache_owner_handle)
+        unregister_client(base_dir, os.getpid())
         unregister_current_tmux_context(base_dir)
     # After the TUI returns the terminal is restored; flush any
     # deferred summary or error captured by the new-project flow so

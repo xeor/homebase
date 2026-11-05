@@ -28,47 +28,6 @@ SURFACE_GLOBAL = "global"
 SURFACE_NAV = "nav"
 
 
-# ---- style rules ----------------------------------------------------
-
-
-def parse_style_rule(raw_rule: object) -> dict[str, object] | None:
-    if not isinstance(raw_rule, dict):
-        return None
-    bg_color = str(raw_rule.get("bg_color", "")).strip()
-    fg_color = str(raw_rule.get("fg_color", "")).strip()
-    when = str(raw_rule.get("when", "")).strip()
-    bold = bool(raw_rule.get("bold", False))
-    underline = bool(raw_rule.get("underline", False))
-    italic = bool(raw_rule.get("italic", False))
-    if not when:
-        return None
-    if not bg_color and not fg_color and not (bold or underline or italic):
-        return None
-    rule: dict[str, object] = {"when": when}
-    if bg_color:
-        rule["bg_color"] = bg_color
-    if fg_color:
-        rule["fg_color"] = fg_color
-    if bold:
-        rule["bold"] = True
-    if underline:
-        rule["underline"] = True
-    if italic:
-        rule["italic"] = True
-    return rule
-
-
-def parse_style_rules(raw_style: object) -> list[dict[str, object]]:
-    if not isinstance(raw_style, list) or not raw_style:
-        return []
-    out: list[dict[str, object]] = []
-    for raw_rule in raw_style:
-        rule = parse_style_rule(raw_rule)
-        if rule is not None:
-            out.append(rule)
-    return out
-
-
 # ---- surface derivation ---------------------------------------------
 
 

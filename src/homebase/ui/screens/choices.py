@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import difflib
 import re
 
 from textual.app import ComposeResult
@@ -9,6 +8,7 @@ from textual.events import Key, Resize
 from textual.widgets import Static
 
 from ...core.constants import ACTION_ACCEPT, ACTION_CANCEL
+from ...core.fuzzy import fuzzy_rank
 from .base import LargeModalScreen
 from .listwin import compute_window, overflow_hint
 
@@ -192,26 +192,15 @@ class FuzzyChoiceScreen(LargeModalScreen[str | None]):
         return f"{key} {label}".lower()
 
     def _visible_options(self) -> list[tuple[str, str]]:
-        q = self.filter_text.strip().lower()
+        q = self.filter_text.strip()
         if not q:
             return self.options
-        ranked: list[tuple[float, tuple[str, str]]] = []
-        for item in self.options:
-            text = self._search_text(item)
-            score = 0.0
-            if q in text:
-                score = max(score, 0.80 + min(0.15, len(q) / max(1, len(text))))
-            score = max(score, difflib.SequenceMatcher(None, q, text).ratio())
-            qi = 0
-            for ch in text:
-                if qi < len(q) and ch == q[qi]:
-                    qi += 1
-            if qi == len(q):
-                score = max(score, 0.72 + min(0.20, len(q) / max(1, len(text))))
-            if score >= 0.45:
-                ranked.append((score, item))
-        ranked.sort(key=lambda pair: (-pair[0], pair[1][1]))
-        return [item for _score, item in ranked]
+        return fuzzy_rank(
+            q,
+            self.options,
+            key=self._search_text,
+            tiebreak=lambda item: item[1],
+        )
 
     def _refresh_body(self) -> None:
         self.query_one("#choice_picker_filter", Static).update(

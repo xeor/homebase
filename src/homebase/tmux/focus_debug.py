@@ -6,8 +6,9 @@ import sys
 import time
 from functools import partial
 from pathlib import Path
-from typing import Callable
+from typing import Any, Callable
 
+from ..core.constants import UI_TICK_FOCUS_WARM_S
 from ..core.setup_model import MainThreadActivator, SetupDebugOption, SetupDebugTool
 from . import client_focus
 from .external import resolve_external_tmux_target
@@ -22,7 +23,8 @@ _FOCUS_METHODS: dict[str, str] = {
     "auto": "Auto-detect",
     "appkit": "Force: AppKit (pyobjc)",
     "osascript": "Force: osascript activate",
-    "system_events": "Force: System Events",
+    "system_events": "Force: System Events (in-process, fast)",
+    "system_events_osascript": "Force: System Events (osascript)",
 }
 
 
@@ -127,7 +129,7 @@ def _activation_policy_name(policy: int) -> str:
     return _ACTIVATION_POLICY_NAMES.get(int(policy), f"unknown ({policy})")
 
 
-def _appkit_app_desc(app: object) -> str:
+def _appkit_app_desc(app: Any) -> str:
     """One-line ``name (pid, bundle)`` for an ``NSRunningApplication``."""
     if app is None:
         return "<none>"
@@ -186,11 +188,11 @@ def _appkit_requester_lines() -> list[str]:
 
 
 def _appkit_diagnostics(
-    running: object,
+    running: Any,
     app_pid: int,
     active_before: bool,
     activate_returned: bool,
-    ns_workspace: object,
+    ns_workspace: Any,
 ) -> list[str]:
     """State of the target app and the workspace right after an AppKit
     activation attempt. Pinpoints the case where ``activateWithOptions_``
@@ -222,16 +224,31 @@ def _appkit_diagnostics(
 
 
 def _focus_detail(base_dir: Path) -> str:
-    """Live one-liner for the info panel: what auto-detect resolves to
-    for the current target right now, plus the detected app."""
+    """Live one-liner for the info panel: the configured backend, what
+    auto-detect resolves to for the current target, and the detected app."""
+    configured = client_focus._configured_focus_method(base_dir)
+    if configured == "auto":
+        configured_line = (
+            "[bold]config tmux_focus.method:[/] "
+            f"{_esc(_FOCUS_METHODS.get(configured, configured))} "
+            "[dim](default; set to a backend id to enforce one)[/]"
+        )
+    else:
+        configured_line = (
+            "[bright_cyan]config tmux_focus.method:[/] "
+            f"[bold]{_esc(configured)}[/] "
+            f"{_esc(_FOCUS_METHODS.get(configured, configured))} "
+            "[dim](enforced; `b open` runs only this backend)[/]"
+        )
     ctx = _resolve_focus_context(base_dir)
     if isinstance(ctx, str):
-        return f"[bright_yellow]auto-detect: unavailable — {_esc(ctx)}[/]"
+        return f"{configured_line}\n[bright_yellow]auto-detect: unavailable — {_esc(ctx)}[/]"
     session, _client_pid_val, _ancestry, app = ctx
     method, why = _auto_method(app)
     app_bundle = app[1] if app is not None else None
     return (
-        f"[bold]auto-detect will use:[/] "
+        f"{configured_line}\n"
+        f"[bold]auto-detect would use:[/] "
         f"{_esc(_FOCUS_METHODS.get(method, method))} [dim]({why})[/]\n"
         f"target session: {_esc(session)}   "
         f"app: {_esc(app_bundle) if app_bundle is not None else '<none>'}"
@@ -319,7 +336,33 @@ def _run_focus(base_dir: Path, method: str, activator: MainThreadActivator) -> s
         "asynchronously after it returns. osascript backends spawn a process "
         "and compile AppleScript, so they run ~10-50x slower than AppKit.[/]"
     )
+    lines.append("")
+    lines.extend(_enforce_hint(base_dir, method))
     return "\n".join(lines)
+
+
+def _enforce_hint(base_dir: Path, method: str) -> list[str]:
+    """How to pin the just-tested backend as the live default. Only the
+    config-enforceable ids appear (the osascript System Events variant is
+    a debug-only comparison, not a live backend)."""
+    from ..core.constants import TMUX_FOCUS_METHODS
+
+    configured = client_focus._configured_focus_method(base_dir)
+    out = [f"[dim]live config tmux_focus.method = {_esc(configured)}[/]"]
+    if method not in TMUX_FOCUS_METHODS:
+        out.append(
+            f"[dim]'{_esc(method)}' is a debug-only comparison; not selectable "
+            "via config. `system_events` is the live in-process equivalent.[/]"
+        )
+        return out
+    if method == configured:
+        out.append("[dim]this backend is already the configured default.[/]")
+        return out
+    out.append(
+        "[bold]enforce:[/] set in `.homebase/config.yaml`:\n"
+        f"  [bright_cyan]tmux_focus:\n    method: {_esc(method)}[/]"
+    )
+    return out
 
 
 def _activate_with(
@@ -372,6 +415,22 @@ def _activate_with(
         ok, detail = _osascript_activate_bundle(app_bundle)
         return ok, detail, time.perf_counter() - start
     if method == "system_events":
+        pids = [pid for pid, _ in ancestry]
+        app_name = app_bundle.stem if app_bundle is not None else None
+        start = time.perf_counter()
+        # In-process NSAppleScript must run on the main thread, like the
+        # live `b` path; the activator hops there when run from the TUI.
+        ok, used, detail = activator.run(
+            lambda: client_focus.system_events_set_frontmost(app_name, pids)
+        )
+        elapsed = time.perf_counter() - start
+        text = f"method: {used}   pids: {pids}"
+        if app_name:
+            text += f"   app name: {app_name}"
+        if detail:
+            text += f"\n{detail}"
+        return ok, text, elapsed
+    if method == "system_events_osascript":
         pids = [pid for pid, _ in ancestry]
         start = time.perf_counter()
         ok, detail = _osascript_system_events_focus(pids)
@@ -545,6 +604,22 @@ def _report_macos_backends() -> str:
             "  [dim]without pyobjc, activation uses osascript (slower) and "
             "depends on the TCC permissions probed below.[/]"
         )
+
+    lines.append("")
+    lines.append("[bold]System Events warm-up (compile + keep alive)[/]")
+    if client_focus._foundation_available():
+        start = time.perf_counter()
+        warm_ok, warm_detail = client_focus.warm_up_focus_backend()
+        lines.append(f"  warm-up: {_ok(warm_ok)}   [bold]{_ms(time.perf_counter() - start)}[/]")
+        if warm_detail:
+            lines.append(f"    {_esc(warm_detail)}")
+        lines.append(
+            "  [dim]first call initializes Open Scripting + launches System "
+            "Events (~0.5-1s); the TUI re-runs this in the background every "
+            f"{int(UI_TICK_FOCUS_WARM_S)}s so the first `b open` is already warm.[/]"
+        )
+    else:
+        lines.append("  [dim]pyobjc Foundation unavailable; warm-up uses osascript path.[/]")
 
     lines.append("")
     lines.append("[bold]osascript / System Events (TCC)[/]")

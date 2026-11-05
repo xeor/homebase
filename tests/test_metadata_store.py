@@ -23,7 +23,7 @@ def test_save_and_load_base_data_roundtrip(tmp_path: Path) -> None:
 
 
 def test_load_base_data_caches_until_mtime_changes(tmp_path: Path, monkeypatch) -> None:
-    metadata_store._clear_base_data_cache()
+    metadata_store._BASE_DATA_CACHE.clear()
 
     target = tmp_path / "p"
     target.mkdir()
@@ -36,13 +36,13 @@ def test_load_base_data_caches_until_mtime_changes(tmp_path: Path, monkeypatch) 
     )
 
     parses = {"count": 0}
-    real_safe_load = metadata_store.yaml.safe_load
+    real_safe_load = metadata_store.yaml_safe_load
 
     def counting_safe_load(text: str) -> object:
         parses["count"] += 1
         return real_safe_load(text)
 
-    monkeypatch.setattr(metadata_store.yaml, "safe_load", counting_safe_load)
+    monkeypatch.setattr(metadata_store, "yaml_safe_load", counting_safe_load)
 
     loaded_a = metadata_store.load_base_data(
         target,
@@ -79,7 +79,7 @@ def test_load_base_data_caches_until_mtime_changes(tmp_path: Path, monkeypatch) 
 
 
 def test_load_base_data_returns_independent_copy(tmp_path: Path) -> None:
-    metadata_store._clear_base_data_cache()
+    metadata_store._BASE_DATA_CACHE.clear()
     target = tmp_path / "p2"
     target.mkdir()
     metadata_store.save_base_data(
@@ -178,7 +178,7 @@ def test_load_base_data_packed_delegates(tmp_path: Path) -> None:
 
 
 def test_load_base_data_returns_empty_for_invalid_yaml(tmp_path: Path) -> None:
-    metadata_store._clear_base_data_cache()
+    metadata_store._BASE_DATA_CACHE.clear()
     target = tmp_path / "p"
     target.mkdir()
     (target / ".base.yaml").write_text(":\n  not valid: [")
@@ -192,7 +192,7 @@ def test_load_base_data_returns_empty_for_invalid_yaml(tmp_path: Path) -> None:
 
 
 def test_load_base_data_returns_empty_for_non_dict_yaml(tmp_path: Path) -> None:
-    metadata_store._clear_base_data_cache()
+    metadata_store._BASE_DATA_CACHE.clear()
     target = tmp_path / "p"
     target.mkdir()
     (target / ".base.yaml").write_text("[1, 2, 3]\n")
@@ -206,7 +206,7 @@ def test_load_base_data_returns_empty_for_non_dict_yaml(tmp_path: Path) -> None:
 
 
 def test_load_base_data_missing_marker_returns_empty(tmp_path: Path) -> None:
-    metadata_store._clear_base_data_cache()
+    metadata_store._BASE_DATA_CACHE.clear()
     out = metadata_store.load_base_data(
         tmp_path / "nope",
         is_packed_archive_path=lambda _p: False,
@@ -245,7 +245,7 @@ def test_ensure_base_marker_preserves_existing(tmp_path: Path) -> None:
 
 
 def test_repair_base_metadata_normalises_and_saves(tmp_path: Path) -> None:
-    metadata_store._clear_base_data_cache()
+    metadata_store._BASE_DATA_CACHE.clear()
     target = tmp_path / "p"
     target.mkdir()
     (target / ".base.yaml").write_text("tags: ['a']\n")
@@ -455,7 +455,7 @@ def test_open_meta_for_review_no_open_command_returns_message(
 
 
 def test_load_base_data_cache_eviction(tmp_path: Path) -> None:
-    metadata_store._clear_base_data_cache()
+    metadata_store._BASE_DATA_CACHE.clear()
     metadata_store._BASE_DATA_CACHE_MAX
     # Force the cache to fill so the eviction branch (line ~40) is exercised.
     saved_max = metadata_store._BASE_DATA_CACHE_MAX
@@ -475,4 +475,4 @@ def test_load_base_data_cache_eviction(tmp_path: Path) -> None:
         assert len(metadata_store._BASE_DATA_CACHE) <= 2
     finally:
         metadata_store._BASE_DATA_CACHE_MAX = saved_max
-        metadata_store._clear_base_data_cache()
+        metadata_store._BASE_DATA_CACHE.clear()

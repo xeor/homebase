@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from homebase.cli import dispatch as cli_dispatch
 from homebase.cli import parser as cli_parser
 
@@ -27,6 +29,7 @@ def _stub_dispatch_kwargs(**overrides: object) -> dict[str, object]:
         cmd_help=lambda _ns: 0,
         cmd_setup=lambda _a, _b, _c: 0,
         cmd_cache_warm=lambda: 0,
+        cmd_daemon=lambda *a, **k: 0,
         cmd_tags_sync=lambda _a, _b, _c: 0,
         cmd_tags_ls=lambda _a: 0,
         cmd_hooks_refresh=lambda _bd, **_kw: 0,
@@ -500,6 +503,31 @@ def test_dispatch_raycast_run_forwards_action_and_project() -> None:
     assert seen == [(Path("/base"), "run", "alpha", "open_item")]
 
 
+@pytest.mark.parametrize(
+    ("argv", "expected"),
+    [
+        (["opened", "alpha"], ("opened", "alpha", "")),
+        (["snapshot"], ("snapshot", "", "")),
+    ],
+)
+def test_dispatch_raycast_opened_and_snapshot(argv: list[str], expected: tuple[str, str, str]) -> None:
+    ns = cli_dispatch.build_cli_parser().parse_args(["integration", "raycast", *argv])
+    seen: list[tuple[str, str, str]] = []
+    rc = cli_dispatch.dispatch_command(
+        ns,
+        base_dir=Path("/base"),
+        bin_dir=Path("/bin"),
+        cwd=Path("/cwd"),
+        no_arg_flow=lambda _a, _b, _c: 0,
+        initial_filter_expr="",
+        **_stub_dispatch_kwargs(
+            cmd_raycast=lambda _bd, sub, project, action: seen.append((sub, project, action)) or 0
+        ),
+    )
+    assert rc == 0
+    assert seen == [expected]
+
+
 def test_dispatch_rm_forwards_flags() -> None:
     parser = cli_dispatch.build_cli_parser()
     ns = parser.parse_args(["rm", "p", "--force-outside-base", "--force"])
@@ -765,3 +793,37 @@ def test_dispatch_completion_and_internal() -> None:
         **_stub_dispatch_kwargs(cmd_internal_complete=lambda *_a: 161),
     )
     assert rc_int == 161
+
+
+def test_parser_open_mode_and_daemon() -> None:
+    parser = cli_dispatch.build_cli_parser()
+    ns = parser.parse_args(["--open-mode", "shell_cd"])
+    assert ns.open_mode == "shell_cd"
+    assert ns.command is None
+    assert parser.parse_args([]).open_mode == ""
+    with pytest.raises(SystemExit):
+        parser.parse_args(["--open-mode", "nope"])
+    ns = parser.parse_args(["daemon", "--once"])
+    assert ns.command == "daemon" and ns.once is True
+
+
+def test_dispatch_daemon_passes_once_and_plain() -> None:
+    parser = cli_dispatch.build_cli_parser()
+    seen: list[tuple[Path, bool, bool]] = []
+    rc = cli_dispatch.dispatch_command(
+        parser.parse_args(["daemon", "--once", "--plain"]),
+        base_dir=Path("/base"),
+        bin_dir=Path("/bin"),
+        cwd=Path("/cwd"),
+        no_arg_flow=lambda _a, _b, _c: 0,
+        initial_filter_expr="",
+        **_stub_dispatch_kwargs(cmd_daemon=lambda bd, *, once, plain: seen.append((bd, once, plain)) or 7),
+    )
+    assert rc == 7
+    assert seen == [(Path("/base"), True, True)]
+
+
+def test_parser_clear_query_flag() -> None:
+    parser = cli_dispatch.build_cli_parser()
+    assert parser.parse_args(["--clear-query"]).clear_query is True
+    assert parser.parse_args([]).clear_query is False

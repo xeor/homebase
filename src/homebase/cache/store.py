@@ -207,6 +207,17 @@ def _create_ancillary_tables(conn: sqlite3.Connection) -> None:
     )
     conn.execute(
         """
+        CREATE TABLE IF NOT EXISTS packed_meta (
+            path TEXT PRIMARY KEY,
+            mtime_ns INTEGER NOT NULL,
+            size INTEGER NOT NULL,
+            member TEXT,
+            raw TEXT
+        )
+        """
+    )
+    conn.execute(
+        """
         CREATE TABLE IF NOT EXISTS worktree_health_rows (
             path TEXT PRIMARY KEY,
             inputs_sig TEXT NOT NULL,
@@ -495,6 +506,47 @@ def cache_store_rows(
     now_ts = int(time.time())
     conn = cache_connect(base_dir)
     cache_init(conn, cache_schema_version=cache_schema_version)
+    _replace_project_rows(conn, payload_rows, now_ts)
+    conn.commit()
+    conn.close()
+    return now_ts
+
+
+def cache_store_rows_merged(
+    base_dir: Path,
+    *,
+    cache_schema_version: int,
+    payload_rows: list[tuple[object, ...]],
+    scan_started_ts: int,
+) -> int:
+    """Replace rows from a full scan that started at ``scan_started_ts``,
+    keeping rows another process wrote after that (cached_at >= start):
+    those are newer than the scan."""
+    now_ts = int(time.time())
+    conn = cache_connect(base_dir)
+    try:
+        cache_init(conn, cache_schema_version=cache_schema_version)
+        conn.isolation_level = None
+        conn.execute("BEGIN IMMEDIATE")
+        conn.execute("DELETE FROM project_cache WHERE cached_at < ?", (scan_started_ts,))
+        if payload_rows:
+            conn.executemany(
+                PROJECT_CACHE_INSERT_SQL.replace("INSERT OR REPLACE", "INSERT OR IGNORE", 1),
+                payload_rows,
+            )
+        conn.executemany(
+            "INSERT OR REPLACE INTO cache_meta(key, value) VALUES(?, ?)",
+            [("last_refresh_ts", str(now_ts)), ("full_scan_ts", str(now_ts))],
+        )
+        conn.execute("COMMIT")
+        return now_ts
+    finally:
+        conn.close()
+
+
+def _replace_project_rows(
+    conn: sqlite3.Connection, payload_rows: list[tuple[object, ...]], now_ts: int
+) -> None:
     conn.execute("DELETE FROM project_cache")
     if payload_rows:
         conn.executemany(PROJECT_CACHE_INSERT_SQL, payload_rows)
@@ -502,9 +554,72 @@ def cache_store_rows(
         "INSERT OR REPLACE INTO cache_meta(key, value) VALUES('last_refresh_ts', ?)",
         (str(now_ts),),
     )
-    conn.commit()
-    conn.close()
-    return now_ts
+
+
+def _read_meta_int(conn: sqlite3.Connection, key: str) -> int:
+    row = conn.execute("SELECT value FROM cache_meta WHERE key = ?", (key,)).fetchone()
+    return int(str(row[0])) if row and str(row[0]).isdigit() else 0
+
+
+def cache_read_meta_int(base_dir: Path, key: str) -> int:
+    """Cheap read of one numeric cache_meta value; 0 when unset or no cache."""
+    if not cache_db_path(base_dir).is_file():
+        return 0
+    try:
+        conn = cache_connect(base_dir)
+    except (OSError, sqlite3.Error):
+        return 0
+    try:
+        return _read_meta_int(conn, key)
+    except sqlite3.OperationalError:
+        return 0
+    finally:
+        conn.close()
+
+
+PackedMetaEntry = tuple[str, int, int, str | None, str | None]
+
+
+def cache_load_packed_meta(
+    base_dir: Path, *, cache_schema_version: int
+) -> list[PackedMetaEntry]:
+    """(path, mtime_ns, size, member, raw yaml) per packed archive, so a new
+    process does not have to unpack every archive to find its metadata."""
+    if not cache_db_path(base_dir).is_file():
+        return []
+    conn = cache_connect(base_dir)
+    try:
+        cache_init(conn, cache_schema_version=cache_schema_version)
+        rows = conn.execute(
+            "SELECT path, mtime_ns, size, member, raw FROM packed_meta"
+        ).fetchall()
+    finally:
+        conn.close()
+    return [
+        (str(r[0]), int(r[1]), int(r[2]), r[3], r[4])
+        for r in rows
+    ]
+
+
+def cache_save_packed_meta(
+    base_dir: Path,
+    *,
+    cache_schema_version: int,
+    entries: list[PackedMetaEntry],
+) -> None:
+    if not entries:
+        return
+    conn = cache_connect(base_dir)
+    try:
+        cache_init(conn, cache_schema_version=cache_schema_version)
+        conn.executemany(
+            "INSERT OR REPLACE INTO packed_meta(path, mtime_ns, size, member, raw) "
+            "VALUES(?, ?, ?, ?, ?)",
+            entries,
+        )
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def cache_upsert_rows(

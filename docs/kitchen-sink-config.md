@@ -75,8 +75,9 @@ properties:
     # Cache this property for 8 seconds.
     cache_ttl_s: 8
     queries:
-      # Detector: check tmux pane commands.
-      - type: tmux_editor_commands
+      # Detector: check tmux/herdr pane commands
+      # (tmux_editor_commands / herdr_editor_commands for one of them).
+      - type: editor_commands
         commands: [code, code-insiders, codium, cursor, zed, nvim, vim]
 
   RECENT:
@@ -344,12 +345,41 @@ open_mode:
   #   tmux_tab                  open new tmux window
   #   tmux_tab_load             goto matching tmux pane, else new tmux window
   #   tmux_tab_load_or_goto     goto matching tmux pane, else load .tmuxp.yaml/new window
+  #   herdr_tab                 open new herdr tab in the current workspace
+  #   herdr_tab_goto            goto matching herdr pane, else new herdr tab
+  #   herdr_workspace           goto matching herdr pane, else new herdr workspace
   profile: shell_cd
   # Optional tmux session name/id used when b runs outside tmux.
   # If omitted, one discoverable tmux session is used automatically.
   # If multiple sessions or sockets are active, tmux open mode fails
   # until this is set or `b --tmux-session <name-or-id>` is passed.
   # tmux_session: main
+
+# macOS: which backend brings the terminal window frontmost when
+# `b open` targets a tmux session in another window. Other platforms
+# ignore this. Default `auto` tries the fastest working backend in
+# order; pin a single backend here if auto picks one your machine
+# silently ignores (macOS focus-stealing prevention can drop AppKit /
+# osascript-activate requests without error).
+#
+#   auto            try appkit -> osascript -> system_events, first win
+#   appkit          Cocoa NSRunningApplication.activate (needs pyobjc)
+#   osascript       `tell application "<app>" to activate` subprocess
+#   system_events   System Events set-frontmost (Accessibility proxy;
+#                   exempt from focus-stealing prevention, slowest)
+#
+# Test backends before enforcing: `b setup` -> Debug -> "Focus / switch
+# tmux terminal". The info panel shows the configured + auto-detected
+# backend; run each option to time it and see which actually moves the
+# window. The report prints the exact `tmux_focus.method` line to set.
+#
+# The `system_events` backend's first call is cold (~0.5-1s: it loads
+# Open Scripting and launches the System Events helper). The TUI warms it
+# in the background (precompiles the script, keeps System Events alive)
+# so the first real `b open` is fast; nothing to configure. `b setup` ->
+# Debug -> "Probe macOS focus backends" times the warm-up.
+tmux_focus:
+  method: auto
 
 # Notes integration for built-in notes actions.
 notes:

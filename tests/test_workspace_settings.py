@@ -280,3 +280,28 @@ def test_load_notes_config_supports_log_and_rename_blocks() -> None:
 def test_nested_discovery_set_and_get_roundtrip() -> None:
     updated = workspace_settings.set_nested_discovery_enabled({}, enabled=True)
     assert workspace_settings.nested_discovery_enabled(updated) is True
+
+
+_KNOWN_FOCUS = {"auto", "appkit", "osascript", "system_events"}
+
+
+@pytest.mark.parametrize(
+    "data,expected",
+    [
+        ({"tmux_focus": {"method": "system_events"}}, "system_events"),
+        ({"tmux_focus": {"method": "  appkit  "}}, "appkit"),
+        ({"tmux_focus": {"method": "bogus"}}, "auto"),
+        ({"tmux_focus": {"method": ""}}, "auto"),
+        ({"tmux_focus": {}}, "auto"),
+        ({"tmux_focus": "system_events"}, "auto"),
+        ({}, "auto"),
+        ("not-a-dict", "auto"),
+    ],
+)
+def test_load_tmux_focus_method(data: object, expected: str) -> None:
+    assert (
+        workspace_settings.load_tmux_focus_method(
+            data, default="auto", known=_KNOWN_FOCUS
+        )
+        == expected
+    )

@@ -150,6 +150,28 @@ def test_log_row_health_issues_clears_seen_when_ok() -> None:
     assert "/a" not in app._health_issue_seen
 
 
+def test_log_row_health_issues_memoizes_by_signature() -> None:
+    app = _make_app(_health_memo={})
+    row = SimpleNamespace(path="/a", name="A")
+    calls: list[str] = []
+    sig = {"v": ("dir", (1, 1), None)}
+
+    def _health(path):
+        calls.append(path)
+        return ("warning", "broken")
+
+    for _ in range(3):
+        runtime_feedback.log_row_health_issues(
+            app, [row], base_meta_health=_health, base_meta_signature=lambda _p: sig["v"]
+        )
+    assert calls == ["/a"]
+    sig["v"] = ("dir", (2, 1), None)
+    runtime_feedback.log_row_health_issues(
+        app, [row], base_meta_health=_health, base_meta_signature=lambda _p: sig["v"]
+    )
+    assert calls == ["/a", "/a"]
+
+
 def test_mark_state_dirty_sets_flag_and_due_at() -> None:
     app = _make_app()
     before = time.time()

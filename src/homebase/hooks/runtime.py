@@ -13,10 +13,10 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any
 
-from .. import __version__ as homebase_version
 from ..core import prompting
 from ..core.models import HookInfo, HookRuntime, HookTarget, PreOutcome, PreResult
 from ..core.utils import HOOK_RUN_ERRORS
+from ..core.version import get_version
 from ..metadata.api import append_base_log
 from .api import HookContext
 from .loader import resolve_hook_module
@@ -99,7 +99,7 @@ def _run_pre_chain(
             module = resolve_hook_module(spec, Path(app.base_dir))
             runtime = HookRuntime(
                 invoker="tui",
-                homebase_version=homebase_version,
+                homebase_version=get_version(),
                 now_iso=datetime.now(timezone.utc).isoformat(),
                 now_ts=int(time.time()),
                 user=str(getpass.getuser() or ""),
@@ -330,7 +330,7 @@ def _run_cli_module(
 ) -> None:
     runtime = HookRuntime(
         invoker="cli",
-        homebase_version=homebase_version,
+        homebase_version=get_version(),
         now_iso=datetime.now(timezone.utc).isoformat(),
         now_ts=int(time.time()),
         user=str(getpass.getuser() or ""),
@@ -446,7 +446,7 @@ def _run_cli_pre_module(
 ) -> object:
     runtime = HookRuntime(
         invoker="cli",
-        homebase_version=homebase_version,
+        homebase_version=get_version(),
         now_iso=datetime.now(timezone.utc).isoformat(),
         now_ts=int(time.time()),
         user=str(getpass.getuser() or ""),
@@ -589,7 +589,7 @@ def _run_post_chain(
 
         runtime = HookRuntime(
             invoker="tui",
-            homebase_version=homebase_version,
+            homebase_version=get_version(),
             now_iso=datetime.now(timezone.utc).isoformat(),
             now_ts=int(time.time()),
             user=str(getpass.getuser() or ""),

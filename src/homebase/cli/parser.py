@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import argparse
 
+from ..core.constants import OPEN_MODE_PROFILES
+
 
 def _add_new_arguments(p: argparse.ArgumentParser) -> None:
     p.add_argument("inputs", nargs="*", default=[])
@@ -77,6 +79,19 @@ def build_cli_parser() -> argparse.ArgumentParser:
         help="target tmux session name/id for outside-tmux open mode",
     )
     parser.add_argument("--filter", dest="initial_filter", default="")
+    parser.add_argument(
+        "--clear-query",
+        dest="clear_query",
+        action="store_true",
+        help="start with an empty search instead of the last one",
+    )
+    parser.add_argument(
+        "--open-mode",
+        dest="open_mode",
+        choices=[str(profile["id"]) for profile in OPEN_MODE_PROFILES],
+        default="",
+        help="open profile for this run, overrides open_mode.profile in config",
+    )
     parser.add_argument(
         "-v",
         "--verbose",
@@ -211,7 +226,8 @@ def build_cli_parser() -> argparse.ArgumentParser:
         "shell-init",
         help="print shell-integration wrapper (cd handoff via HOMEBASE_CD_FILE)",
     )
-    p_shell_init.add_argument("shell", nargs="?", choices=["fish", "zsh", "bash"], default="", help="shell name (omit for usage help)")
+    # default None, not "": Python 3.13 checks a string default against choices.
+    p_shell_init.add_argument("shell", nargs="?", choices=["fish", "zsh", "bash"], default=None, help="shell name (omit for usage help)")
     p_internal_complete = sub.add_parser("__complete", help=argparse.SUPPRESS)
     p_internal_complete.add_argument("shell", choices=["fish", "zsh", "bash"], help=argparse.SUPPRESS)
     p_internal_complete.add_argument("cword", type=int, help=argparse.SUPPRESS)
@@ -225,6 +241,15 @@ def build_cli_parser() -> argparse.ArgumentParser:
     p_setup = sub.add_parser("setup", help="check and install recommended shell/tool setup")
     p_setup.add_argument("--dry-run", action="store_true", help="print proposed changes without writing")
     p_setup.add_argument("--json", dest="json_output", action="store_true", help="emit machine-readable report")
+
+    p_daemon = sub.add_parser(
+        "daemon",
+        help="keep the project cache fresh for all b instances (status screen in a terminal)",
+    )
+    p_daemon.add_argument("--once", action="store_true", help="one full refresh, then exit")
+    p_daemon.add_argument(
+        "--plain", action="store_true", help="log lines on stdout instead of the status screen"
+    )
 
     p_cache = sub.add_parser("cache", help="cache maintenance commands")
     cache_sub = p_cache.add_subparsers(dest="cache_subcommand", required=True)
@@ -328,6 +353,15 @@ def build_cli_parser() -> argparse.ArgumentParser:
     )
     p_raycast_run.add_argument("action_id")
     p_raycast_run.add_argument("project", nargs="?", default="")
+    p_raycast_opened = raycast_sub.add_parser(
+        "opened",
+        help="record that the extension just opened a project (for raycast.sort: opened)",
+    )
+    p_raycast_opened.add_argument("project")
+    raycast_sub.add_parser(
+        "snapshot",
+        help="write the project list file the extension reads (b daemon keeps it current)",
+    )
 
     p_deworktree = sub.add_parser(
         "deworktree",

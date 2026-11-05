@@ -2,26 +2,20 @@ from __future__ import annotations
 
 import threading
 import time
-from pathlib import Path
 from typing import Any
 
 from textual.widgets import Static
 
 from ...cache.api import (
     cache_load_worktree_health,
-    cache_load_worktree_health_rows,
-    cache_prune_worktree_health_rows,
     cache_save_worktree_health,
-    cache_upsert_worktree_health_row,
 )
 from ...core.utils import WIDGET_API_ERRORS
 from ...workspace.health import (
-    audit_unit,
-    audit_unit_signature,
     audit_workspace,
-    list_audit_units,
     repair_issue,
 )
+from ...workspace.health_scan import issue_to_dict, scan_worktree_health
 
 SCAN_BUDGET_S = 0.2
 
@@ -37,16 +31,6 @@ def _is_idle(app: Any) -> bool:
     if callable(critical) and critical():
         return False
     return True
-
-
-def _issue_to_dict(issue) -> dict[str, object]:
-    return {
-        "kind": issue.kind,
-        "path": str(issue.path),
-        "detail": issue.detail,
-        "fix_summary": issue.fix_summary,
-        "parent_path": str(issue.parent_path) if issue.parent_path else "",
-    }
 
 
 def load_initial_health(app: Any) -> None:
@@ -76,56 +60,21 @@ def maybe_refresh_worktree_health(app: Any, *, interval_s: float) -> None:
     cursor = list(getattr(app, "worktree_health_scan_cursor", []) or [])
     if not cursor and now - last < interval_s:
         return
+    app.worktree_health_refresh_last_ts = now
+    is_owner = getattr(app, "_is_cache_owner", None)
+    if callable(is_owner) and not is_owner():
+        reload_health_from_cache(app)
+        return
 
     app.worktree_health_refresh_running = True
-    app.worktree_health_refresh_last_ts = now
     base_dir = app.base_dir
 
     def worker() -> None:
         try:
             cur_cursor = list(getattr(app, "worktree_health_scan_cursor", []) or [])
-            if not cur_cursor:
-                units = list_audit_units(base_dir)
-                cur_cursor = [str(unit) for unit in units]
-                # Drop cache entries for paths that vanished.
-                cache_prune_worktree_health_rows(base_dir, set(cur_cursor))
-            cached = cache_load_worktree_health_rows(base_dir)
-            remaining = list(cur_cursor)
-            deadline = time.monotonic() + SCAN_BUDGET_S
-            now_scan = int(time.time())
-            visited = 0
-            while remaining:
-                unit_str = remaining[0]
-                unit_path = Path(unit_str)
-                try:
-                    sig = audit_unit_signature(base_dir, unit_path)
-                except OSError:
-                    remaining.pop(0)
-                    continue
-                cached_entry = cached.get(unit_str)
-                if cached_entry is not None and cached_entry[0] == sig:
-                    remaining.pop(0)
-                    visited += 1
-                    if time.monotonic() >= deadline:
-                        break
-                    continue
-                try:
-                    issues = audit_unit(base_dir, unit_path)
-                except (OSError, ValueError):
-                    issues = []
-                payload = [_issue_to_dict(issue) for issue in issues]
-                cache_upsert_worktree_health_row(
-                    base_dir, unit_str, sig, now_scan, payload
-                )
-                cached[unit_str] = (sig, now_scan, payload)
-                remaining.pop(0)
-                visited += 1
-                if time.monotonic() >= deadline:
-                    break
-            aggregate: list[dict[str, object]] = []
-            for _path, (_sig, _ts, entries) in cached.items():
-                aggregate.extend(entries)
-            cache_save_worktree_health(base_dir, now_scan, aggregate)
+            aggregate, remaining, visited, now_scan = scan_worktree_health(
+                base_dir, cur_cursor, budget_s=SCAN_BUDGET_S
+            )
             app.call_from_thread(
                 on_worktree_health_refresh_done,
                 app,
@@ -138,6 +87,17 @@ def maybe_refresh_worktree_health(app: Any, *, interval_s: float) -> None:
             app.call_from_thread(_clear_refresh_running, app)
 
     threading.Thread(target=worker, daemon=True).start()
+
+
+def reload_health_from_cache(app: Any) -> None:
+    """Pick up the cache owner's latest sweep without scanning."""
+    cached = cache_load_worktree_health(app.base_dir)
+    if cached is None:
+        return
+    scan_at, issues = cached
+    if int(scan_at) <= int(getattr(app, "worktree_health_last_scan_ts", 0)):
+        return
+    on_worktree_health_refresh_done(app, list(issues), int(scan_at))
 
 
 def _clear_refresh_running(app: Any) -> None:
@@ -218,7 +178,7 @@ def _on_confirm_fix(app: Any, ok: bool | None, issues: list) -> None:
     else:
         app._log(f"worktree fix applied {applied}", "info")
 
-    refreshed = [_issue_to_dict(issue) for issue in audit_workspace(app.base_dir)]
+    refreshed = [issue_to_dict(issue) for issue in audit_workspace(app.base_dir)]
     cache_save_worktree_health(app.base_dir, int(time.time()), refreshed)
     app.worktree_health_issues = refreshed
     app.worktree_health_last_scan_ts = int(time.time())

@@ -33,6 +33,8 @@ class UIContext:
     )
     hook_specs: dict[tuple[str, str], list[HookSpec]] = field(default_factory=dict)
     hook_refresh_config: object | None = None
+    # Start with an empty search instead of the one saved by the last run.
+    clear_query: bool = False
 
 
 def build_ui_context(base_dir: Path) -> UIContext:

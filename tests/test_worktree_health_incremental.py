@@ -129,3 +129,40 @@ def test_maybe_refresh_short_circuits_when_not_idle(tmp_path: Path) -> None:
     # change — the scheduler exits early.
     assert app.worktree_health_refresh_running is False
     assert app.worktree_health_refresh_last_ts == 0.0
+
+
+def test_maybe_refresh_non_owner_reloads_owner_sweep_from_cache(tmp_path: Path) -> None:
+    from homebase.cache.api import cache_save_worktree_health
+
+    issue = {"kind": "orphan", "path": "/x", "detail": "d", "fix_summary": "f", "parent_path": ""}
+    cache_save_worktree_health(tmp_path, 500, [issue])
+    done: list[object] = []
+    app = SimpleNamespace(
+        base_dir=tmp_path,
+        fast_exit_requested=False,
+        worktree_health_refresh_running=False,
+        worktree_health_refresh_last_ts=0.0,
+        worktree_health_scan_cursor=[],
+        worktree_health_issues=[],
+        worktree_health_last_scan_ts=0,
+        worktree_health_dismissed=True,
+        query_apply_pending=False,
+        _busy_depth=0,
+        _critical_job_active=lambda: False,
+        _is_cache_owner=lambda: False,
+        _log=lambda *_a, **_k: None,
+        query_one=lambda *_a: SimpleNamespace(
+            update=lambda _t: None, add_class=lambda _c: None, remove_class=lambda _c: None
+        ),
+        call_from_thread=lambda *a, **_k: done.append(a),
+    )
+    maybe_refresh_worktree_health(app, interval_s=1.0)
+    assert app.worktree_health_refresh_running is False
+    assert app.worktree_health_issues == [issue]
+    assert app.worktree_health_last_scan_ts == 500
+    assert done == []
+    # Same sweep again: nothing new to apply.
+    app.worktree_health_issues = []
+    app.worktree_health_refresh_last_ts = 0.0
+    maybe_refresh_worktree_health(app, interval_s=1.0)
+    assert app.worktree_health_issues == []

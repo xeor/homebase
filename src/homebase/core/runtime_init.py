@@ -80,36 +80,6 @@ def load_runtime_config(
     )
 
 
-def validate_custom_hotkeys(
-    custom_hotkeys: list[dict[str, object]],
-    *,
-    reserved_hotkeys: set[str],
-) -> str | None:
-    seen: dict[str, str] = {}
-    reserved = {str(key).strip().lower() for key in reserved_hotkeys if str(key).strip()}
-
-    for idx, binding in enumerate(custom_hotkeys, start=1):
-        hotkey = str(binding.get("hotkey", "")).strip().lower()
-        if not hotkey:
-            continue
-        binding_id = str(binding.get("id", "")).strip() or f"custom_hotkey_{idx}"
-
-        if hotkey in reserved:
-            return (
-                "custom action hotkey conflict: "
-                f"{hotkey!r} for custom hotkey {binding_id!r} is already in use"
-            )
-
-        previous = seen.get(hotkey)
-        if previous is not None:
-            return (
-                "custom action hotkey conflict: "
-                f"{hotkey!r} is used by both {previous!r} and {binding_id!r}"
-            )
-        seen[hotkey] = binding_id
-    return None
-
-
 def resolve_initial_filter_expression(
     initial_filter_expr: str,
     *,

@@ -6,7 +6,6 @@ import shlex
 import shutil
 import subprocess
 import sys
-import textwrap
 from datetime import datetime
 from pathlib import Path
 from typing import Callable
@@ -15,6 +14,7 @@ import yaml
 
 from .changelog import ChangelogEntry, entries_since, load_changelog_entries
 from .constants import GLOBAL_CONFIG_FILE_NAME, HOMEBASE_DIR_NAME
+from .diff import color_diff_lines
 from .setup_model import (
     STATUS_FAIL,
     STATUS_PASS,
@@ -33,6 +33,7 @@ from .setup_render import (
     render_summary,
 )
 from .version import get_commit, get_version
+from .yaml_io import yaml_safe_load
 
 # macOS fast-focus optional backend. ``FAST_FOCUS_EXTRA`` is the
 # pyproject optional-dependency group; ``FAST_FOCUS_PACKAGE`` is the
@@ -143,47 +144,11 @@ def recommended_tmux_save_binding(script_path: Path, tmux_bin: str = "") -> str:
     )
 
 
-def compact_path_for_display(path_text: str) -> str:
-    raw = str(path_text)
-    home = str(Path.home())
-    if home and raw.startswith(home):
-        return "~" + raw[len(home) :]
-    return raw
-
-
-def binding_display_lines(binding: str, width: int = 88) -> list[str]:
-    compact = compact_path_for_display(binding)
-    return textwrap.wrap(compact, width=width, break_long_words=False, break_on_hyphens=False) or [compact]
-
-
 def _is_tmux_bind_line(line: str) -> bool:
     stripped = str(line).strip()
     if not stripped or stripped.startswith("#"):
         return False
     return stripped.startswith("bind-key ") or stripped.startswith("bind ")
-
-
-def is_acceptable_tmux_save_binding(line: str) -> bool:
-    """Returns True if `line` defines a working ``b tmux save`` binding.
-
-    Parser-style: tolerates whitespace, quoting, and path variation;
-    only checks that the essential pieces are present. Used so the
-    binding doesn't read as "stale" because of a trivial difference."""
-    if not _is_tmux_bind_line(line):
-        return False
-    stripped = str(line).strip()
-    if "tmux save" not in stripped:
-        return False
-    if "#{pane_id}" not in stripped:
-        return False
-    if "session_id" not in stripped:
-        return False
-    # The legacy form invoked the entry-point via `uv run --script`,
-    # which sometimes failed silently. Treat it as stale so setup can
-    # offer the rewrite.
-    if "uv run --script" in stripped:
-        return False
-    return True
 
 
 def _normalize_binding(line: str) -> str:
@@ -205,23 +170,6 @@ def has_recommended_tmux_binding(tmux_conf_text: str, expected_line: str = "") -
         _normalize_binding(line) == expected_norm
         for line in tmux_conf_text.splitlines()
     )
-
-
-def has_any_tmux_save_binding(tmux_conf_text: str) -> bool:
-    """True if there's ANY `b tmux save` binding (acceptable or
-    legacy). Used to detect "present" state for the fix."""
-    for raw in tmux_conf_text.splitlines():
-        if not _is_tmux_bind_line(raw):
-            continue
-        line = str(raw).strip()
-        if "tmux save" not in line:
-            continue
-        # The line must actually invoke `b tmux save`; the legacy form
-        # has 'tmux save' as a sub-command after a path ending in /b,
-        # which still satisfies the loose check.
-        if " save" in line:
-            return True
-    return False
 
 
 def tmux_save_binding_lines(tmux_conf_text: str) -> list[str]:
@@ -573,9 +521,9 @@ def _install_command(
         return cmd
     if install_mode == "uv-tool":
         if with_fast_focus:
-            cmd = _uv_tool_fast_focus_cmd()
-            if cmd is not None:
-                return cmd
+            fast_focus_cmd = _uv_tool_fast_focus_cmd()
+            if fast_focus_cmd is not None:
+                return fast_focus_cmd
             return f'uv tool install --force "homebase[{FAST_FOCUS_EXTRA}]"'
         return "uv tool upgrade homebase"
     if install_mode == "pip":
@@ -583,17 +531,6 @@ def _install_command(
             return f'python -m pip install -U "homebase[{FAST_FOCUS_EXTRA}]"'
         return "python -m pip install -U homebase"
     return ""
-
-
-def _detect_self_update(
-    base_dir: Path,
-    launcher_path: Path | None,
-    *,
-    fast_focus_installed: bool = False,
-) -> tuple[str, str]:
-    mode, detail = _detect_install_mode(base_dir, launcher_path)
-    cmd = _install_command(mode, base_dir, with_fast_focus=fast_focus_installed)
-    return detail, cmd
 
 
 # --- context gather --------------------------------------------------
@@ -675,7 +612,7 @@ def _gather_context(
     config_valid = True
     if config_exists:
         try:
-            loaded = yaml.safe_load(config_path.read_text())
+            loaded = yaml_safe_load(config_path.read_text())
             config_valid = loaded is None or isinstance(loaded, dict)
         except (OSError, yaml.YAMLError):
             config_valid = False
@@ -1026,58 +963,6 @@ def _build_checks(ctx: SetupContext) -> list[SetupCheck]:
 # --- fix building ----------------------------------------------------
 
 
-def _color_diff_lines(
-    current_lines: list[str],
-    desired_lines: list[str],
-    *,
-    header: str = "",
-    max_lines: int = 80,
-) -> tuple[str, ...]:
-    """Return a coloured unified-diff representation as Rich-markup lines.
-
-    - Removed lines are coloured red, added lines green, hunk headers
-      cyan, and unchanged context dim.
-    - Truncates the body at ``max_lines`` with a trailing summary so
-      the preview pane never grows unbounded.
-    - When both sides are identical, returns a single dim ``(no
-      differences)`` line.
-    """
-    import difflib
-
-    diff = list(
-        difflib.unified_diff(
-            current_lines,
-            desired_lines,
-            fromfile="current",
-            tofile="desired",
-            lineterm="",
-            n=2,
-        )
-    )
-    if not diff:
-        return ((f"{header}\n" if header else "") + "[dim](no differences)[/]",)
-
-    out: list[str] = []
-    if header:
-        out.append(f"[dim]{header}[/]")
-    for line in diff:
-        if line.startswith("---") or line.startswith("+++"):
-            out.append(f"[dim]{line}[/]")
-        elif line.startswith("@@"):
-            out.append(f"[bright_cyan]{line}[/]")
-        elif line.startswith("+"):
-            out.append(f"[bright_green]{line}[/]")
-        elif line.startswith("-"):
-            out.append(f"[bright_red]{line}[/]")
-        else:
-            out.append(f"[dim]{line}[/]")
-    if len(out) > max_lines:
-        truncated = len(out) - max_lines
-        out = out[:max_lines]
-        out.append(f"[dim]… (diff truncated; {truncated} more line(s))[/]")
-    return tuple(out)
-
-
 def _gitignore_preview_create(path: Path) -> tuple[str, ...]:
     current = _read_text_lines(path)
     desired = list(current)
@@ -1085,13 +970,13 @@ def _gitignore_preview_create(path: Path) -> tuple[str, ...]:
         if desired and desired[-1].strip() != "":
             desired.append("")
         desired.append("cache.sqlite3")
-    return _color_diff_lines(current, desired, header=f"# {path}")
+    return color_diff_lines(current, desired, header=f"# {path}")
 
 
 def _gitignore_preview_remove(path: Path) -> tuple[str, ...]:
     current = _read_text_lines(path)
     desired = [line for line in current if line.strip() != "cache.sqlite3"]
-    return _color_diff_lines(current, desired, header=f"# {path}")
+    return color_diff_lines(current, desired, header=f"# {path}")
 
 
 def _inline_char_diff_pair(old: str, new: str) -> tuple[str, str]:
@@ -1488,12 +1373,12 @@ def _build_fixes(ctx: SetupContext) -> list[SetupFix]:
                 recommended=True,
                 apply_create=_fix_completion,
                 apply_remove=_remove_completion,
-                preview_create=_color_diff_lines(
+                preview_create=color_diff_lines(
                     _read_text_lines(comp_path),
                     comp_body.splitlines(),
                     header=f"# {comp_path}",
                 ),
-                preview_remove=_color_diff_lines(
+                preview_remove=color_diff_lines(
                     _read_text_lines(comp_path),
                     [],
                     header=f"# delete {comp_path}",
@@ -1549,7 +1434,7 @@ def _build_fixes(ctx: SetupContext) -> list[SetupFix]:
             _remove_shell_init_source_line(rc, source_line)
 
         preview_create_lines = list(
-            _color_diff_lines(
+            color_diff_lines(
                 _read_text_lines(init_path),
                 init_body.splitlines(),
                 header=f"# {init_path}",
@@ -1557,7 +1442,7 @@ def _build_fixes(ctx: SetupContext) -> list[SetupFix]:
             )
         )
         preview_remove_lines = list(
-            _color_diff_lines(
+            color_diff_lines(
                 _read_text_lines(init_path),
                 [],
                 header=f"# delete {init_path}",
@@ -1573,7 +1458,7 @@ def _build_fixes(ctx: SetupContext) -> list[SetupFix]:
             rc_desired_remove = [line for line in rc_current if line.strip() != source_line.strip()]
             preview_create_lines.append("")
             preview_create_lines.extend(
-                _color_diff_lines(
+                color_diff_lines(
                     rc_current,
                     rc_desired_create,
                     header=f"# {ctx.shell_init_rc}",
@@ -1582,7 +1467,7 @@ def _build_fixes(ctx: SetupContext) -> list[SetupFix]:
             )
             preview_remove_lines.append("")
             preview_remove_lines.extend(
-                _color_diff_lines(
+                color_diff_lines(
                     rc_current,
                     rc_desired_remove,
                     header=f"# {ctx.shell_init_rc}",

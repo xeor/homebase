@@ -79,13 +79,13 @@ def test_load_global_config_dict_caches_result(tmp_path: Path, monkeypatch) -> N
     config_store.save_global_config_dict(tmp_path, data)
 
     parses = {"count": 0}
-    real = config_store.yaml.safe_load
+    real = config_store.yaml_safe_load
 
     def counter(text: str) -> object:
         parses["count"] += 1
         return real(text)
 
-    monkeypatch.setattr(config_store.yaml, "safe_load", counter)
+    monkeypatch.setattr(config_store, "yaml_safe_load", counter)
 
     config_store.clear_global_config_cache()
     assert config_store.load_global_config_dict(tmp_path) == data

@@ -50,12 +50,14 @@ from ..core.constants import (
     DEFAULT_ARCHIVE_TZ_NAME,
     ENV_BASE_DIR,
     ENV_DEBUG_TIMERS,
+    ENV_OPEN_MODE,
     ENV_TMUX_SESSION,
     discover_tab_actions,
 )
 from ..core.logging import configure_logging, logger
 from ..ui import run_textual_ui as _run_textual_ui
 from ..ui.context import UIContext
+from ..ui.new_project_app import run_new_project_ui as _run_new_project_ui
 from ..workspace.projects import run_post_commands
 from ..workspace.startup_validation import run_startup_validations
 from .completion import completion_candidates, completion_script
@@ -66,6 +68,13 @@ from .shell_init import shell_init_help_text, shell_init_script
 
 def resolve_base_dir(base_folder_arg: str | None) -> Path:
     return core_utils.resolve_base_dir(base_folder_arg, os.environ.get("BASE_FOLDER"))
+
+
+def _daemon_entry(base_dir: Path, *, once: bool = False, plain: bool = False) -> int:
+    # Imported on use: only `b daemon` needs the status screen.
+    from ..ui.daemon_app import daemon_entry
+
+    return daemon_entry(base_dir, once=once, plain=plain)
 
 
 def run_textual_ui(
@@ -85,7 +94,8 @@ def no_arg_flow(
     *,
     ctx: UIContext | None = None,
 ) -> int:
-    from ..tmux.flow import open_shell_in_dir, open_with_mode
+    from ..commands.open_target import open_with_mode
+    from ..tmux.flow import open_shell_in_dir
 
     return interactive_flow.no_arg_flow(
         base_dir,
@@ -227,6 +237,17 @@ def _cmd_raycast(
             raycast_config=runtime_cfg.raycast_config,
             compile_filter_expr=compile_filter_expr,
         )
+    if subcommand == "opened":
+        from ..cache.api import cache_set_opened_ts
+
+        return raycast_cmd.cmd_opened(
+            base_dir, project, load_rows=cache_load_rows, set_opened_ts=cache_set_opened_ts
+        )
+    if subcommand == "snapshot":
+        from ..commands.raycast_snapshot import build_snapshot, write_snapshot
+
+        print(write_snapshot(base_dir, build_snapshot(base_dir)))
+        return 0
     return raycast_cmd.cmd_run(
         base_dir,
         project,
@@ -292,6 +313,9 @@ def main(argv: list[str]) -> int:
     tmux_session = str(getattr(ns, "tmux_session", "") or "").strip()
     if tmux_session:
         os.environ[ENV_TMUX_SESSION] = tmux_session
+    open_mode = str(getattr(ns, "open_mode", "") or "").strip()
+    if open_mode:
+        os.environ[ENV_OPEN_MODE] = open_mode
     debug_timers.set_enabled(
         bool(getattr(ns, "debug_timers", False))
         or os.environ.get(ENV_DEBUG_TIMERS, "").strip() not in ("", "0")
@@ -364,6 +388,7 @@ def main(argv: list[str]) -> int:
         },
         hook_specs=dict(runtime_cfg.hook_specs),
         hook_refresh_config=runtime_cfg.hook_refresh_config,
+        clear_query=bool(getattr(ns, "clear_query", False)),
     )
 
     initial_filter_expr = runtime_init.resolve_initial_filter_expression(
@@ -483,7 +508,7 @@ def main(argv: list[str]) -> int:
                 cwd_path,
                 pre_create_hook=_pre_create_hook,
                 post_create_hook=_post_create_hook,
-                run_textual_ui=_run_textual_ui,
+                run_textual_ui=_run_new_project_ui,
             ),
             cmd_completion=lambda shell: _cmd_completion(shell),
             cmd_internal_complete=lambda shell, cword, words: _cmd_internal_complete(
@@ -519,6 +544,7 @@ def main(argv: list[str]) -> int:
                 json_output=json_output,
             ),
             cmd_cache_warm=cmd_cache_warm,
+            cmd_daemon=_daemon_entry,
             cmd_tags_sync=lambda bd, verbose, debug: cmd_tags_sync(
                 bd,
                 verbose=verbose,
@@ -605,6 +631,7 @@ def main(argv: list[str]) -> int:
     if rc == 1 and ns.command not in {
         None,
         "cache",
+        "daemon",
         "tags",
         "archive",
         "tmux",

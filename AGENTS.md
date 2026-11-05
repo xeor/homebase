@@ -50,6 +50,7 @@ src/homebase/
 ├── cache/       # store, api, queue (sqlite)
 ├── metadata/    # store, utils, api (.base.yml), property
 ├── tmux/        # core, commands, flow
+├── herdr/       # socket client, panes, open modes
 ├── filter/      # engine, tag_index
 ├── notes/       # markdown note-edit primitives (log_md)
 ├── hooks/       # hook config/runtime/loader/snapshots
@@ -88,11 +89,12 @@ cache/       ← core/, config/
 metadata/    ← core/, config/
 archive/     ← core/, config/
 tmux/        ← core/, config/
+herdr/       ← core/, config/
 filter/      ← core/, config/
 notes/       ← core/
 hooks/       ← core/, config/, metadata/
 workspace/   ← core/, config/, cache/, metadata/, archive/, filter/
-commands/    ← workspace/, archive/, cache/, metadata/, tmux/, hooks/, core/, config/
+commands/    ← workspace/, archive/, cache/, metadata/, tmux/, herdr/, hooks/, core/, config/
 ui/          ← everything except cli/
 cli/         ← everything
 ```

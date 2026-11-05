@@ -12,9 +12,9 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any, Callable
 
-from .. import __version__ as homebase_version
 from ..core.models import HookInfo, HookRuntime, HookSpec, HookTarget
 from ..core.utils import HOOK_RUN_ERRORS
+from ..core.version import get_version
 from ..metadata.api import append_base_log
 from .api import HookContext
 from .loader import resolve_hook_module
@@ -183,7 +183,7 @@ def _build_context(
 ) -> HookContext:
     runtime = HookRuntime(
         invoker=invoker,
-        homebase_version=homebase_version,
+        homebase_version=get_version(),
         now_iso=datetime.now(timezone.utc).isoformat(),
         now_ts=int(time.time()),
         user=str(getpass.getuser() or ""),

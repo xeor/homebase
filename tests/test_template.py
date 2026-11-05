@@ -63,13 +63,6 @@ def test_template_q_quoting_uses_shlex_quote() -> None:
     assert ctx["path_q"] == shlex.quote("/tmp/a b")
 
 
-def test_validate_template_reports_unknown_and_unquoted() -> None:
-    allowed = {"path", "path_q"}
-    msgs = template.validate_template("cmd {{ path }} {{ bad }} {{ path_q }}", allowed)
-    assert "unknown template variable: bad" in msgs
-    assert "warning: unquoted template variable in command: path" in msgs
-
-
 def test_list_context_paths_q_supports_single_and_multiple_rows() -> None:
     app = SimpleNamespace()
     one = template.build_list_context(app, [_row("/p/a")], Path("/p"))
