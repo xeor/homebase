@@ -34,10 +34,9 @@
         {
           "name": "bPath",
           "title": "b Path",
-          "description": "Path to the b executable",
+          "description": "Path to the b executable (empty: ~/.local/bin/b)",
           "type": "textfield",
-          "required": false,
-          "default": "/Users/xeor/.local/bin/b"
+          "required": false
         },
         {
           "name": "timeoutMs",

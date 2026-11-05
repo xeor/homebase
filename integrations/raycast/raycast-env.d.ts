@@ -15,8 +15,8 @@ declare type Preferences = ExtensionPreferences
 declare namespace Preferences {
   /** Preferences accessible in the `projects` command */
   export type Projects = ExtensionPreferences & {
-  /** b Path - Path to the b executable */
-  "bPath": string,
+  /** b Path - Path to the b executable (empty: ~/.local/bin/b) */
+  "bPath"?: string,
   /** Command Timeout - Timeout in milliseconds */
   "timeoutMs": string
 }

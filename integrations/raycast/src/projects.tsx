@@ -10,13 +10,15 @@ import {
   Toast,
 } from "@raycast/api";
 import { execFile, spawn } from "node:child_process";
+import os from "node:os";
 import path from "node:path";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-const DEFAULT_B_PATH = "/Users/xeor/.local/bin/b";
+const LOCAL_BIN = path.join(os.homedir(), ".local", "bin");
+const DEFAULT_B_PATH = path.join(LOCAL_BIN, "b");
 const DEFAULT_TIMEOUT_MS = 10_000;
 const COMMAND_PATHS = [
-  "/Users/xeor/.local/bin",
+  LOCAL_BIN,
   "/opt/homebrew/bin",
   "/usr/local/bin",
   "/usr/bin",
