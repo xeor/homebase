@@ -34,6 +34,13 @@ class DaemonStatus:
     health_issues: int = -1
     health_ts: float = 0.0
     health_took_s: float = 0.0
+    warm_ts: float = 0.0
+    warm_runs: int = 0
+    warm_cold_runs: int = 0
+    warm_listed: int = 0
+    warm_files: int = 0
+    warm_bytes: int = 0
+    warm_took_s: float = 0.0
     recent: tuple[str, ...] = ()
 
 
@@ -74,6 +81,13 @@ def read_daemon_status(base_dir: Path) -> DaemonStatus | None:
             health_issues=int(raw.get("health_issues", -1)),
             health_ts=float(raw.get("health_ts", 0.0)),
             health_took_s=float(raw.get("health_took_s", 0.0)),
+            warm_ts=float(raw.get("warm_ts", 0.0)),
+            warm_runs=int(raw.get("warm_runs", 0)),
+            warm_cold_runs=int(raw.get("warm_cold_runs", 0)),
+            warm_listed=int(raw.get("warm_listed", 0)),
+            warm_files=int(raw.get("warm_files", 0)),
+            warm_bytes=int(raw.get("warm_bytes", 0)),
+            warm_took_s=float(raw.get("warm_took_s", 0.0)),
             recent=tuple(str(line) for line in raw.get("recent", ())),
         )
     except FileNotFoundError:

@@ -1,0 +1,24 @@
+--- pid=79089 start=2026-11-13T09:50:12.324 args=--startup-trace verify-reconstruct
+    +  0.000s  (+0.000s)  python interpreter
+    +  0.539s  (+0.539s)  imports: ui (textual)
+    +  0.549s  (+0.010s)  imports done
+    +  0.557s  (+0.008s)  command imports
+    +  0.567s  (+0.010s)  args parsed
+    +  0.571s  (+0.004s)  startup validation
+    +  0.584s  (+0.013s)  config loaded
+    +  0.587s  (+0.003s)  ui start
+    +  0.606s  (+0.018s)  ui state read
+    +  0.621s  (+0.015s)  cache rows read
+    +  0.631s  (+0.010s)  app constructed
+    +  0.693s  (+0.062s)  ui mount
+    +  0.703s  (+0.010s)  tmux/herdr context registered
+    +  0.711s  (+0.009s)  table + side built
+    +  0.721s  (+0.009s)  cache owner checked
+    +  0.726s  (+0.005s)  ui mounted
+    +  0.804s  (+0.079s)  ui first paint
+    +  0.813s  (+0.009s)  after paint: worktree health
+    +  0.821s  (+0.008s)  after paint: focus warm-up
+    +  0.831s  (+0.009s)  after paint: active dir check
+    +  0.922s  (+0.091s)  after paint: pane probe
+    +  0.935s  (+0.013s)  after paint: record startup files
+    +  0.941s  (+0.006s)  ui settled

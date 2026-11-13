@@ -62,6 +62,7 @@ from ..config.prefs import (
     resolve_filter_expression,
     save_ui_state,
 )
+from ..core import startup_trace
 from ..core import utils as core_utils
 from ..core.constants import (
     ARCHIVE_DIR_NAME,
@@ -429,8 +430,11 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
         self._single_choice_screen_cls = SingleChoiceScreen
         self._result_screen_cls = ResultScreen
         self.start_new_mode = start_new_mode
+        self._startup_painted = False
         persisted = load_ui_state(self.base_dir)
+        startup_trace.mark("ui state read")
         self._init_rows_state(initial_filter, persisted)
+        startup_trace.mark("cache rows read")
         self._init_side_state(persisted)
         self._init_view_state(persisted)
         self._init_message_state()
@@ -923,6 +927,7 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
         yield Footer()
 
     def on_mount(self) -> None:
+        startup_trace.mark("ui mount")
         self._configure_inputs()
         self._state_last_json = json.dumps(self._state_snapshot(), sort_keys=True)
         table = self.query_one(WIDGET_PROJECTS, DataTable)
@@ -954,10 +959,11 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
                 project_panes=self.open_panes_by_project,
             ),
         )
-        self.call_after_refresh(self._initial_worktree_health_scan)
+        startup_trace.mark("tmux/herdr context registered")
+        self._trace_after_refresh("worktree health", self._initial_worktree_health_scan)
         if sys.platform == "darwin":
             self.set_interval(UI_TICK_FOCUS_WARM_S, self._maybe_warm_focus_backend)
-            self.call_after_refresh(self._maybe_warm_focus_backend)
+            self._trace_after_refresh("focus warm-up", self._maybe_warm_focus_backend)
         for wid in (
             self.query_one("#side", Vertical),
             self.query_one("#side_main_tabs", Tabs),
@@ -995,10 +1001,12 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
             self.workspace_sig_last_ts = time.time()
         finally:
             self._busy_stop()
+        startup_trace.mark("table + side built")
         self.set_interval(CACHE_BG_REFRESH_S, self._maybe_refresh_cache)
         self.set_interval(UI_TICK_CACHE_OWNER_POLL_S, self._poll_cache_owner)
         self.set_interval(2.0, self._check_cache_concurrency)
         self._check_cache_concurrency()
+        startup_trace.mark("cache owner checked")
         if not self.active_rows and not self.archived_rows:
             self.call_after_refresh(
                 lambda: self._start_cache_refresh("cold start", force=True)
@@ -1009,10 +1017,46 @@ class BApp(AppActionsMixin, AppDisplayMixin, AppEventsMixin, App[tuple[str, Path
             )
         if self.start_new_mode:
             self.call_after_refresh(self.action_new_project)
-        self.call_after_refresh(self._startup_quick_active_dir_check)
-        self.call_after_refresh(self._start_probe_open_panes)
+        self._trace_after_refresh("active dir check", self._startup_quick_active_dir_check)
+        self._trace_after_refresh("pane probe", self._start_probe_open_panes)
+        self._trace_after_refresh("record startup files", self._record_startup_files)
+        self.call_after_refresh(lambda: startup_trace.mark("ui settled"))
         self.set_timer(0.12, self._retry_pending_restore)
         self.set_timer(0.18, self._reflow_table_columns_after_layout)
+        startup_trace.mark("ui mounted")
+
+    def _trace_after_refresh(self, label: str, step: Callable[[], None]) -> None:
+        """Queue a post-paint start-up step and time it with the start-up trace.
+
+        The first queued callback runs once the first frame is on screen, so the
+        mark before the first step is what "first paint" means for the user.
+        """
+
+        def run() -> None:
+            if not self._startup_painted:
+                self._startup_painted = True
+                startup_trace.mark("ui first paint")
+            try:
+                step()
+            finally:
+                startup_trace.mark(f"after paint: {label}")
+
+        self.call_after_refresh(run)
+
+    def _record_startup_files(self) -> None:
+        """Write the list of files this start-up read, for the daemon to keep warm.
+
+        ``b daemon`` re-reads them periodically so the next start finds them in the
+        file cache instead of waiting for the virus scanner to read them from disk.
+        """
+        if self.is_headless:
+            return
+        try:
+            from ..core.startup_warm import record_module_files
+
+            record_module_files()
+        except OSError:
+            pass
 
     def _reflow_table_columns_after_layout(self) -> None:
         self._configure_table_columns()
@@ -3500,6 +3544,7 @@ def run_textual_ui(
     start_new: bool = False,
     initial_filter_expr: str = "",
 ) -> tuple[str, Path | None, list[str]]:
+    startup_trace.mark("ui start")
     set_filter_query_base_dir(base_dir)
     set_filter_manage_base_dir(base_dir)
     app = BApp(
@@ -3508,6 +3553,7 @@ def run_textual_ui(
         start_new_mode=start_new,
         initial_filter=initial_filter_expr,
     )
+    startup_trace.mark("app constructed")
     _register_client(base_dir, cwd)
     try:
         result = app.run() or ("quit", None, [])

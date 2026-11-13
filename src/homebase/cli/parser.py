@@ -106,6 +106,19 @@ def build_cli_parser() -> argparse.ArgumentParser:
         help="record step timings for instrumented operations to .homebase/debug-timers.jsonl",
     )
 
+    parser.add_argument(
+        "--startup-trace",
+        dest="startup_trace",
+        nargs="?",
+        const="1",
+        default="",
+        metavar="PATH",
+        help=(
+            "append timestamped start-up marks to PATH "
+            "(default ~/.local/state/homebase/startup-trace.log)"
+        ),
+    )
+
     sub = parser.add_subparsers(dest="command")
     sub.add_parser("version", help="show homebase version and commit")
     p_help = sub.add_parser(

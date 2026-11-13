@@ -292,3 +292,25 @@ def test_update_raycast_snapshot_writes_and_logs_errors_once(
     daemon.update_raycast_snapshot(st)
     daemon.update_raycast_snapshot(st)
     assert sum("raycast snapshot failed" in line for line in st.lines) == 1
+
+
+def test_warm_startup_files_runs_in_background_and_waits_for_interval(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    listed = tmp_path / "startup-files.txt"
+    warmed = tmp_path / "module.py"
+    warmed.write_bytes(b"y" * 512)
+    listed.write_text(f"{warmed}\n", encoding="utf-8")
+    monkeypatch.setattr(daemon, "read_module_files", lambda: [warmed])
+    st = _state(tmp_path)
+    st.echo = False
+
+    daemon.warm_startup_files(st, time.time())
+    assert st.warm_thread is not None
+    st.warm_thread.join(timeout=5)
+    assert (st.warm_runs, st.warm_files) == (1, 1)
+    assert any("startup warm files=1" in line for line in st.lines)
+
+    # A second tick within the interval must not read everything again.
+    daemon.warm_startup_files(st, time.time())
+    assert st.warm_runs == 1

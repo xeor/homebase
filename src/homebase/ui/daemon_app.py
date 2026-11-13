@@ -17,7 +17,7 @@ from pathlib import Path
 from rich.table import Table
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.containers import Grid
+from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.widgets import Footer, Header, Log, Static
 
 from ..cache.api import cache_db_path, cache_full_scan_ts, cache_last_refresh_ts
@@ -35,6 +35,7 @@ from ..cache.owner import (
     try_flock,
 )
 from ..commands.daemon import (
+    WARM_COLD_S,
     DaemonState,
     cmd_daemon,
     new_daemon_state,
@@ -44,6 +45,7 @@ from ..commands.daemon import (
 from ..core.constants import (
     CACHE_MAX_AGE_S,
     DAEMON_SIGNATURE_CHECK_S,
+    DAEMON_STARTUP_WARM_S,
     UI_TICK_WORKTREE_HEALTH_S,
 )
 from ..core.proc_stats import (
@@ -53,10 +55,21 @@ from ..core.proc_stats import (
     peak_rss_bytes,
     process_cpu_s,
 )
+from ..core.startup_warm import DEFAULT_LIST_PATH
 from ..core.utils import fmt_duration, fmt_size_human
 
 # How long quitting waits for a running full scan before leaving it behind.
 STOP_WAIT_S = 30.0
+# Two columns of panels, left to right, top to bottom.
+PANEL_COLUMNS = (("daemon", "cache"), ("process", "startup", "clients"))
+PANELS = tuple(name for column in PANEL_COLUMNS for name in column)
+PANEL_TITLES = {
+    "daemon": "Daemon",
+    "process": "Process",
+    "cache": "Project cache",
+    "startup": "Start-up speed",
+    "clients": "Open b windows",
+}
 SCREEN_TICK_S = 1.0
 
 Section = tuple[str, list[tuple[str, str]]]
@@ -127,31 +140,85 @@ def _doing(status: DaemonStatus, now: float) -> str:
     return status.state
 
 
+def _warm_files_text(status: DaemonStatus) -> str:
+    if status.warm_listed <= 0:
+        return "none read yet"
+    size = fmt_size_human(status.warm_bytes)
+    if status.warm_files != status.warm_listed:
+        return f"{status.warm_files} of {status.warm_listed} listed files, {size}"
+    return f"{status.warm_files} files, {size}"
+
+
+def _warm_last_text(status: DaemonStatus, now: float) -> str:
+    if status.warm_runs <= 0:
+        return f"not yet, runs every {fmt_duration(DAEMON_STARTUP_WARM_S)}"
+    cold = " (cold: it would have been a slow start)" if status.warm_took_s >= WARM_COLD_S else ""
+    return f"{_ago(status.warm_ts, now)}, took {status.warm_took_s:.1f}s{cold}"
+
+
+def _warm_passes_text(status: DaemonStatus) -> str:
+    if status.warm_runs <= 0:
+        return "none yet"
+    return (
+        f"{status.warm_runs} done, {status.warm_cold_runs} found the files cold, "
+        f"one every {fmt_duration(DAEMON_STARTUP_WARM_S)}"
+    )
+
+
+def _warm_list_text(now: float) -> str:
+    """Where the file list comes from: the last `b` TUI start wrote it."""
+    path = DEFAULT_LIST_PATH.expanduser()
+    try:
+        written = path.stat().st_mtime
+    except OSError:
+        return f"{_short_path(str(path))} (no b TUI has started yet)"
+    return f"{_short_path(str(path))}, written {_ago(written, now)}"
+
+
+def startup_section(status: DaemonStatus | None, now: float) -> Section:
+    """What the daemon does to keep the next `b` start fast.
+
+    A TUI start reads ~750 module files, and a virus scanner rescans every one
+    of them once they have left the file cache, which is what makes the first
+    `b` after an idle period slow. Re-reading them here keeps them cached.
+    """
+    if status is None:
+        return ("Start-up speed", [("files kept warm", "-")])
+    rows = [
+        ("files kept warm", _warm_files_text(status)),
+        ("last warm-up", _warm_last_text(status, now)),
+        ("warm-ups", _warm_passes_text(status)),
+        ("file list from", _warm_list_text(now)),
+        ("this keeps", "b's imports in the file cache, so a new b opens fast"),
+    ]
+    return ("Start-up speed", rows)
+
+
 def daemon_section(
     status: DaemonStatus | None, *, main: bool, base_dir: Path, owner: str, now: float
 ) -> Section:
     if status is None or (not main and not daemon_status_alive(status, now)):
-        return ("Daemon", [("running", "no"), ("base", str(base_dir))])
+        return ("Daemon", [("daemon running", "no"), ("base directory", str(base_dir))])
     rows = [
-        ("this screen", "main daemon" if main else f"viewer of pid {status.pid}"),
-        ("pid", str(status.pid)),
-        ("version", status.version),
-        ("base", str(base_dir)),
-        ("uptime", fmt_duration(now - status.started_ts)),
-        ("role", _role(status, owner)),
-        ("doing", _doing(status, now)),
-        ("heartbeat", _ago(status.heartbeat_ts, now)),
+        ("this screen", "the running daemon" if main else f"a viewer of pid {status.pid}"),
+        ("process id", str(status.pid)),
+        ("homebase version", status.version),
+        ("base directory", str(base_dir)),
+        ("running for", fmt_duration(now - status.started_ts)),
+        ("background work", _role(status, owner)),
+        ("doing right now", _doing(status, now)),
+        ("last heartbeat", _ago(status.heartbeat_ts, now)),
     ]
     return ("Daemon", rows)
 
 
 def process_section(proc: ProcFacts) -> Section:
     rows = [
-        ("cpu now", _pct(proc.cpu_pct)),
-        ("cpu average", _pct(proc.cpu_avg_pct)),
-        ("memory", _size(proc.rss_bytes)),
-        ("memory peak", _size(proc.peak_rss_bytes)),
-        ("threads", "-" if proc.threads is None else str(proc.threads)),
+        ("cpu right now", _pct(proc.cpu_pct)),
+        ("cpu since start", _pct(proc.cpu_avg_pct)),
+        ("memory in use", _size(proc.rss_bytes)),
+        ("memory high mark", _size(proc.peak_rss_bytes)),
+        ("threads running", "-" if proc.threads is None else str(proc.threads)),
     ]
     return ("Process", rows)
 
@@ -181,22 +248,27 @@ def _health_text(status: DaemonStatus | None, now: float) -> str:
     )
 
 
+def _last_scan_text(status: DaemonStatus | None, now: float) -> str:
+    if status is None or not status.refreshes:
+        return "-"
+    ago = _ago(status.last_refresh_ts, now)
+    when = "" if ago == "-" else f", {ago}"
+    return f"took {status.last_refresh_s:.1f}s{when} ({status.last_reason or '-'})"
+
+
 def cache_section(status: DaemonStatus | None, cache: CacheFacts, now: float) -> Section:
-    last = "-"
-    if status is not None and status.refreshes:
-        last = f"took {status.last_refresh_s:.1f}s ({status.last_reason or '-'})"
     rows = [
-        ("rows", _rows_text(status)),
-        ("database", fmt_size_human(cache.db_bytes)),
-        ("full scan", _ago(cache.full_scan_ts, now)),
-        ("last scan", last),
-        ("scans", "-" if status is None else str(status.refreshes)),
-        ("next scan", _next_scan(cache, now)),
-        ("last write", _ago(cache.last_write_ts, now)),
-        ("request", cache.pending_request or "-"),
+        ("projects cached", _rows_text(status)),
+        ("database size", fmt_size_human(cache.db_bytes)),
+        ("last full scan", _ago(cache.full_scan_ts, now)),
+        ("that scan took", _last_scan_text(status, now)),
+        ("scans since start", "-" if status is None else str(status.refreshes)),
+        ("next full scan", _next_scan(cache, now)),
+        ("last cache write", _ago(cache.last_write_ts, now)),
+        ("rescan requested by", cache.pending_request or "nobody"),
         ("worktree health", _health_text(status, now)),
     ]
-    return ("Cache", rows)
+    return ("Project cache", rows)
 
 
 def _short_path(path: str) -> str:
@@ -206,7 +278,7 @@ def _short_path(path: str) -> str:
 
 def clients_section(clients: list[ClientInfo], owner: str, now: float) -> Section:
     owner_pid = owner.split(" ", 1)[0]
-    rows: list[tuple[str, str]] = [("connected b", str(len(clients)))]
+    rows: list[tuple[str, str]] = [("b windows open", str(len(clients)))]
     for client in clients:
         mark = ", cache owner" if str(client.pid) == owner_pid else ""
         tty = client.tty.removeprefix("/dev/") or "-"
@@ -216,7 +288,7 @@ def clients_section(clients: list[ClientInfo], owner: str, now: float) -> Sectio
                 f"{tty}  up {fmt_duration(now - client.started_ts)}{mark}  {_short_path(client.cwd)}",
             )
         )
-    return ("Clients", rows)
+    return ("Open b windows", rows)
 
 
 def render_section(section: Section) -> Table:
@@ -231,8 +303,12 @@ def render_section(section: Section) -> Table:
 class DaemonApp(App[None]):
     TITLE = "b daemon"
     CSS = """
-    #panels { grid-size: 2; grid-gutter: 0 1; height: auto; }
+    #panels { height: auto; }
+    #panels > Vertical { width: 1fr; height: auto; }
     .panel { border: round $primary; padding: 0 1; height: auto; }
+    /* The column height follows the left one (see _balance_columns) and the
+       window list takes whatever the panels above it leave. */
+    #clients-panel { height: 1fr; min-height: 3; }
     #log { border: round $primary; height: 1fr; }
     """
     BINDINGS = [
@@ -262,16 +338,24 @@ class DaemonApp(App[None]):
 
     def compose(self) -> ComposeResult:
         yield Header()
-        with Grid(id="panels"):
-            for name in ("daemon", "process", "cache", "clients"):
-                yield Static(id=name, classes="panel")
+        with Horizontal(id="panels"):
+            for index, column in enumerate(PANEL_COLUMNS):
+                with Vertical(id=f"column{index}"):
+                    for name in column:
+                        if name == "clients":
+                            # More windows than fit: the list scrolls.
+                            with VerticalScroll(id="clients-panel", classes="panel"):
+                                yield Static(id=name)
+                        else:
+                            yield Static(id=name, classes="panel")
         yield Log(id="log")
         yield Footer()
 
     def on_mount(self) -> None:
         self.sub_title = "main daemon" if self.st is not None else "viewer"
-        for name in ("daemon", "process", "cache", "clients"):
-            self.query_one(f"#{name}", Static).border_title = name.capitalize()
+        for name in PANELS:
+            panel = self.query_one("#clients-panel" if name == "clients" else f"#{name}")
+            panel.border_title = PANEL_TITLES[name]
         self.query_one("#log", Log).border_title = "Log"
         self.tick()
         self.set_interval(SCREEN_TICK_S, self.tick)
@@ -327,11 +411,20 @@ class DaemonApp(App[None]):
             ),
             "process": process_section(self._proc(status, now)),
             "cache": cache_section(status, cache, now),
+            "startup": startup_section(status, now),
             "clients": clients_section(list_clients(self.base_dir), cache.owner, now),
         }
         for name, section in sections.items():
             self.query_one(f"#{name}", Static).update(render_section(section))
         self._update_log(status)
+        self.call_after_refresh(self._balance_columns)
+
+    def _balance_columns(self) -> None:
+        """Make the right column as tall as the left one; the window list then
+        fills what the panels above it leave, and scrolls when it is longer."""
+        left = self.query_one("#column0").outer_size.height
+        if left > 0:
+            self.query_one("#column1").styles.height = left
 
     def action_rescan(self) -> None:
         request_cache_refresh(self.base_dir, "daemon screen")

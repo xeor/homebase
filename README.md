@@ -253,6 +253,45 @@ uv sync                       # install with dev extras
 uv run python -m homebase status
 ```
 
+## Debugging a slow start
+
+`b --startup-trace` appends timestamped marks for each start-up step to
+`~/.local/state/homebase/startup-trace.log` (pass a path to write somewhere else, or
+export `HOMEBASE_STARTUP_TRACE`):
+
+```sh
+b --startup-trace            # default log path
+b --startup-trace /tmp/b.log # or a path of your own
+```
+
+```
+--- pid=5670 start=2026-11-11T13:11:20.415 args=(none)
+    +  0.130s  (+0.130s)  python interpreter    <- exec + interpreter boot
+    +  1.191s  (+1.061s)  imports: ui (textual) <- textual, rich, widget tree
+    +  1.230s  (+0.011s)  args parsed
+    +  1.243s  (+0.007s)  config loaded
+    +  1.304s  (+0.025s)  cache rows read       <- sqlite, waits for the owner's lock
+    +  1.400s  (+0.007s)  tmux/herdr context registered
+    +  1.411s  (+0.011s)  table + side built
+    +  1.503s  (+0.080s)  ui first paint        <- TUI on screen
+    +  1.557s  (+0.011s)  after paint: pane probe
+    +  1.603s  (+0.046s)  ui settled
+```
+
+The marks cover every step that leaves the process or touches the disk, so a slow start
+points at one line: module loading, the cache read, the tmux/herdr round-trips, the first
+render, or the steps queued for after the first paint.
+
+Whoever starts `b` can export `HOMEBASE_STARTUP_EPOCH` (unix seconds, e.g.
+`perl -MTime::HiRes=time -e 'printf "%.3f", time'`) and the marks are measured from that
+moment instead of from the start of the Python process, so the time spent in the terminal
+and shell before `b` ran shows up in the first mark. Everything the run starts itself (the
+daemon, a nested `b`) inherits the trace, and other tools can append their own
+`    +  1.234s  label` lines to the same log to get one timeline for the whole chain.
+
+`b --debug-timers` is the other half: it records timings of instrumented operations
+(tmux/herdr focus, open-with-mode) to `<base>/.homebase/debug-timers.jsonl`.
+
 ## Cache owner and daemon
 
 One process per base owns background cache work (full rescans, reconcile, git status and
@@ -264,11 +303,24 @@ hands over to a daemon as soon as it sees the daemon's heartbeat.
 
 `b daemon` rescans when the last full scan is older than `CACHE_MAX_AGE_S`, when a
 top-level dir appears/disappears, or on request, and sweeps worktree health. One per base.
-In a terminal it shows a status screen: role (cache owner or waiting), what it does now,
-uptime, version, CPU, memory, cache age and size, next rescan, worktree health, connected
-`b` instances and the log (`r` rescan now, `w` worktree health now, `q` quit). A second
+In a terminal it shows a status screen with one panel per subject: Daemon (role, what it
+does now, uptime, version), Process (CPU, memory, threads), Project cache (rows, database
+size, last and next scan with how long the last one took, worktree health), Start-up speed
+(how many files the daemon keeps warm, how large they are, when the last warm-up ran and
+how long it took, how many warm-ups found the files cold) and Open b windows, plus the log
+(`r` rescan now, `w` worktree health now, `q` quit). A second
 `b daemon` shows the running one read-only. `--plain` (or no terminal) logs to stdout
 instead; `b daemon --once` does one rescan and exits.
+
+The daemon also keeps the start-up warm. A TUI start imports ~750 module files, and on a
+machine with real-time anti-virus scanning those are all rescanned once they have fallen
+out of the file cache, which is why the first `b` after an idle period can take seconds
+on imports while the next one is fast (measured: 3.35 s cold against 0.54 s warm). Every
+`DAEMON_STARTUP_WARM_S` the daemon re-reads the same files in a background thread, so it
+pays that cost instead of the user. Each TUI start records its own module files in
+`~/.local/state/homebase/startup-files.txt` for the daemon to read, since the daemon
+never imports the TUI itself. Warm passes are silent; a pass that takes a second or more
+is logged, which shows how often the cache really went cold.
 
 ## Runtime Files
 

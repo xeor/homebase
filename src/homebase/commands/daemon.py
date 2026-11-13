@@ -34,12 +34,14 @@ from ..core.constants import (
     ARCHIVE_DIR_NAME,
     CACHE_MAX_AGE_S,
     DAEMON_SIGNATURE_CHECK_S,
+    DAEMON_STARTUP_WARM_S,
     DAEMON_STATUS_LOG_S,
     DAEMON_TICK_S,
     PACKED_ARCHIVE_SUFFIX,
     UI_TICK_WORKTREE_HEALTH_S,
 )
 from ..core.models import ProjectRow
+from ..core.startup_warm import module_files, read_module_files, warm_files
 from ..core.utils import CACHE_REFRESH_ERRORS
 from ..core.version import get_version
 from ..workspace.health_scan import scan_worktree_health
@@ -54,6 +56,9 @@ ONCE_OWNER_WAIT_S = 10.0
 # daemon.json for a second `b daemon` that only views this one.
 DAEMON_LOG_LINES = 200
 DAEMON_STATUS_LOG_LINES = 30
+# A warm pass this slow means the files had fallen out of the file cache, so
+# the start-up it just saved would have been a slow one.
+WARM_COLD_S = 1.0
 
 
 @dataclass
@@ -81,6 +86,15 @@ class DaemonState:
     archived_rows: int = -1
     health_ts: float = 0.0
     health_took_s: float = 0.0
+    warm_due_at: float = 0.0
+    warm_ts: float = 0.0
+    warm_runs: int = 0
+    warm_cold_runs: int = 0
+    warm_listed: int = 0
+    warm_files: int = 0
+    warm_bytes: int = 0
+    warm_took_s: float = 0.0
+    warm_thread: threading.Thread | None = None
     echo: bool = True
     log_count: int = 0
     # Content key of raycast.json on disk; last snapshot error (logged once).
@@ -229,6 +243,45 @@ def sweep_worktree_health(st: DaemonState, now: float) -> None:
         st.log(f"worktree health issues={len(issues)}")
 
 
+def warm_startup_files(st: DaemonState, now: float) -> None:
+    """Re-read what a TUI start-up imports, in the background.
+
+    The files fall out of the file cache while nobody runs `b`, and the next
+    start then pays for a full anti-virus rescan of all of them (seconds, in
+    front of the user). Doing it here means the daemon pays instead.
+    """
+    if now < st.warm_due_at:
+        return
+    st.warm_due_at = now + DAEMON_STARTUP_WARM_S
+    if st.warm_thread is not None and st.warm_thread.is_alive():
+        return
+    st.warm_thread = threading.Thread(target=_warm_startup_files, args=(st,), daemon=True)
+    st.warm_thread.start()
+
+
+def _warm_startup_files(st: DaemonState) -> None:
+    # Without a recorded list (no TUI has started yet) the daemon's own modules
+    # are still worth warming: a TUI loads all of them too.
+    paths = read_module_files() or module_files()
+    t0 = time.monotonic()
+    files, size = warm_files(paths)
+    took = time.monotonic() - t0
+    st.warm_ts = time.time()
+    st.warm_listed = len(paths)
+    st.warm_files = files
+    st.warm_bytes = size
+    st.warm_took_s = took
+    st.warm_runs += 1
+    if took >= WARM_COLD_S:
+        st.warm_cold_runs += 1
+    # A warm pass is milliseconds; logging only the slow ones records how often
+    # the cache actually went cold.
+    if st.warm_runs == 1 or took >= WARM_COLD_S:
+        st.log(
+            f"startup warm files={files} mb={size / 1_000_000:.1f} took={took:.2f}s"
+        )
+
+
 def update_raycast_snapshot(st: DaemonState) -> None:
     """Keep raycast.json current; cheap when nothing changed."""
     try:
@@ -265,6 +318,13 @@ def status_of(st: DaemonState, now: float | None = None) -> DaemonStatus:
         health_issues=st.health_issues,
         health_ts=st.health_ts,
         health_took_s=st.health_took_s,
+        warm_ts=st.warm_ts,
+        warm_runs=st.warm_runs,
+        warm_cold_runs=st.warm_cold_runs,
+        warm_listed=st.warm_listed,
+        warm_files=st.warm_files,
+        warm_bytes=st.warm_bytes,
+        warm_took_s=st.warm_took_s,
         recent=tuple(list(st.lines)[-DAEMON_STATUS_LOG_LINES:]),
     )
 
@@ -315,6 +375,7 @@ def _run_loop(st: DaemonState, stop: threading.Event) -> None:
             if reason is not None:
                 refresh(st, reason)
             sweep_worktree_health(st, time.time())
+        warm_startup_files(st, time.time())
         update_raycast_snapshot(st)
         _log_status(st, time.time())
         stop.wait(DAEMON_TICK_S)

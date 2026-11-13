@@ -43,7 +43,7 @@ from ..commands.setup import (
     cmd_tags_sync,
     cmd_utils,
 )
-from ..core import debug_timers, runtime_init
+from ..core import debug_timers, runtime_init, startup_trace
 from ..core import utils as core_utils
 from ..core.constants import (
     BUILTIN_ACTIONS,
@@ -51,6 +51,7 @@ from ..core.constants import (
     ENV_BASE_DIR,
     ENV_DEBUG_TIMERS,
     ENV_OPEN_MODE,
+    ENV_STARTUP_TRACE,
     ENV_TMUX_SESSION,
     discover_tab_actions,
 )
@@ -260,6 +261,7 @@ def _cmd_raycast(
 
 
 def main(argv: list[str]) -> int:
+    startup_trace.mark("imports done")
     from ..config import prefs as app_prefs  # noqa: F401  (alias for clarity)
     from ..config.hooks import HookConfigError, load_hook_refresh_config, load_hook_specs
     from ..config.prefs import (
@@ -286,10 +288,19 @@ def main(argv: list[str]) -> int:
     from ..workspace.new import cmd_new
     from ..workspace.regression import cmd_test_regression
 
+    startup_trace.mark("command imports")
+
     parser = build_cli_parser()
     ns, rc = _parse_args(argv, parser)
     if ns is None:
         return rc
+
+    startup_trace_value = str(getattr(ns, "startup_trace", "") or "").strip()
+    if startup_trace_value:
+        startup_trace.enable(startup_trace_value)
+        # Anything b starts for itself (the daemon, a nested b) traces too.
+        os.environ[ENV_STARTUP_TRACE] = startup_trace_value
+    startup_trace.mark("args parsed")
 
     verbosity = configure_logging(int(getattr(ns, "verbose", 0) or 0))
     logger.debug(
@@ -328,6 +339,7 @@ def main(argv: list[str]) -> int:
     validation_rc = _handle_startup_validation(ns, base_dir)
     if validation_rc is not None:
         return validation_rc
+    startup_trace.mark("startup validation")
 
     runtime_builtins = dict(BUILTIN_ACTIONS)
     runtime_builtins.update(discover_tab_actions())
@@ -390,6 +402,8 @@ def main(argv: list[str]) -> int:
         hook_refresh_config=runtime_cfg.hook_refresh_config,
         clear_query=bool(getattr(ns, "clear_query", False)),
     )
+
+    startup_trace.mark("config loaded")
 
     initial_filter_expr = runtime_init.resolve_initial_filter_expression(
         str(ns.initial_filter or ""),

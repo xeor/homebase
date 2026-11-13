@@ -425,6 +425,11 @@ ENV_TMUX_SESSION = "HOMEBASE_TMUX_SESSION"
 # `b --open-mode <profile>`: open profile for this run, over open_mode.profile in config.
 ENV_OPEN_MODE = "HOMEBASE_OPEN_MODE"
 ENV_DEBUG_TIMERS = "HOMEBASE_DEBUG_TIMERS"
+# `b --startup-trace`: "1" for the default log path, or a path to write to.
+ENV_STARTUP_TRACE = "HOMEBASE_STARTUP_TRACE"
+# Unix time the launcher (shell, hotkey script) started this run, so the trace
+# can show what happened before Python was running.
+ENV_STARTUP_EPOCH = "HOMEBASE_STARTUP_EPOCH"
 WIDGET_PROJECTS = "#projects"
 BUSY_LABEL_IDLE = "idle"
 ACTION_ACCEPT = "accept"
@@ -609,6 +614,9 @@ DAEMON_TICK_S = 2.0
 DAEMON_SIGNATURE_CHECK_S = 10.0
 DAEMON_STATUS_LOG_S = 300.0
 DAEMON_STALE_S = 15.0
+# How often the daemon re-reads the files a TUI start-up imports, so an
+# anti-virus scanner never has to rescan all of them in front of the user.
+DAEMON_STARTUP_WARM_S = 120.0
 UI_TICK_CACHE_OWNER_POLL_S = 1.0
 SIZE_REFRESH_EVERY_N = 10
 
