@@ -21,6 +21,7 @@ _TOP_LEVEL_COMMANDS = [
     "fix",
     "archive",
     "tmux",
+    "herdr",
     "integration",
     "benchmark",
     "test",
@@ -279,6 +280,16 @@ def _tmux_candidates(words: list[str], cword: int) -> list[str]:
     return []
 
 
+def _herdr_candidates(words: list[str], cword: int) -> list[str]:
+    if cword == 2:
+        return ["save", "load"]
+    if len(words) >= 2 and words[1] == "save":
+        return ["--workspace", "--all"]
+    if len(words) >= 2 and words[1] == "load":
+        return ["--ask"]
+    return []
+
+
 def _integration_candidates(words: list[str], cword: int) -> list[str]:
     if cword == 2:
         return ["raycast"]
@@ -330,6 +341,8 @@ def _secondary_subcommand_candidates(
 ) -> list[str]:
     if cmd == "tmux":
         return _tmux_candidates(words, cword)
+    if cmd == "herdr":
+        return _herdr_candidates(words, cword)
     if cmd == "integration":
         return _integration_candidates(words, cword)
     if cmd == "benchmark":

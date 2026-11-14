@@ -553,6 +553,21 @@ def build_cli_parser() -> argparse.ArgumentParser:
         help="print progress and wait for Enter at the end (useful from tmux display-popup)",
     )
 
+    p_herdr = sub.add_parser("herdr", help="herdr integration commands")
+    herdr_sub = p_herdr.add_subparsers(dest="herdr_subcommand", required=True)
+    p_herdr_save = herdr_sub.add_parser(
+        "save", help="save the project's herdr space to .base-state/herdr-layout.json"
+    )
+    p_herdr_save.add_argument("--workspace", default="", help="herdr workspace id (default: current)")
+    p_herdr_save.add_argument("--all", action="store_true", help="every herdr space that is a project")
+    p_herdr_load = herdr_sub.add_parser("load", help="load the project's saved herdr layout")
+    p_herdr_load.add_argument("dir", nargs="?", default=".", help="project directory (default: cwd)")
+    p_herdr_load.add_argument(
+        "--ask",
+        action="store_true",
+        help="only in a fresh, never asked space, after a yes (shell hook)",
+    )
+
     p_bench = sub.add_parser("benchmark", help="performance benchmark commands")
     bench_sub = p_bench.add_subparsers(dest="benchmark_subcommand", required=True)
     p_bench_run = bench_sub.add_parser("run", help="run benchmark suite and store result")

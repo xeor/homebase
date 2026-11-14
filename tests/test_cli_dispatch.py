@@ -47,6 +47,8 @@ def _stub_dispatch_kwargs(**overrides: object) -> dict[str, object]:
         cmd_archive_restore_entry=lambda _a, _b: 0,
         cmd_tmux_load=lambda _a: 0,
         cmd_tmux_save=lambda _a, _b, _c, _d, _e, _f, _g: 0,
+        cmd_herdr_save=lambda _a, _b, _c: 0,
+        cmd_herdr_load=lambda _a, _b, _c: 0,
         cmd_benchmark=lambda _a, _b, _c, _d, _e, _f: 0,
         cmd_test_regression=lambda _a, _b, _c, _d: 0,
         cmd_test=lambda _a, _b, _c, _d: 0,
@@ -827,3 +829,28 @@ def test_parser_clear_query_flag() -> None:
     parser = cli_dispatch.build_cli_parser()
     assert parser.parse_args(["--clear-query"]).clear_query is True
     assert parser.parse_args([]).clear_query is False
+
+
+def test_dispatch_command_herdr_save_and_load() -> None:
+    calls: list[tuple[object, ...]] = []
+    for argv, expected in (
+        (["herdr", "save", "--all"], ("save", Path("."), "", True)),
+        (["herdr", "save", "--workspace", "w5"], ("save", Path("."), "w5", False)),
+        (["herdr", "load", "/p", "--ask"], ("load", Path("."), "/p", True)),
+    ):
+        calls.clear()
+        ns = cli_parser.build_cli_parser().parse_args(argv)
+        rc = cli_dispatch.dispatch_command(
+            ns,
+            base_dir=Path("."),
+            bin_dir=Path("."),
+            cwd=Path("."),
+            no_arg_flow=lambda _a, _b, _c: 0,
+            initial_filter_expr="",
+            **_stub_dispatch_kwargs(
+                cmd_herdr_save=lambda bd, ws, all_: calls.append(("save", bd, ws, all_)) or 0,
+                cmd_herdr_load=lambda bd, d, ask: calls.append(("load", bd, d, ask)) or 0,
+            ),
+        )
+        assert rc == 0
+        assert calls == [expected]

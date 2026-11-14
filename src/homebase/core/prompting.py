@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import io
 import sys
+import termios
+from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import Callable
 
 PROMPT_CANCEL_TOKENS = {"q", "quit", "exit", "cancel", "abort"}
@@ -40,6 +44,33 @@ def prompt_readline(
     if text.lower() in PROMPT_CANCEL_TOKENS:
         return None
     return text
+
+
+@contextmanager
+def line_mode_tty(fd: int | None = None) -> Iterator[None]:
+    """Canonical line mode (line editing, echo, Enter -> newline) for a prompt,
+    restored afterwards. A shell's prompt hook (fish ``fish_prompt`` event)
+    runs commands with the shell's own raw-ish modes, where ``input()`` never
+    sees a line end. No-op when ``fd`` is not a terminal."""
+    if fd is None:
+        try:
+            fd = sys.stdin.fileno()
+        except (io.UnsupportedOperation, ValueError):
+            yield
+            return
+    try:
+        saved = termios.tcgetattr(fd)
+    except termios.error:
+        yield
+        return
+    mode = termios.tcgetattr(fd)
+    mode[0] |= termios.ICRNL
+    mode[3] |= termios.ICANON | termios.ECHO | termios.ISIG
+    termios.tcsetattr(fd, termios.TCSANOW, mode)
+    try:
+        yield
+    finally:
+        termios.tcsetattr(fd, termios.TCSANOW, saved)
 
 
 def prompt_yes_no(question: str, *, default: bool, read: Callable[..., str | None]) -> bool:

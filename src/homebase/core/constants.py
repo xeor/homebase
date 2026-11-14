@@ -66,6 +66,13 @@ TMUX_SHELL_COMMANDS = {"sh", "bash", "zsh", "fish", "nu", "nushell", "tmux"}
 # HERDR_SOCKET_PATH into its panes; outside herdr the default socket is used.
 HERDR_DEFAULT_SOCKET = "~/.config/herdr/herdr.sock"
 HERDR_CALL_TIMEOUT_S = 2.0
+# Per-project herdr layout (`b herdr save|load`): all tabs of the project's
+# space, saved automatically (corex herdr plugin) and offered when the space
+# is opened. The state dir holds one file per asked space (`loading` / `done`).
+HERDR_LAYOUT_FILE = ".base-state/herdr-layout.json"
+HERDR_LAYOUT_VERSION = 1
+HERDR_LAYOUT_STATE_DIR = "~/.local/state/homebase/herdr-layout"
+HERDR_LAYOUT_LOADING_MAX_S = 60.0
 
 # macOS terminal-window focus backend used by `b open` (outside tmux) and
 # the `b setup` Debug focus tool. The `.homebase/config.yaml` key

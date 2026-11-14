@@ -38,6 +38,8 @@ def _stub_kwargs(**overrides):
         cmd_archive_restore_entry=lambda _a, _b: 0,
         cmd_tmux_load=lambda _a: 0,
         cmd_tmux_save=lambda _a, _b, _c, _d, _e, _f, _g: 0,
+        cmd_herdr_save=lambda _a, _b, _c: 0,
+        cmd_herdr_load=lambda _a, _b, _c: 0,
         cmd_benchmark=lambda _a, _b, _c, _d, _e, _f: 0,
         cmd_test_regression=lambda _a, _b, _c, _d: 0,
         cmd_test=lambda _a, _b, _c, _d: 0,

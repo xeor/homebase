@@ -436,6 +436,23 @@ feed the pane count and the pane query types below.
 b --open-mode herdr_workspace
 ```
 
+Project layout: all tabs of a project's herdr space (splits, ratios,
+cwd relative to the project, the command in each pane) in
+`<project>/.base-state/herdr-layout.json`. Loading adds the saved tabs
+and types each command without running it; in a fresh space (1 tab,
+1 pane) the start tab is closed afterwards.
+
+```sh
+b herdr save                # current space (--workspace <id>, --all)
+b herdr load [dir]          # into the current space
+b herdr load --ask [dir]    # shell hook: fresh, never asked space only, after a yes
+```
+
+`save` skips a space whose layout file exists until it was asked
+(`load --ask`, state in `~/.local/state/homebase/herdr-layout/`), while
+a load runs, and when the layout is trivial (one pane, nothing running).
+The replaced file is kept as `herdr-layout.prev.json`.
+
 #### macOS: faster window activation (optional)
 
 When `b open`/`b cd` runs outside tmux on macOS, after switching to the

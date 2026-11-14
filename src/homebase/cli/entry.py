@@ -262,6 +262,7 @@ def _cmd_raycast(
 
 def main(argv: list[str]) -> int:
     startup_trace.mark("imports done")
+    from ..commands.herdr_layout import cmd_herdr_load, cmd_herdr_save
     from ..config import prefs as app_prefs  # noqa: F401  (alias for clarity)
     from ..config.hooks import HookConfigError, load_hook_refresh_config, load_hook_specs
     from ..config.prefs import (
@@ -605,6 +606,8 @@ def main(argv: list[str]) -> int:
                 session_id_hint=session_id,
                 pause=pause,
             ),
+            cmd_herdr_save=cmd_herdr_save,
+            cmd_herdr_load=cmd_herdr_load,
             cmd_benchmark=lambda bd, cwd_path, action, comment, keep_basefolder, ignore: cmd_benchmark(
                 bd,
                 cwd_path,
@@ -649,6 +652,7 @@ def main(argv: list[str]) -> int:
         "tags",
         "archive",
         "tmux",
+        "herdr",
         "benchmark",
         "test",
         "example",

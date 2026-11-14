@@ -226,6 +226,19 @@ def _dispatch_archive(
     return 1
 
 
+def _dispatch_herdr(
+    ns: Any,
+    base_dir: Path,
+    cmd_herdr_save: Callable[..., int],
+    cmd_herdr_load: Callable[..., int],
+) -> int:
+    if ns.herdr_subcommand == "save":
+        return cmd_herdr_save(base_dir, str(ns.workspace), bool(ns.all))
+    if ns.herdr_subcommand == "load":
+        return cmd_herdr_load(base_dir, str(ns.dir), bool(ns.ask))
+    return 1
+
+
 def _dispatch_tmux(
     ns: Any,
     base_dir: Path,
@@ -358,6 +371,9 @@ def _build_dispatch_table(
         "tmux": lambda: _dispatch_tmux(
             ns, base_dir, handlers["cmd_tmux_load"], handlers["cmd_tmux_save"]
         ),
+        "herdr": lambda: _dispatch_herdr(
+            ns, base_dir, handlers["cmd_herdr_save"], handlers["cmd_herdr_load"]
+        ),
         "benchmark": lambda: _dispatch_benchmark(
             ns, base_dir, cwd, handlers["cmd_benchmark"]
         ),
@@ -403,6 +419,8 @@ def dispatch_command(
     cmd_archive_restore_entry: Callable[[Path, str], int],
     cmd_tmux_load: Callable[[str], int],
     cmd_tmux_save: Callable[..., int],
+    cmd_herdr_save: Callable[..., int],
+    cmd_herdr_load: Callable[..., int],
     cmd_benchmark: Callable[[Path, Path, str, str, bool, set[str] | None], int],
     cmd_test_regression: Callable[[Path, Path, bool, list[str]], int],
     cmd_test: Callable[[Path, Path, str, bool], int],
@@ -440,6 +458,8 @@ def dispatch_command(
         "cmd_archive_restore_entry": cmd_archive_restore_entry,
         "cmd_tmux_load": cmd_tmux_load,
         "cmd_tmux_save": cmd_tmux_save,
+        "cmd_herdr_save": cmd_herdr_save,
+        "cmd_herdr_load": cmd_herdr_load,
         "cmd_benchmark": cmd_benchmark,
         "cmd_test_regression": cmd_test_regression,
         "cmd_test": cmd_test,

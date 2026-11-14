@@ -42,3 +42,36 @@ def test_prompt_readline_keyboard_interrupt_can_abort(monkeypatch: pytest.Monkey
     monkeypatch.setattr(builtins, "input", _raise)
     with pytest.raises(KeyboardInterrupt):
         prompting.prompt_readline("q? ", abort_on_interrupt=True)
+
+
+def test_line_mode_tty_sets_and_restores_canonical_mode() -> None:
+    """Regression: from fish's fish_prompt hook the tty has -icanon -icrnl, so
+    input() never saw Enter (b herdr load --ask hung)."""
+    import os
+    import termios
+
+    from homebase.core.prompting import line_mode_tty
+
+    master, slave = os.openpty()
+    try:
+        raw = termios.tcgetattr(slave)
+        raw[0] &= ~termios.ICRNL
+        raw[3] &= ~(termios.ICANON | termios.ECHO)
+        termios.tcsetattr(slave, termios.TCSANOW, raw)
+        with line_mode_tty(slave):
+            mode = termios.tcgetattr(slave)
+            assert mode[0] & termios.ICRNL
+            assert mode[3] & termios.ICANON and mode[3] & termios.ECHO
+            os.write(master, b"y\r")
+            assert os.read(slave, 10) == b"y\n"
+        assert termios.tcgetattr(slave)[:6] == raw[:6]
+    finally:
+        os.close(master)
+        os.close(slave)
+
+
+def test_line_mode_tty_ignores_non_tty(tmp_path) -> None:
+    from homebase.core.prompting import line_mode_tty
+
+    with (tmp_path / "f").open("w") as handle, line_mode_tty(handle.fileno()):
+        pass
