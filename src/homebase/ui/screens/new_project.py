@@ -192,7 +192,9 @@ class NewProjectScreen(ModalScreen[dict[str, object] | None]):
         # source (0) → input (1) → name (2) → toggles (3) → tags (4)
         # → template (5). Enter from any section submits; the plan
         # / status line at the bottom is not a tab stop.
-        self.focus_section = SECTION_SOURCE
+        # The URL/path field is focused on open so the dialog can be
+        # used by typing and pressing enter, without any navigation.
+        self.focus_section = SECTION_INPUT
         self.toggle_index = 0
         self.prefill = dict(prefill or {})
         self.prefill_from_project = str(self.prefill.get("from_project", "")).strip()
@@ -263,7 +265,7 @@ class NewProjectScreen(ModalScreen[dict[str, object] | None]):
                     yield Static("", id="new_help")
             yield Static("", id="new_plan")
             yield Static(
-                "tab/up-down section  left/right cycle  "
+                "tab/up-down section  left/right cycle (edit in text fields)  "
                 "space toggle/edit  enter create  esc cancel",
                 id="new_hotkeys",
             )
@@ -343,6 +345,17 @@ class NewProjectScreen(ModalScreen[dict[str, object] | None]):
                 inp.can_focus = False
             name.can_focus = False
             self.set_focus(None)
+
+    def _focused_input(self) -> Input | None:
+        """The Input the arrow keys should edit, or None when the
+        focused section is not a text field. The screen's arrow
+        bindings are priority bindings, so without this the Input
+        would never see left/right itself."""
+        if self.focus_section == SECTION_INPUT and not self._input_locked():
+            return self.query_one("#new_input", Input)
+        if self.focus_section == SECTION_NAME:
+            return self.query_one("#new_name", Input)
+        return None
 
     def _template_options(self) -> list[str | None]:
         return [None, *self.templates]
@@ -1247,6 +1260,10 @@ class NewProjectScreen(ModalScreen[dict[str, object] | None]):
         self._advance_section(-1)
 
     def action_move_left(self) -> None:
+        inp = self._focused_input()
+        if inp is not None:
+            inp.action_cursor_left()
+            return
         if self.focus_section == SECTION_SOURCE and self.source_choices:
             target = (self.source_index - 1) % len(self.source_choices)
             self._set_source_index(target)
@@ -1263,6 +1280,10 @@ class NewProjectScreen(ModalScreen[dict[str, object] | None]):
         self._refresh()
 
     def action_move_right(self) -> None:
+        inp = self._focused_input()
+        if inp is not None:
+            inp.action_cursor_right()
+            return
         if self.focus_section == SECTION_SOURCE and self.source_choices:
             target = (self.source_index + 1) % len(self.source_choices)
             self._set_source_index(target)
@@ -1355,6 +1376,11 @@ class NewProjectScreen(ModalScreen[dict[str, object] | None]):
         self.action_next_section()
 
     def action_toggle(self) -> None:  # type: ignore[override]  # screen-local binding, distinct from DOMNode attr toggle
+        inp = self._focused_input()
+        if inp is not None:
+            # Priority binding, so the Input never sees space itself.
+            inp.insert_text_at_cursor(" ")
+            return
         if self.focus_section == SECTION_TOGGLES:
             spec = _TOGGLES[self.toggle_index]
             self.toggle_values[spec.key] = not self.toggle_values[spec.key]

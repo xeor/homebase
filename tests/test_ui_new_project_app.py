@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from textual.widgets import Input
 
 from homebase.ui import new_project_app
 from homebase.ui.new_project_app import NewProjectApp
@@ -42,6 +43,24 @@ async def test_submit_creates_and_returns_open(tmp_path: Path) -> None:
     assert action == "open"
     assert path is not None and path.name == "fresh" and path.is_dir()
     assert app.last_new_summary
+
+
+@pytest.mark.asyncio
+async def test_typing_and_enter_creates_without_navigation(tmp_path: Path) -> None:
+    """The URL/path field is focused on open, so the popup is usable by
+    typing a name and pressing enter."""
+    app = NewProjectApp(tmp_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        screen = app.screen
+        assert isinstance(screen, NewProjectScreen)
+        assert screen.focused is screen.query_one("#new_input", Input)
+        await pilot.press(*"a b", "enter")
+        await pilot.pause()
+    action, path, _post = app.return_value or ("", None, [])
+    assert action == "open"
+    # space reaches the Input instead of toggling an option.
+    assert path is not None and path.name == "a b" and path.is_dir()
 
 
 def test_runtime_error_is_kept_for_printing(tmp_path: Path) -> None:
